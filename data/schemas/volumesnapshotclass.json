@@ -1,0 +1,14 @@
+{
+  "resource": "VolumeSnapshotClass",
+  "apiVersion": "snapshot.storage.k8s.io/v1",
+  "schema": {
+    "type": "object",
+    "description": "VolumeSnapshotClass 描述创建 VolumeSnapshot 时使用的参数。",
+    "required": ["driver", "deletionPolicy"],
+    "properties": {
+      "driver": { "type": "string", "description": "负责创建快照的 CSI 驱动。注意这是快照资源的字段,不是 StorageClass.provisioner。" },
+      "deletionPolicy": { "type": "string", "enum": ["Delete", "Retain"], "description": "底层 VolumeSnapshotContent 的删除策略,取 Delete 或 Retain。" },
+      "parameters": { "type": "object", "description": "传给快照驱动的键值参数。" }
+    }
+  }
+}

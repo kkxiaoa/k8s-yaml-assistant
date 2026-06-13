@@ -1,0 +1,13 @@
+{
+  "resource": "VolumeAttributesClass",
+  "apiVersion": "storage.k8s.io/v1beta1",
+  "schema": {
+    "type": "object",
+    "description": "VolumeAttributesClass 定义可在线修改的卷属性(如 iops、throughput)。",
+    "required": ["driverName"],
+    "properties": {
+      "driverName": { "type": "string", "description": "应用这些可变属性的 CSI 驱动名。" },
+      "parameters": { "type": "object", "description": "可变卷属性键值,如 iops、throughput;修改后可在线调整已有卷,无需重建 PVC。" }
+    }
+  }
+}
