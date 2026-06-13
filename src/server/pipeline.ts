@@ -5,10 +5,10 @@ import { config } from 'dotenv';
 config({ override: true });
 import Anthropic from '@anthropic-ai/sdk';
 import { load } from 'js-yaml';
-import { buildIndex, retrieve, type IndexedChunk } from './retrieve';
-import { inferResource } from './router';
-import { rerank, COARSE_N } from './rerank';
-import { validateStorageClass, type ValidationError } from './validate';
+import { buildIndex, retrieve, type IndexedChunk } from '../retrieval/retrieve';
+import { inferResource } from '../retrieval/router';
+import { rerank, COARSE_N } from '../retrieval/rerank';
+import { validateStorageClass, type ValidationError } from '../validation/validate';
 
 export const ANSWER_MODEL = 'claude-sonnet-4-6'; // DeepSeek 映射 deepseek-v4-flash
 

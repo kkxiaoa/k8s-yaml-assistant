@@ -5,12 +5,12 @@
   "type": "module",
   "description": "K8s YAML 智能助手:CLI(ask/check/gen)+ 评估(eval)+ Next.js Web(Monaco)。Anthropic SDK 接 DeepSeek + Voyage。",
   "scripts": {
-    "ask": "tsx src/ask.ts",
-    "check": "tsx src/check.ts",
-    "gen": "tsx src/generate.ts",
-    "eval": "tsx src/eval.ts",
-    "eval:faith": "tsx src/eval-faithfulness.ts",
-    "test": "tsx src/validate.test.ts",
+    "ask": "tsx src/cli/ask.ts",
+    "check": "tsx src/cli/check.ts",
+    "gen": "tsx src/cli/gen.ts",
+    "eval": "tsx src/eval/eval.ts",
+    "eval:faith": "tsx src/eval/faithfulness.ts",
+    "test": "tsx src/validation/validate.test.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"

@@ -52,16 +52,16 @@ K8s 用户写 YAML 时三个真实痛点:
 ## 4. 当前架构
 
 ```
-data/schemas/*.json          真实 K8s OpenAPI schema(知识源,可换集群导出的 CRD)
-   └─ schema-corpus.ts        结构化切片:schema → chunk(一字段一段,带元数据)
-        └─ retrieve.ts         向量检索(内存 + 余弦)
-            ├─ router.ts       关键词软路由(命中资源加分,不硬删)
-            └─ rerank.ts       Voyage cross-encoder 精排
-                 └─ pipeline.ts 服务端管线(检索+生成+校验,供 Web 复用)
+data/schemas/*.json                真实 K8s OpenAPI schema(知识源,可换集群导出的 CRD)
+ └ src/knowledge/schema-corpus.ts   结构化切片:schema → chunk(一字段一段,带元数据)
+    └ src/knowledge/corpus.ts        CORPUS
+       └ src/retrieval/retrieve.ts    向量检索(内存 + 余弦)
+          ├ src/retrieval/router.ts   关键词软路由(命中资源加分,不硬删)
+          └ src/retrieval/rerank.ts   Voyage cross-encoder 精排
+             └ src/server/pipeline.ts 服务端管线(检索+生成+校验,供 Web 复用)
 
-入口:
-  CLI  : ask / check / gen / eval / eval:faith / test
-  Web  : Next.js(app/)+ Monaco 编辑器 + /api/ask(流式)/api/check
+目录:src/{knowledge, retrieval, validation, server, cli, eval} 分层;app/ = Next.js Web。
+入口:CLI = src/cli/{ask,check,gen};Web = app/(Next.js)+ Monaco + /api/{ask 流式, check}
 模型 : Anthropic SDK 接 DeepSeek 兼容端点(便宜;换回真 Claude 只改 baseURL)
 评估 : Voyage embedding + rerank;DeepSeek 生成 + 异构 pro 裁判
 ```

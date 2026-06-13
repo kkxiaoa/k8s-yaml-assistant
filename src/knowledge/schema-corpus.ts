@@ -2,11 +2,11 @@
 // 一字段一 chunk,自带 资源 + 路径 + 类型 + 枚举 + required 元数据(context injection)。
 // 换成集群导出的真实 CRD schema 时,只要往 data/schemas/ 丢 JSON、在下面 DOCS 里加一行即可。
 
-import storageClass from '../data/schemas/storageclass.json';
-import pvc from '../data/schemas/persistentvolumeclaim.json';
-import pv from '../data/schemas/persistentvolume.json';
-import vsc from '../data/schemas/volumesnapshotclass.json';
-import vac from '../data/schemas/volumeattributesclass.json';
+import storageClass from '../../data/schemas/storageclass.json';
+import pvc from '../../data/schemas/persistentvolumeclaim.json';
+import pv from '../../data/schemas/persistentvolume.json';
+import vsc from '../../data/schemas/volumesnapshotclass.json';
+import vac from '../../data/schemas/volumeattributesclass.json';
 
 export interface Chunk {
   id: string;

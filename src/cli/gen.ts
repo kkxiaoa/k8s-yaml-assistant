@@ -8,7 +8,7 @@ import { config } from 'dotenv';
 config({ override: true });
 import { load } from 'js-yaml';
 import Anthropic from '@anthropic-ai/sdk';
-import { validateStorageClass, type ValidationError } from './validate';
+import { validateStorageClass, type ValidationError } from '../validation/validate';
 
 const SUBMIT_TOOL: Anthropic.Tool = {
   name: 'submit_storageclass',

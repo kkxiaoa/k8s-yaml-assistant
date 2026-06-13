@@ -10,9 +10,9 @@
 import { config } from 'dotenv';
 config({ override: true }); // 用 .env 覆盖继承的同名环境变量
 import Anthropic from '@anthropic-ai/sdk';
-import { buildIndex, retrieve } from './retrieve';
-import { inferResource } from './router';
-import { rerank, COARSE_N } from './rerank';
+import { buildIndex, retrieve } from '../retrieval/retrieve';
+import { inferResource } from '../retrieval/router';
+import { rerank, COARSE_N } from '../retrieval/rerank';
 
 const SYSTEM_PROMPT = `你是一位精通 Kubernetes 资源模型的助手,服务于一个容器云平台控制台。
 你的任务是基于给定的 K8s 字段文档片段,准确回答用户关于资源配置的问题。

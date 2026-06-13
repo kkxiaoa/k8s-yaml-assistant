@@ -15,18 +15,22 @@
 | `npm test` | `validateStorageClass` 纯函数单测 |
 | `npm run dev` | Next.js Web(Monaco 编辑器 + RAG 问答 + 校验) |
 
-## 架构(数据流)
+## 目录结构(分层)
 
 ```
-data/schemas/*.json  真实 K8s OpenAPI schema(知识源)
- → src/schema-corpus.ts   结构化切片:schema → chunk(一字段一段 + 元数据)
- → src/corpus.ts          CORPUS = buildSchemaCorpus()
- → src/retrieve.ts        向量检索(内存+余弦)
-   + src/router.ts        关键词软路由(命中资源加分,不硬删)
-   + src/rerank.ts        Voyage cross-encoder 精排
- → src/pipeline.ts        服务端管线(检索+生成+校验),供 Web(app/)复用
-入口:CLI = src/ask|check|generate.ts;Web = app/(Next.js)+ app/api/*
+src/
+  knowledge/    schema-corpus.ts(结构化切片) corpus.ts(CORPUS)
+  retrieval/    embeddings.ts retrieve.ts router.ts rerank.ts
+  validation/   validate.ts validate.test.ts
+  server/       pipeline.ts(服务端管线,供 Web 复用)
+  cli/          ask.ts check.ts gen.ts
+  eval/         eval.ts(检索) faithfulness.ts(生成) eval-set.ts
+app/            Next.js Web(page.tsx + Monaco)+ api/ask|check
+data/schemas/   真实 K8s OpenAPI schema(知识源)
 ```
+
+数据流:`data/schemas/*.json → knowledge/schema-corpus(schema→chunk)→ knowledge/corpus
+→ retrieval/retrieve(向量+余弦)+ router(软路由)+ rerank(精排)→ server/pipeline → CLI / Web`
 
 ## 设计基因:三大支柱(意图不可预知 → 押注这三个)
 
@@ -41,7 +45,7 @@ data/schemas/*.json  真实 K8s OpenAPI schema(知识源)
 - **模型**:用 Anthropic SDK 接 **DeepSeek 兼容端点**(`baseURL: https://api.deepseek.com/anthropic`)。
   传 `claude-sonnet-4-6` → 映射 deepseek-v4-flash;`claude-opus-4-8` → deepseek-v4-pro。换回真 Claude 只改 baseURL + key。
 - **embedding / rerank** 用 Voyage(DeepSeek 无 embedding 接口)。
-- **知识库 schema 驱动**:加一个资源/CRD = 往 `data/schemas/` 丢一个 `{resource, apiVersion, schema}` JSON + `schema-corpus.ts` 的 `DOCS` 加一行。**不要手写 chunk。**
+- **知识库 schema 驱动**:加一个资源/CRD = 往 `data/schemas/` 丢一个 `{resource, apiVersion, schema}` JSON + `src/knowledge/schema-corpus.ts` 的 `DOCS` 加一行。**不要手写 chunk。**
 - **测量驱动**:改了切片/检索/路由/模型,**必须重跑 `npm run eval`** 对比指标,用数字决定好坏,别凭感觉。
 
 ## Gotchas

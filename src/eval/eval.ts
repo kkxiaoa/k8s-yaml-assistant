@@ -18,11 +18,11 @@
 
 import { config } from 'dotenv';
 config({ override: true });
-import { embed } from './embeddings';
-import { CORPUS } from './corpus';
+import { embed } from '../retrieval/embeddings';
+import { CORPUS } from '../knowledge/corpus';
 import { EVAL_SET } from './eval-set';
-import { inferResource, RESOURCE_BOOST } from './router';
-import { rerank, COARSE_N } from './rerank';
+import { inferResource, RESOURCE_BOOST } from '../retrieval/router';
+import { rerank, COARSE_N } from '../retrieval/rerank';
 
 type Mode = 'none' | 'oracle' | 'auto';
 
