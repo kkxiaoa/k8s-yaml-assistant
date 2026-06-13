@@ -2,7 +2,7 @@
 // 语料变大时(迭代3)再换成真正的向量库(pgvector / Chroma 等)。
 
 import { embed } from './embeddings';
-import { CORPUS, type Chunk } from './corpus';
+import { CORPUS, type Chunk } from '../knowledge/corpus';
 import { RESOURCE_BOOST } from './router';
 
 export interface IndexedChunk extends Chunk {

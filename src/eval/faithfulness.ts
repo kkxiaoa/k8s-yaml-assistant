@@ -10,9 +10,9 @@
 import { config } from 'dotenv';
 config({ override: true });
 import Anthropic from '@anthropic-ai/sdk';
-import { buildIndex, retrieve } from './retrieve';
-import { inferResource } from './router';
-import { rerank, COARSE_N } from './rerank';
+import { buildIndex, retrieve } from '../retrieval/retrieve';
+import { inferResource } from '../retrieval/router';
+import { rerank, COARSE_N } from '../retrieval/rerank';
 
 const MODEL = 'claude-sonnet-4-6'; // 被测(生成):DeepSeek 映射 deepseek-v4-flash
 const JUDGE_MODEL = 'claude-opus-4-8'; // 裁判:DeepSeek 映射 deepseek-v4-pro,更强 + 异构,减少"自己评自己"的偏袒

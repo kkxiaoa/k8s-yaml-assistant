@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { validateYamlText } from '../../../src/pipeline';
+import { validateYamlText } from '../../../src/server/pipeline';
 
 export const runtime = 'nodejs';
 

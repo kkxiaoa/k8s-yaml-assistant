@@ -12,7 +12,7 @@ config({ override: true });
 import { readFileSync } from 'node:fs';
 import { load } from 'js-yaml';
 import Anthropic from '@anthropic-ai/sdk';
-import { validateStorageClass } from './validate';
+import { validateStorageClass } from '../validation/validate';
 
 const TOOL: Anthropic.Tool = {
   name: 'validate_storageclass',
