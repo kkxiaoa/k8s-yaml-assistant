@@ -1,0 +1,8 @@
+# 这份故意埋了 4 个错,用来演示校验 + 模型解释
+apiVersion: storage.k8s.io/v1beta1   # 错1:应为 storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: Fast_SSD                      # 错2:大写+下划线,违反 DNS-1123
+# provisioner 整行缺失                # 错3:provisioner 必填
+reclaimPolicy: Recycle                # 错4:只能 Delete / Retain
+volumeBindingMode: WaitForFirstConsumer

@@ -1,0 +1,27 @@
+{
+  "resource": "PersistentVolume",
+  "apiVersion": "v1",
+  "schema": {
+    "type": "object",
+    "description": "PersistentVolume(PV)表示集群中一块已供应的持久存储。",
+    "properties": {
+      "spec": {
+        "type": "object",
+        "description": "PV 的期望状态。",
+        "properties": {
+          "capacity": { "type": "object", "description": "卷容量,capacity.storage 声明该卷的大小(如 100Gi)。" },
+          "accessModes": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"] },
+            "description": "该卷支持的访问模式。"
+          },
+          "persistentVolumeReclaimPolicy": { "type": "string", "enum": ["Retain", "Delete", "Recycle"], "description": "PV 上的回收策略,可选 Retain、Delete、Recycle(Recycle 已废弃)。注意与 StorageClass.reclaimPolicy 不是同一个字段。" },
+          "storageClassName": { "type": "string", "description": "该 PV 所属的 StorageClass;空字符串表示不属于任何 StorageClass。" },
+          "volumeMode": { "type": "string", "enum": ["Filesystem", "Block"], "description": "卷模式,Filesystem 或 Block。" },
+          "mountOptions": { "type": "array", "items": { "type": "string" }, "description": "挂载选项。" },
+          "nodeAffinity": { "type": "object", "description": "限制该卷只能从满足条件的节点访问,常用于 local(本地)卷。" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "resource": "PersistentVolumeClaim",
+  "apiVersion": "v1",
+  "schema": {
+    "type": "object",
+    "description": "PersistentVolumeClaim(PVC)表示用户对持久存储的申请。",
+    "properties": {
+      "spec": {
+        "type": "object",
+        "description": "PVC 的期望状态。",
+        "properties": {
+          "accessModes": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"] },
+            "description": "申请的访问模式,需与目标 PV 兼容。"
+          },
+          "resources": { "type": "object", "description": "资源申请。resources.requests.storage 指定申请的存储大小(如 10Gi);当 StorageClass 允许扩容时,可把该值调大触发扩容。" },
+          "storageClassName": { "type": "string", "description": "指定用哪个 StorageClass 动态供应;设为空字符串则禁用动态供应,只能绑定已存在的 PV。" },
+          "volumeName": { "type": "string", "description": "指定要绑定的具体 PV 名称,用于静态绑定到某个预先创建的 PV。" },
+          "volumeMode": { "type": "string", "enum": ["Filesystem", "Block"], "description": "卷模式,Filesystem(默认)或 Block(把卷作为裸块设备暴露给容器)。" },
+          "volumeAttributesClassName": { "type": "string", "description": "引用的 VolumeAttributesClass 名称,用于设置可变卷属性。" }
+        }
+      }
+    }
+  }
+}
