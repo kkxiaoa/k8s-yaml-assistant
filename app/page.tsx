@@ -35,7 +35,9 @@ const btn: React.CSSProperties = {
 export default function Home() {
   const [yaml, setYaml] = useState(DEFAULT_YAML);
   const [errors, setErrors] = useState<VErr[] | null>(null);
-  const [question, setQuestion] = useState('reclaimPolicy 能填哪些值?默认是什么?');
+  const [question, setQuestion] = useState(
+    'reclaimPolicy 能填哪些值?默认是什么?',
+  );
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -79,7 +81,9 @@ export default function Home() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ padding: '12px 20px', borderBottom: '1px solid #30363d' }}>
+      <header
+        style={{ padding: '12px 20px', borderBottom: '1px solid #30363d' }}
+      >
         <strong>K8s YAML 智能助手</strong>
         <span style={{ color: '#8b949e', marginLeft: 12, fontSize: 13 }}>
           Monaco 编辑 · RAG 问答 · 校验(向量→软路由→rerank)
@@ -88,7 +92,14 @@ export default function Home() {
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         {/* 左:Monaco YAML 编辑器 */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #30363d' }}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            borderRight: '1px solid #30363d',
+          }}
+        >
           <div style={{ padding: 8 }}>
             <button style={btn} onClick={check} disabled={busy}>
               校验 StorageClass
@@ -107,18 +118,33 @@ export default function Home() {
         </div>
 
         {/* 右:校验结果 + 问答 */}
-        <div style={{ width: 460, display: 'flex', flexDirection: 'column', gap: 12, padding: 16, overflow: 'auto' }}>
+        <div
+          style={{
+            width: 460,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            padding: 16,
+            overflow: 'auto',
+          }}
+        >
           <div style={card}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>校验结果</div>
             {errors === null ? (
-              <div style={{ color: '#8b949e', fontSize: 13 }}>点上方「校验」检查这段 YAML</div>
+              <div style={{ color: '#8b949e', fontSize: 13 }}>
+                点上方「校验」检查这段 YAML
+              </div>
             ) : errors.length === 0 ? (
               <div style={{ color: '#3fb950' }}>✓ 校验通过,没有发现问题</div>
             ) : (
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {errors.map((e, i) => (
-                  <li key={i} style={{ color: '#f85149', marginBottom: 4, fontSize: 13 }}>
-                    <code style={{ color: '#d29922' }}>{e.path || '(根)'}</code>:{e.message}
+                  <li
+                    key={i}
+                    style={{ color: '#f85149', marginBottom: 4, fontSize: 13 }}
+                  >
+                    <code style={{ color: '#d29922' }}>{e.path || '(根)'}</code>
+                    :{e.message}
                   </li>
                 ))}
               </ul>
@@ -141,11 +167,24 @@ export default function Home() {
                 resize: 'vertical',
               }}
             />
-            <button style={{ ...btn, marginTop: 8 }} onClick={ask} disabled={busy || !question.trim()}>
+            <button
+              style={{ ...btn, marginTop: 8 }}
+              onClick={ask}
+              disabled={busy || !question.trim()}
+            >
               {busy ? '思考中…' : '问'}
             </button>
             {answer && (
-              <div style={{ marginTop: 12, whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: 14 }}>{answer}</div>
+              <div
+                style={{
+                  marginTop: 12,
+                  whiteSpace: 'pre-wrap',
+                  lineHeight: 1.6,
+                  fontSize: 14,
+                }}
+              >
+                {answer}
+              </div>
             )}
           </div>
         </div>

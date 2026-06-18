@@ -71,8 +71,8 @@ data/schemas/*.json                真实 K8s OpenAPI schema(知识源,可换集
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | **Phase A** | schema 驱动知识库(真实 OpenAPI schema 自动生成 chunk) | ✅ 已完成(29 chunk,eval 100%/1.0) |
-| **Phase B** | schema 驱动校验(按 type/enum/required 通用校验任意资源) | 下一步 |
-| **Phase C** | 编辑器上下文感知(解析当前 apiVersion/kind,scope 检索/校验)+ Monaco 内联报错标记 | 规划 |
+| **Phase B** | schema 驱动校验(按 type/enum/required/未知字段 通用校验任意资源) | ✅ 已完成(validateResource,任意资源;单测 14 项)|
+| **Phase C** | 编辑器上下文感知(解析当前 apiVersion/kind,scope 检索/校验)+ Monaco 内联报错标记 | 下一步 |
 | **Phase D** | agentic 动作("修掉这个错 / 按需求生成"内联)+ 运行时自检 | 规划 |
 | **Phase E** | 反馈回路(👍/👎 + 查询日志 → 回灌 eval),贯穿,可提前埋点 | 规划 |
 
