@@ -1,7 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
+import { detectResource, buildMarkers, type VErr, type EditorT, type MonacoT } from './lib/yaml';
+import { LABEL, PRIMARY_BTN } from './ui/styles';
+import { ValidatePanel } from './ui/ValidatePanel';
+import { AskPanel } from './ui/AskPanel';
+import { StatusBar } from './ui/StatusBar';
+import { ResizeHandle } from './ui/ResizeHandle';
+import { useResizable } from './lib/use-resizable';
+import { checkYaml, askStream } from './lib/api';
 
 const DEFAULT_YAML = `apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -13,182 +21,114 @@ volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 `;
 
-interface VErr {
-  path: string;
-  message: string;
-}
-
-const card: React.CSSProperties = {
-  background: '#161b22',
-  border: '1px solid #30363d',
-  borderRadius: 8,
-  padding: 12,
-};
-const btn: React.CSSProperties = {
-  background: '#238636',
-  color: 'white',
-  border: 'none',
-  borderRadius: 6,
-  padding: '6px 14px',
-};
-
 export default function Home() {
   const [yaml, setYaml] = useState(DEFAULT_YAML);
   const [errors, setErrors] = useState<VErr[] | null>(null);
-  const [question, setQuestion] = useState(
-    'reclaimPolicy 能填哪些值?默认是什么?',
-  );
+  const [question, setQuestion] = useState('reclaimPolicy 能填哪些值?默认是什么?');
   const [answer, setAnswer] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'check' | 'ask' | null>(null);
+  const editorRef = useRef<EditorT | null>(null);
+  const monacoRef = useRef<MonacoT | null>(null);
+  const { width, onResizeStart } = useResizable(440, 320, 760);
+
+  const { kind, apiVersion } = detectResource(yaml);
+
+  function setMarkers(errs: VErr[]) {
+    const monaco = monacoRef.current;
+    const model = editorRef.current?.getModel();
+    if (monaco && model) monaco.editor.setModelMarkers(model, 'k8s', errs ? buildMarkers(yaml, errs, monaco) : []);
+  }
 
   async function check() {
-    setBusy(true);
+    setBusy('check');
     setErrors(null);
     try {
-      const res = await fetch('/api/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ yaml }),
-      });
-      const data = (await res.json()) as { errors: VErr[] };
-      setErrors(data.errors);
+      const errs = await checkYaml(yaml);
+      setErrors(errs);
+      setMarkers(errs);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   async function ask() {
-    setBusy(true);
+    setBusy('ask');
     setAnswer('');
     try {
-      const res = await fetch('/api/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
-      });
-      if (!res.body) return;
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        setAnswer((a) => a + dec.decode(value));
-      }
+      await askStream(question, (t) => setAnswer((a) => a + t));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <header
-        style={{ padding: '12px 20px', borderBottom: '1px solid #30363d' }}
-      >
-        <strong>K8s YAML 智能助手</strong>
-        <span style={{ color: '#8b949e', marginLeft: 12, fontSize: 13 }}>
-          Monaco 编辑 · RAG 问答 · 校验(向量→软路由→rerank)
+    <div className="flex h-screen flex-col">
+      <header className="flex items-center gap-4 border-b border-line bg-surface/50 px-5 py-3 backdrop-blur">
+        <span className="text-brand">◆</span>
+        <span className="font-mono text-sm font-semibold tracking-tight text-fg">
+          k8s<span className="text-muted">.</span>assistant
         </span>
+        <span className={LABEL}>schema-driven · RAG · validate</span>
+        {kind && (
+          <span className="ml-auto rounded border border-brand/30 bg-brand/10 px-2.5 py-1 font-mono text-[11px] text-brand">
+            {kind}
+          </span>
+        )}
       </header>
 
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        {/* 左:Monaco YAML 编辑器 */}
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            borderRight: '1px solid #30363d',
-          }}
-        >
-          <div style={{ padding: 8 }}>
-            <button style={btn} onClick={check} disabled={busy}>
-              校验 StorageClass
+      <main className="flex min-h-0 flex-1">
+        <section className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-center gap-3 border-b border-line px-4 py-2">
+            <button className={PRIMARY_BTN} onClick={check} disabled={busy !== null}>
+              {busy === 'check' ? '校验中…' : `校验 ${kind ?? '资源'}`}
             </button>
+            <span className="font-mono text-[11px] text-muted">{apiVersion ?? '—'}</span>
           </div>
-          <div style={{ flex: 1, minHeight: 0 }}>
+          <div className="min-h-0 flex-1">
             <Editor
               height="100%"
               defaultLanguage="yaml"
               theme="vs-dark"
               value={yaml}
-              onChange={(v) => setYaml(v ?? '')}
-              options={{ minimap: { enabled: false }, fontSize: 13 }}
-            />
-          </div>
-        </div>
-
-        {/* 右:校验结果 + 问答 */}
-        <div
-          style={{
-            width: 460,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-            padding: 16,
-            overflow: 'auto',
-          }}
-        >
-          <div style={card}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>校验结果</div>
-            {errors === null ? (
-              <div style={{ color: '#8b949e', fontSize: 13 }}>
-                点上方「校验」检查这段 YAML
-              </div>
-            ) : errors.length === 0 ? (
-              <div style={{ color: '#3fb950' }}>✓ 校验通过,没有发现问题</div>
-            ) : (
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
-                {errors.map((e, i) => (
-                  <li
-                    key={i}
-                    style={{ color: '#f85149', marginBottom: 4, fontSize: 13 }}
-                  >
-                    <code style={{ color: '#d29922' }}>{e.path || '(根)'}</code>
-                    :{e.message}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div style={card}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>RAG 问答</div>
-            <textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              rows={2}
-              style={{
-                width: '100%',
-                background: '#0d1117',
-                color: '#e6edf3',
-                border: '1px solid #30363d',
-                borderRadius: 6,
-                padding: 8,
-                resize: 'vertical',
+              onChange={(v) => {
+                setYaml(v ?? '');
+                setMarkers([]); // 编辑即清除旧标记
+              }}
+              onMount={(ed, m) => {
+                editorRef.current = ed;
+                monacoRef.current = m;
+              }}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 13,
+                fontFamily: 'var(--font-plex-mono)',
+                padding: { top: 12 },
+                scrollBeyondLastLine: false,
+                renderLineHighlight: 'none',
               }}
             />
-            <button
-              style={{ ...btn, marginTop: 8 }}
-              onClick={ask}
-              disabled={busy || !question.trim()}
-            >
-              {busy ? '思考中…' : '问'}
-            </button>
-            {answer && (
-              <div
-                style={{
-                  marginTop: 12,
-                  whiteSpace: 'pre-wrap',
-                  lineHeight: 1.6,
-                  fontSize: 14,
-                }}
-              >
-                {answer}
-              </div>
-            )}
           </div>
-        </div>
-      </div>
+        </section>
+
+        <ResizeHandle onMouseDown={onResizeStart} />
+
+        <aside
+          style={{ width }}
+          className="flex shrink-0 flex-col gap-4 overflow-auto p-4"
+        >
+          <ValidatePanel errors={errors} />
+          <AskPanel
+            question={question}
+            answer={answer}
+            asking={busy === 'ask'}
+            disabled={busy !== null}
+            onChange={setQuestion}
+            onAsk={ask}
+          />
+        </aside>
+      </main>
+
+      <StatusBar kind={kind} apiVersion={apiVersion} errors={errors} />
     </div>
   );
 }

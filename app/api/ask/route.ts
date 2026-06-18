@@ -1,4 +1,4 @@
-import { getClient, retrieveContext, ASK_SYSTEM, ANSWER_MODEL } from '../../../src/server/pipeline';
+import { getClient, retrieveContext, ASK_SYSTEM, ANSWER_MODEL } from '@/server/pipeline';
 
 export const runtime = 'nodejs'; // 需要 Node:Anthropic SDK、dotenv、fetch 向量/rerank
 

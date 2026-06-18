@@ -18,16 +18,22 @@
 ## 目录结构(分层)
 
 ```
-src/
-  knowledge/    schema-corpus.ts(结构化切片) corpus.ts(CORPUS)
-  retrieval/    embeddings.ts retrieve.ts router.ts rerank.ts
-  validation/   validate.ts validate.test.ts
-  server/       pipeline.ts(服务端管线,供 Web 复用)
-  cli/          ask.ts check.ts gen.ts
-  eval/         eval.ts(检索) faithfulness.ts(生成) eval-set.ts
-app/            Next.js Web(page.tsx + Monaco)+ api/ask|check
-data/schemas/   真实 K8s OpenAPI schema(知识源)
+src/             领域/后端层(框架无关,用 @/ 别名访问)
+  knowledge/     schemas.ts(共享加载) schema-corpus.ts(结构化切片) corpus.ts
+  retrieval/     embeddings.ts retrieve.ts router.ts rerank.ts
+  validation/    validate.ts(validateResource) validate.test.ts
+  server/        pipeline.ts(服务端管线,供 Web 复用)
+  cli/           ask.ts check.ts gen.ts
+  eval/          eval.ts(检索) faithfulness.ts(生成) eval-set.ts
+app/             Next.js 前端(分层)
+  layout/page/globals  路由 + 全局
+  api/           route handlers(/api/ask 流式, /api/check)
+  ui/            UI 层:展示组件(ValidatePanel/AskPanel/StatusBar)+ styles.ts
+  lib/           前端逻辑/工具(yaml.ts:detectResource/buildMarkers)
+data/schemas/    真实 K8s OpenAPI schema(知识源)
 ```
+
+路径别名:`@/* → src/*`(`app/api` 用 `@/server/pipeline` 访问后端,避免 `../../../`)。
 
 数据流:`data/schemas/*.json → knowledge/schema-corpus(schema→chunk)→ knowledge/corpus
 → retrieval/retrieve(向量+余弦)+ router(软路由)+ rerank(精排)→ server/pipeline → CLI / Web`
@@ -45,6 +51,8 @@ data/schemas/   真实 K8s OpenAPI schema(知识源)
 - **模型**:用 Anthropic SDK 接 **DeepSeek 兼容端点**(`baseURL: https://api.deepseek.com/anthropic`)。
   传 `claude-sonnet-4-6` → 映射 deepseek-v4-flash;`claude-opus-4-8` → deepseek-v4-pro。换回真 Claude 只改 baseURL + key。
 - **embedding / rerank** 用 Voyage(DeepSeek 无 embedding 接口)。
+- **前端分层(Next.js 最佳实践)**:`app/` 只放路由(page/layout/route);**`app/ui/` = UI 层**(展示组件,纯展示、状态与副作用都在 `page.tsx` 这个薄组合根里);`app/lib/` = 前端逻辑/工具。跨层访问后端用 `@/` 别名(`@/server/pipeline`),不写 `../../../`。新建展示组件放 `app/ui/`,新建前端纯逻辑放 `app/lib/`。**与 `/api/*` 的通信封装在 `app/lib/api.ts`,组件/page 不直接 `fetch`**(page 只做状态编排)。
+- **前端栈**:Tailwind v4(`@theme` token + `app/globals.css`)+ IBM Plex Mono/Sans(next/font),蓝图 dev-console 风格;资源感知(从 YAML 解析 kind/apiVersion)+ Monaco 内联报错标记(path→行)。UI 用 `frontend-design` 技能。
 - **知识库 schema 驱动**:加一个资源/CRD = 往 `data/schemas/` 丢一个 `{resource, apiVersion, schema}` JSON + `src/knowledge/schema-corpus.ts` 的 `DOCS` 加一行。**不要手写 chunk。**
 - **测量驱动**:改了切片/检索/路由/模型,**必须重跑 `npm run eval`** 对比指标,用数字决定好坏,别凭感觉。
 
