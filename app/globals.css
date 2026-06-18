@@ -1,19 +1,45 @@
-* {
-  box-sizing: border-box;
+@import 'tailwindcss';
+
+/* 蓝图/电路图风开发者控制台 —— 主题 token */
+@theme {
+  --color-ink: #090c13;
+  --color-surface: #11151f;
+  --color-surface-2: #161c28;
+  --color-line: #222a3a;
+  --color-brand: #4dd4ff;
+  --color-ok: #4ade80;
+  --color-err: #ff6b6b;
+  --color-warn: #f5b53d;
+  --color-muted: #79859e;
+  --color-fg: #d7dfee;
+
+  --font-mono: var(--font-plex-mono), ui-monospace, 'SF Mono', monospace;
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, 'PingFang SC', sans-serif;
 }
+
 html,
 body {
+  height: 100%;
+}
+
+body {
   margin: 0;
-  padding: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: #0d1117;
-  color: #e6edf3;
+  background-color: var(--color-ink);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  /* 极淡蓝图网格 */
+  background-image:
+    linear-gradient(rgba(77, 212, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(77, 212, 255, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
-button {
-  font: inherit;
-  cursor: pointer;
+
+/* 细滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 4px;
 }
