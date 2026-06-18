@@ -12,12 +12,12 @@ config({ override: true });
 import { readFileSync } from 'node:fs';
 import { load } from 'js-yaml';
 import Anthropic from '@anthropic-ai/sdk';
-import { validateStorageClass } from '../validation/validate';
+import { validateResource } from '../validation/validate';
 
 const TOOL: Anthropic.Tool = {
-  name: 'validate_storageclass',
+  name: 'validate_resource',
   description:
-    '对当前正在审阅的 StorageClass YAML 运行静态校验,返回结构化错误列表(每项含 path 和 message,path 可用于编辑器定位)。当用户要求校验/检查 YAML 时,必须先调用本工具,再依据返回结果回答。',
+    '对当前正在审阅的 Kubernetes 资源 YAML 运行 schema 驱动校验(按 type/enum/required/未知字段),返回结构化错误列表(每项含 path 和 message,path 可用于编辑器定位)。当用户要求校验/检查 YAML 时,必须先调用本工具,再依据返回结果回答。',
   // 无入参:工具校验的是"当前这份 YAML"(由程序持有),不需要模型把 YAML 再传一遍
   input_schema: { type: 'object', properties: {} },
 };
@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   const messages: Anthropic.MessageParam[] = [
     {
       role: 'user',
-      content: `请校验这段 StorageClass YAML,指出所有问题并给出修复建议。\n\n\`\`\`yaml\n${yamlText}\n\`\`\``,
+      content: `请校验这段 Kubernetes 资源 YAML,指出所有问题并给出修复建议。\n\n\`\`\`yaml\n${yamlText}\n\`\`\``,
     },
   ];
 
@@ -67,14 +67,9 @@ async function main(): Promise<void> {
       messages.push({ role: 'assistant', content: resp.content });
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const block of resp.content) {
-        if (
-          block.type === 'tool_use' &&
-          block.name === 'validate_storageclass'
-        ) {
-          const errors = validateStorageClass(parsed);
-          console.error(
-            `  [tool] validate_storageclass → ${errors.length} 个问题`,
-          );
+        if (block.type === 'tool_use' && block.name === 'validate_resource') {
+          const errors = validateResource(parsed);
+          console.error(`  [tool] validate_resource → ${errors.length} 个问题`);
           toolResults.push({
             type: 'tool_result',
             tool_use_id: block.id,

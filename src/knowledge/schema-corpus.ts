@@ -1,12 +1,8 @@
 // Phase A:schema 驱动知识库。从真实 K8s OpenAPI v3 schema 自动生成 chunk(结构化切片)。
 // 一字段一 chunk,自带 资源 + 路径 + 类型 + 枚举 + required 元数据(context injection)。
-// 换成集群导出的真实 CRD schema 时,只要往 data/schemas/ 丢 JSON、在下面 DOCS 里加一行即可。
+// schema 加载与查找见 ./schemas.ts(校验也复用同一份)。
 
-import storageClass from '../../data/schemas/storageclass.json';
-import pvc from '../../data/schemas/persistentvolumeclaim.json';
-import pv from '../../data/schemas/persistentvolume.json';
-import vsc from '../../data/schemas/volumesnapshotclass.json';
-import vac from '../../data/schemas/volumeattributesclass.json';
+import { SCHEMA_DOCS, type SchemaNode } from './schemas';
 
 export interface Chunk {
   id: string;
@@ -14,22 +10,6 @@ export interface Chunk {
   title: string;
   text: string;
 }
-
-interface SchemaNode {
-  type?: string;
-  description?: string;
-  enum?: unknown[];
-  properties?: Record<string, SchemaNode>;
-  items?: SchemaNode;
-  required?: string[];
-}
-interface SchemaDoc {
-  resource: string;
-  apiVersion: string;
-  schema: SchemaNode;
-}
-
-const DOCS = [storageClass, pvc, pv, vsc, vac] as unknown as SchemaDoc[];
 
 function chunkText(resource: string, path: string, node: SchemaNode, required: boolean): string {
   const parts = [`${resource} 的字段 ${path}:${node.description ?? '(无描述)'}`];
@@ -51,7 +31,6 @@ function walk(resource: string, node: SchemaNode, prefix: string, out: Chunk[], 
       title: `${resource} · ${path}`,
       text: chunkText(resource, path, child, requiredSet.has(name)),
     });
-    // 递归对象 / 数组项的子属性
     const sub = child.properties ? child : child.items?.properties ? child.items : null;
     if (sub) walk(resource, sub, path, out, depth + 1);
   }
@@ -60,6 +39,6 @@ function walk(resource: string, node: SchemaNode, prefix: string, out: Chunk[], 
 /** 把所有 schema 展开成 chunk 数组。 */
 export function buildSchemaCorpus(): Chunk[] {
   const out: Chunk[] = [];
-  for (const doc of DOCS) walk(doc.resource, doc.schema, '', out, 0);
+  for (const doc of SCHEMA_DOCS) walk(doc.resource, doc.schema, '', out, 0);
   return out;
 }

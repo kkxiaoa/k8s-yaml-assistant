@@ -8,7 +8,7 @@ import { config } from 'dotenv';
 config({ override: true });
 import { load } from 'js-yaml';
 import Anthropic from '@anthropic-ai/sdk';
-import { validateStorageClass, type ValidationError } from '../validation/validate';
+import { validateResource, type ValidationError } from '../validation/validate';
 
 const SUBMIT_TOOL: Anthropic.Tool = {
   name: 'submit_storageclass',
@@ -39,7 +39,7 @@ function validateYamlText(yamlText: string): ValidationError[] {
   } catch (e) {
     return [{ path: '', message: `YAML 解析失败: ${e instanceof Error ? e.message : String(e)}` }];
   }
-  return validateStorageClass(parsed);
+  return validateResource(parsed);
 }
 
 async function main(): Promise<void> {

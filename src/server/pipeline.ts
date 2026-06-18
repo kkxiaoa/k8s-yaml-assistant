@@ -8,7 +8,7 @@ import { load } from 'js-yaml';
 import { buildIndex, retrieve, type IndexedChunk } from '../retrieval/retrieve';
 import { inferResource } from '../retrieval/router';
 import { rerank, COARSE_N } from '../retrieval/rerank';
-import { validateStorageClass, type ValidationError } from '../validation/validate';
+import { validateResource, type ValidationError } from '../validation/validate';
 
 export const ANSWER_MODEL = 'claude-sonnet-4-6'; // DeepSeek 映射 deepseek-v4-flash
 
@@ -49,7 +49,7 @@ export async function retrieveContext(question: string, k = 3): Promise<{ contex
   return { context, hits: hits.map((c) => ({ title: c.title, text: c.text })) };
 }
 
-/** 校验一段 StorageClass YAML 文本(解析 + 规则校验)。供 /api/check 调用。 */
+/** 校验一段资源 YAML 文本(解析 + schema 驱动校验,自动按 kind 选 schema)。供 /api/check 调用。 */
 export function validateYamlText(yamlText: string): ValidationError[] {
   let parsed: unknown;
   try {
@@ -57,5 +57,5 @@ export function validateYamlText(yamlText: string): ValidationError[] {
   } catch (e) {
     return [{ path: '', message: 'YAML 解析失败: ' + (e instanceof Error ? e.message : String(e)) }];
   }
-  return validateStorageClass(parsed);
+  return validateResource(parsed);
 }
