@@ -10,6 +10,22 @@ export interface VErr {
   message: string;
 }
 
+/** 轻量 YAML path 推断:按缩进栈定位光标所在字段,优先覆盖常见 K8s YAML。 */
+export function inferPathAtLine(yaml: string, lineNumber: number | null | undefined): string | null {
+  if (!lineNumber) return null;
+  const stack: Array<{ indent: number; key: string }> = [];
+  const lines = yaml.split('\n').slice(0, lineNumber);
+  for (const line of lines) {
+    const match = line.match(/^(\s*)(-\s*)?([A-Za-z0-9_.-]+)\s*:/);
+    if (!match) continue;
+    const indent = match[1]!.length + (match[2] ? 2 : 0);
+    const key = match[3]!;
+    while (stack.length > 0 && stack[stack.length - 1]!.indent >= indent) stack.pop();
+    stack.push({ indent, key });
+  }
+  return stack.length ? stack.map((item) => item.key).join('.') : null;
+}
+
 /** 从编辑器里的 YAML 解析出当前资源(kind / apiVersion)。 */
 export function detectResource(yaml: string): { kind: string | null; apiVersion: string | null } {
   try {
