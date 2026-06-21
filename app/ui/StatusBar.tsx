@@ -18,7 +18,7 @@ export function StatusBar({ kind, apiVersion, errors }: Props) {
       <span className={errors === null ? '' : errors.length === 0 ? 'text-ok' : 'text-err'}>
         {errors === null ? 'not validated' : errors.length === 0 ? '0 errors' : `${errors.length} errors`}
       </span>
-      <span className="ml-auto">schema 知识库:5 资源 · 29 字段</span>
+      <span className="ml-auto">schema 知识库:动态加载</span>
     </footer>
   );
 }

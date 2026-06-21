@@ -3,6 +3,7 @@
 
 const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
 const MODEL = 'voyage-3';
+const MAX_BATCH_SIZE = 1000;
 
 interface VoyageResponse {
   data: { embedding: number[] }[];
@@ -22,19 +23,24 @@ export async function embed(
     throw new Error('VOYAGE_API_KEY 未设置。复制 .env.example 为 .env 并填入,或 export VOYAGE_API_KEY=...');
   }
 
-  const res = await fetch(VOYAGE_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({ input: texts, model: MODEL, input_type: inputType }),
-  });
+  const out: number[][] = [];
+  for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
+    const batch = texts.slice(i, i + MAX_BATCH_SIZE);
+    const res = await fetch(VOYAGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({ input: batch, model: MODEL, input_type: inputType }),
+    });
 
-  if (!res.ok) {
-    throw new Error(`Voyage API ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      throw new Error(`Voyage API ${res.status}: ${await res.text()}`);
+    }
+
+    const json = (await res.json()) as VoyageResponse;
+    out.push(...json.data.map((d) => d.embedding));
   }
-
-  const json = (await res.json()) as VoyageResponse;
-  return json.data.map((d) => d.embedding);
+  return out;
 }

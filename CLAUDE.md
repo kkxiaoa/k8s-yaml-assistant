@@ -1,18 +1,19 @@
-# CLAUDE.md · K8s YAML 智能助手
+# CLAUDE.md · K8s YAML Copilot 训练场
 
-独立的、生产级定位的 AI 应用:懂集群所有资源/CRD、活在编辑器里、答案可控可审计的 K8s 配置助手。
-能力:**问答(RAG)/ 校验 / 生成**。产品全貌见 `docs/产品设计-K8s智能助手.md`。
+当前项目不是在做完整 K8s AI 产品,而是用 K8s YAML Copilot 场景训练 AI 应用开发能力。
+训练重点:**RAG 问答 / YAML 校验 / Generate-Fix 生成修复 / Eval / Trace / Feedback**。
+主线文档见 `docs/AI应用开发训练方案-K8s-YAML-Copilot.md` 和 `docs/AI应用开发能力训练实现方案.md`。
 
 ## 命令
 
 | 命令 | 作用 |
 |------|------|
 | `npm run ask -- "<问题>"` | RAG 问答(CLI,流式) |
-| `npm run check -- <file.yaml>` | 校验 StorageClass(Tool Use) |
+| `npm run check -- <file.yaml>` | 校验任意资源(schema 驱动,Tool Use) |
 | `npm run gen -- "<需求>"` | 生成 YAML + 自检修正闭环 |
-| `npm run eval` | 检索评估:Recall@k / MRR(① 无过滤 / ② oracle / ③ auto路由 / ④ rerank) |
+| `npm run eval` | 检索评估:Recall@k / MRR(当前 eval set 仍需扩展,不能代表全量 88k 语料) |
 | `npm run eval:faith` | 生成评估:Faithfulness(LLM-as-judge,异构 pro 裁判) |
-| `npm test` | `validateStorageClass` 纯函数单测 |
+| `npm test` | `validateResource` 纯函数单测 |
 | `npm run dev` | Next.js Web(Monaco 编辑器 + RAG 问答 + 校验) |
 
 ## 目录结构(分层)
@@ -41,20 +42,22 @@ data/schemas/    真实 K8s OpenAPI schema(知识源)
 ## 设计基因:三大支柱(意图不可预知 → 押注这三个)
 
 1. **评估**:检索 Recall@k/MRR + 生成 Faithfulness,是一切优化的标尺 + 回归门禁。
-2. **反馈回路**(规划):线上 👍/👎 + 查询日志 → 回灌 eval 标注集。
+2. **反馈回路**:先用离线 `bad-cases.jsonl` 回灌 eval,后续再做 UI 反馈。
 3. **自适应检索**:rerank / 软加权 / 动态 k —— 不赌"预测意图/完美路由"。
 支撑手段:结构化切片(schema 驱动)、自检(生成→校验→修正 + 运行时 schema 核验)。
 
 ## 关键约定
 
+- **禁止玩具思维落盘(最高优先)**:落盘的东西必须是当前阶段的**真实工程形态**,不得为了快速跑通而沉淀简化/占位/硬编码版本 —— 例如手写少字段 schema 覆盖真实 ingestion 产物、storage-only 的 fallback 资源集、`CORPUS.slice(0, N)` 截断语料、单资源特判。临时方案必须**显式标注边界并征得同意**,不能悄悄变成既成事实。发现历史玩具残留(如 `FIXTURE_SCHEMA_DOCS` 覆盖层、`FALLBACK_RESOURCES`/`chunksForResource` 硬过滤、旧 `validateStorageClass`/`submit_storageclass` 注释)应**清退**,不得在其上继续叠加。
 - **TS 严格模式**(`noUncheckedIndexedAccess` 等);改代码后跑 `npx tsc --noEmit -p tsconfig.json`。
 - **模型**:用 Anthropic SDK 接 **DeepSeek 兼容端点**(`baseURL: https://api.deepseek.com/anthropic`)。
   传 `claude-sonnet-4-6` → 映射 deepseek-v4-flash;`claude-opus-4-8` → deepseek-v4-pro。换回真 Claude 只改 baseURL + key。
 - **embedding / rerank** 用 Voyage(DeepSeek 无 embedding 接口)。
 - **前端分层(Next.js 最佳实践)**:`app/` 只放路由(page/layout/route);**`app/ui/` = UI 层**(展示组件,纯展示、状态与副作用都在 `page.tsx` 这个薄组合根里);`app/lib/` = 前端逻辑/工具。跨层访问后端用 `@/` 别名(`@/server/pipeline`),不写 `../../../`。新建展示组件放 `app/ui/`,新建前端纯逻辑放 `app/lib/`。**与 `/api/*` 的通信封装在 `app/lib/api.ts`,组件/page 不直接 `fetch`**(page 只做状态编排)。
 - **前端栈**:Tailwind v4(`@theme` token + `app/globals.css`)+ IBM Plex Mono/Sans(next/font),蓝图 dev-console 风格;资源感知(从 YAML 解析 kind/apiVersion)+ Monaco 内联报错标记(path→行)。UI 用 `frontend-design` 技能。
-- **知识库 schema 驱动**:加一个资源/CRD = 往 `data/schemas/` 丢一个 `{resource, apiVersion, schema}` JSON + `src/knowledge/schema-corpus.ts` 的 `DOCS` 加一行。**不要手写 chunk。**
-- **测量驱动**:改了切片/检索/路由/模型,**必须重跑 `npm run eval`** 对比指标,用数字决定好坏,别凭感觉。
+- **知识库 schema 驱动**:资源/CRD 应通过 ingestion pipeline 进入 `data/schemas/generated/`,不要靠手工 import 扩覆盖。
+- **单一检索路径(eval == serving)**:CLI / Web / eval 共用同一段 `retrieve`(**全量软加权,无 `chunksForResource` 硬过滤**)+ 同一份索引。语料经 `data/schemas/curated.json` 白名单收敛(~20-40 个核心 kind),不全量遍历 `generated/*`。改检索时**别把硬过滤分支引回来**(违背支柱③"不赌完美路由")。理由与依赖链见实现方案 §4.1 / §4.3。
+- **测量驱动**:改了切片/检索/路由/模型,必须与 baseline 对比。当前需要优先补 `eval:compare` 和 `data/eval/baseline.json`,不能只看单次指标。持久化索引必须在"语料收敛 + 检索路径合一"之后做(顺序见 §4.3),否则把分裂索引烤进磁盘。
 
 ## Gotchas
 

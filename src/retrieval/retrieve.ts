@@ -5,6 +5,8 @@ import { embed } from './embeddings';
 import { CORPUS, type Chunk } from '../knowledge/corpus';
 import { RESOURCE_BOOST } from './router';
 
+const FIELD_PATH_BOOST = 0.08;
+
 export interface IndexedChunk extends Chunk {
   embedding: number[];
 }
@@ -25,13 +27,13 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
-/** 把整个语料编码成带向量的索引(内存)。启动时跑一次。 */
-export async function buildIndex(): Promise<IndexedChunk[]> {
+/** 把语料编码成带向量的索引。调用方应按资源缩小 chunks,避免全量集群 schema 冷启动。 */
+export async function buildIndex(chunks: Chunk[] = CORPUS): Promise<IndexedChunk[]> {
   const embeddings = await embed(
-    CORPUS.map((c) => c.text),
+    chunks.map((c) => c.text),
     'document',
   );
-  return CORPUS.map((c, i) => ({ ...c, embedding: embeddings[i] ?? [] }));
+  return chunks.map((c, i) => ({ ...c, embedding: embeddings[i] ?? [] }));
 }
 
 /**
@@ -43,16 +45,19 @@ export async function retrieve(
   index: IndexedChunk[],
   k = 3,
   boostResource?: string,
+  boostPath?: string,
 ): Promise<Array<{ chunk: Chunk; score: number }>> {
   const [queryEmbedding] = await embed([query], 'query');
   if (!queryEmbedding) return [];
+  const normalizedPath = boostPath?.toLowerCase();
   return index
     .map((c) => ({
       chunk: c as Chunk,
       // 软加权:命中路由资源的 chunk 加分,但保留所有 chunk(误路由也不会删掉正确答案)
       score:
         cosineSimilarity(queryEmbedding, c.embedding) +
-        (boostResource && c.resource === boostResource ? RESOURCE_BOOST : 0),
+        (boostResource && c.resource === boostResource ? RESOURCE_BOOST : 0) +
+        (normalizedPath && c.path.toLowerCase().endsWith(normalizedPath) ? FIELD_PATH_BOOST : 0),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, k);

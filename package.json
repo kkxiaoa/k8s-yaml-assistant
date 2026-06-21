@@ -10,6 +10,7 @@
     "gen": "tsx src/cli/gen.ts",
     "eval": "tsx src/eval/eval.ts",
     "eval:faith": "tsx src/eval/faithfulness.ts",
+    "ingest:schemas": "tsx scripts/ingest-schemas.ts",
     "test": "tsx src/validation/validate.test.ts",
     "dev": "next dev",
     "build": "next build",
@@ -22,7 +23,9 @@
     "js-yaml": "latest",
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.1",

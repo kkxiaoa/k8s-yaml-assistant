@@ -4,11 +4,15 @@
 
 import { SCHEMA_DOCS, type SchemaNode } from './schemas';
 
+const MAX_SCHEMA_DEPTH = 8;
+
 export interface Chunk {
   id: string;
   resource: string;
+  path: string;
   title: string;
   text: string;
+  sourceType: 'schema';
 }
 
 function chunkText(resource: string, path: string, node: SchemaNode, required: boolean): string {
@@ -21,15 +25,17 @@ function chunkText(resource: string, path: string, node: SchemaNode, required: b
 }
 
 function walk(resource: string, node: SchemaNode, prefix: string, out: Chunk[], depth: number): void {
-  if (depth > 4 || !node.properties) return;
+  if (depth > MAX_SCHEMA_DEPTH || !node.properties) return;
   const requiredSet = new Set(node.required ?? []);
   for (const [name, child] of Object.entries(node.properties)) {
     const path = prefix ? `${prefix}.${name}` : name;
     out.push({
       id: `${resource}::${path}`,
       resource,
+      path,
       title: `${resource} · ${path}`,
       text: chunkText(resource, path, child, requiredSet.has(name)),
+      sourceType: 'schema',
     });
     const sub = child.properties ? child : child.items?.properties ? child.items : null;
     if (sub) walk(resource, sub, path, out, depth + 1);
