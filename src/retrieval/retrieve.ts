@@ -1,10 +1,11 @@
 // 内存向量索引 + 余弦相似度检索。迭代0 用内存即可(语料就几段);
 // 语料变大时(迭代3)再换成真正的向量库(pgvector / Chroma 等)。
 
-import { embed } from './embeddings';
+import { embed, EMBEDDING_MODEL } from './embeddings';
 import { CORPUS, type Chunk } from '../knowledge/corpus';
 import { RESOURCE_BOOST } from './router';
 import { rerank, COARSE_N } from './rerank';
+import { readIndex, computeCorpusHash, computeIndexHash } from './index-store';
 
 const FIELD_PATH_BOOST = 0.08;
 
@@ -70,9 +71,22 @@ export async function retrieve(
 
 let corpusIndexPromise: Promise<IndexedChunk[]> | null = null;
 
-/** 取(惰性构建)全量 CORPUS 索引。无硬过滤——路由只影响软加权,不删候选。 */
+/**
+ * 优先读持久化索引(data/index):indexHash 与当前 CORPUS+模型匹配才用,
+ * 否则(缺失/语料或模型变了)回落到实时嵌入重建。这样 eval/serving 冷启动不必每次重嵌全量。
+ */
+async function loadOrBuildCorpusIndex(): Promise<IndexedChunk[]> {
+  const persisted = readIndex();
+  if (persisted) {
+    const wantHash = computeIndexHash(computeCorpusHash(CORPUS), EMBEDDING_MODEL);
+    if (persisted.manifest.indexHash === wantHash) return persisted.chunks;
+  }
+  return buildIndex(CORPUS);
+}
+
+/** 取(惰性构建/读盘)全量 CORPUS 索引。无硬过滤——路由只影响软加权,不删候选。 */
 export function getCorpusIndex(): Promise<IndexedChunk[]> {
-  if (!corpusIndexPromise) corpusIndexPromise = buildIndex(CORPUS);
+  if (!corpusIndexPromise) corpusIndexPromise = loadOrBuildCorpusIndex();
   return corpusIndexPromise;
 }
 

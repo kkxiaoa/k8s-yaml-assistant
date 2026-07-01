@@ -15,6 +15,7 @@
     "corpus:stats": "tsx scripts/corpus-stats.ts",
     "corpus:closure": "tsx scripts/curated-closure.ts",
     "eval:check": "tsx scripts/eval-check.ts",
+    "index:build": "tsx scripts/index-build.ts",
     "test": "tsx src/validation/validate.test.ts",
     "dev": "next dev",
     "build": "next build",
