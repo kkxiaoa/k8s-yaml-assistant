@@ -4,6 +4,7 @@
 import { embed } from './embeddings';
 import { CORPUS, type Chunk } from '../knowledge/corpus';
 import { RESOURCE_BOOST } from './router';
+import { rerank, COARSE_N } from './rerank';
 
 const FIELD_PATH_BOOST = 0.08;
 
@@ -61,4 +62,45 @@ export async function retrieve(
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
+}
+
+// ── 共享检索入口(eval == serving)─────────────────────────────────────────
+// 单一全量索引:整个 CORPUS 嵌入一次,模块级缓存。CLI / Web / eval 共用同一份,
+// 同一段「软加权粗召回 → rerank 精排」代码,保证 eval 数字预测线上行为。
+
+let corpusIndexPromise: Promise<IndexedChunk[]> | null = null;
+
+/** 取(惰性构建)全量 CORPUS 索引。无硬过滤——路由只影响软加权,不删候选。 */
+export function getCorpusIndex(): Promise<IndexedChunk[]> {
+  if (!corpusIndexPromise) corpusIndexPromise = buildIndex(CORPUS);
+  return corpusIndexPromise;
+}
+
+export interface SearchOptions {
+  /** 软加权:命中该资源的 chunk 加分(不删其它资源,误路由也不丢答案)。 */
+  boostResource?: string;
+  /** 软加权:命中该字段路径的 chunk 加分。 */
+  boostPath?: string;
+  /** 粗召回候选数,默认 COARSE_N。 */
+  coarseN?: number;
+}
+
+/**
+ * 共享检索:全量软加权粗召回 → rerank 精排。返回 rerank 后的完整候选排序
+ * (长度 = 粗召回候选数),调用方自行 slice 到 k。serving 取 top-k,eval 据此算 Recall@k / MRR。
+ */
+export async function searchCorpus(
+  queryText: string,
+  options: SearchOptions = {},
+): Promise<Array<{ chunk: Chunk; score: number }>> {
+  const { boostResource, boostPath, coarseN = COARSE_N } = options;
+  const index = await getCorpusIndex();
+  const coarse = await retrieve(queryText, index, coarseN, boostResource, boostPath);
+  if (coarse.length === 0) return [];
+  const rr = await rerank(
+    queryText,
+    coarse.map((h) => h.chunk.text),
+    coarse.length,
+  );
+  return rr.map((r) => ({ chunk: coarse[r.index]!.chunk, score: r.score }));
 }

@@ -5,10 +5,9 @@ import { config } from 'dotenv';
 config({ override: true });
 import Anthropic from '@anthropic-ai/sdk';
 import { load } from 'js-yaml';
-import { buildIndex, retrieve, type IndexedChunk } from '../retrieval/retrieve';
+import { searchCorpus } from '../retrieval/retrieve';
 import { CORPUS } from '../knowledge/corpus';
 import { inferResource } from '../retrieval/router';
-import { rerank, COARSE_N } from '../retrieval/rerank';
 import { validateResource, type ValidationError } from '../validation/validate';
 
 export const ANSWER_MODEL = 'claude-sonnet-4-6'; // DeepSeek 映射 deepseek-v4-flash
@@ -28,46 +27,6 @@ export function getClient(): Anthropic {
     baseURL: 'https://api.deepseek.com/anthropic',
     apiKey: process.env.DEEPSEEK_API_KEY,
   });
-}
-
-const FALLBACK_RESOURCES = new Set([
-  'Deployment',
-  'StatefulSet',
-  'DaemonSet',
-  'Pod',
-  'Service',
-  'Ingress',
-  'ConfigMap',
-  'Secret',
-  'StorageClass',
-  'PersistentVolumeClaim',
-]);
-
-const indexPromises = new Map<string, Promise<IndexedChunk[]>>();
-
-function chunksForResource(resource?: string): {
-  cacheKey: string;
-  chunks: typeof CORPUS;
-} {
-  if (resource) {
-    const scoped = CORPUS.filter((c) => c.resource === resource);
-    if (scoped.length > 0)
-      return { cacheKey: `resource:${resource}`, chunks: scoped };
-  }
-  const fallback = CORPUS.filter((c) => FALLBACK_RESOURCES.has(c.resource));
-  return {
-    cacheKey: 'fallback:core',
-    chunks: fallback.length > 0 ? fallback : CORPUS.slice(0, 1000),
-  };
-}
-
-function getIndex(resource?: string): Promise<IndexedChunk[]> {
-  const { cacheKey, chunks } = chunksForResource(resource);
-  const existing = indexPromises.get(cacheKey);
-  if (existing) return existing;
-  const next = buildIndex(chunks);
-  indexPromises.set(cacheKey, next);
-  return next;
 }
 
 export interface Hit {
@@ -201,24 +160,13 @@ export async function retrieveContext(
     };
   }
 
-  const index = await getIndex(routed ?? undefined);
   const text = retrievalText(query);
-  const coarse = await retrieve(
-    text,
-    index,
-    COARSE_N,
-    routed ?? undefined,
-    query.fieldPathHint,
-  );
-  const rr = await rerank(
-    text,
-    coarse.map((h) => h.chunk.text),
-    k,
-  );
-  const hits = rr.map((r) => ({
-    chunk: coarse[r.index]!.chunk,
-    score: r.score,
-  }));
+  // 全量软加权检索(无硬过滤),与 eval 共用同一索引与同一段代码。serving 取 top-k。
+  const ranked = await searchCorpus(text, {
+    boostResource: routed ?? undefined,
+    boostPath: query.fieldPathHint,
+  });
+  const hits = ranked.slice(0, k);
   const context = hits
     .map(({ chunk }) => `## ${chunk.title}\n${chunk.text}`)
     .join('\n\n');

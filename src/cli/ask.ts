@@ -1,10 +1,7 @@
 // 迭代0 主流程:检索 → 拼上下文 → 流式作答。
 // 跑通它,你就同时摸到了 RAG 的四个点:切片(corpus)/ 向量库(retrieve)/ 检索(cosine)/ 流式(下面)。
 //
-// 用 Anthropic SDK,但 baseURL 指向 DeepSeek 的 Anthropic 兼容端点(便宜)。
-// 好处:代码保持 Anthropic 形态,以后换回真 Claude 只需改 baseURL + 模型名。
-// embedding 仍用 Voyage(DeepSeek 没有 embedding 接口)。
-//
+
 // 用法: npm run ask -- "reclaimPolicy 能填哪些值?默认是什么?"
 
 import { config } from 'dotenv';
@@ -56,8 +53,15 @@ async function main(): Promise<void> {
     `[2/3] 路由 → ${routed ?? '(未识别)'};粗召回 top-${COARSE_N} → rerank 精排 top-3...`,
   );
   const coarse = await retrieve(question, index, COARSE_N, routed ?? undefined);
-  const reranked = await rerank(question, coarse.map((h) => h.chunk.text), 3);
-  const hits = reranked.map((r) => ({ chunk: coarse[r.index]!.chunk, score: r.score }));
+  const reranked = await rerank(
+    question,
+    coarse.map((h) => h.chunk.text),
+    3,
+  );
+  const hits = reranked.map((r) => ({
+    chunk: coarse[r.index]!.chunk,
+    score: r.score,
+  }));
   for (const h of hits) {
     console.error(`      · ${h.chunk.title}  (rerank ${h.score.toFixed(3)})`);
   }

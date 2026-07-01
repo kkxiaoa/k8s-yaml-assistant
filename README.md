@@ -68,7 +68,9 @@ npm test
 ## 核心架构
 
 ```text
-data/schemas/*.json 或 data/schemas/generated/*.json
+data/schemas/generated/resources/*.json
+data/schemas/generated/definitions/*.json
+data/schemas/curated.json
         ↓
 src/knowledge/schemas.ts
         ↓
@@ -86,26 +88,28 @@ app/ Monaco Web UI
 关键设计:
 
 - schema 是字段事实层,同时服务问答语料和 YAML 校验。
+- `curated.json` 控制当前训练语料范围;不再读取 `data/schemas/*.json` 手写 fixture。
+- `resources/` 保存资源入口 schema,`definitions/` 保存 OpenAPI `$ref` registry,运行时本地解析引用,不请求网络。
 - 问答返回 SSE:先发送 `sources`,再发送答案 `delta`。
 - 检索会结合用户问题、当前资源、光标字段、选中文本和校验错误。
 - 生成和修复通过 agentic loop 执行“生成/修复 → schema 校验 → 再修正”。
 
 ## Schema Ingestion
 
-不要靠手动 import 扩展资源覆盖。项目支持把外部 schema 标准化生成到:
+不要靠手动 import 或根目录 fixture 扩展资源覆盖。项目支持把外部 schema 标准化生成到:
 
 ```text
 data/schemas/generated/
+  resources/
+  definitions/
+  manifest.json
 ```
 
-当该目录没有 generated JSON 时,系统会回退到 `data/schemas/*.json` 中的 fixture。
+系统不再回退到 `data/schemas/*.json` fixture。缺少 generated 产物时会直接失败,应重新运行 ingestion。
 
 示例:
 
 ```bash
-# 从已有 schema 目录生成标准化 SchemaDoc
-npm run ingest:schemas -- --source dir --input data/schemas --out data/schemas/generated
-
 # 从 CRD YAML 生成 SchemaDoc
 npm run ingest:schemas -- --source crd --input examples/my-crd.yaml
 
@@ -114,6 +118,9 @@ npm run ingest:schemas -- --source kubernetes --input openapi.json
 
 # 从集群 OpenAPI 导出的 JSON 生成 SchemaDoc
 npm run ingest:schemas -- --source cluster --input openapi.json
+
+# 从当前 kubeconfig 指向的集群拉取完整 OpenAPI v3 discovery
+npm run ingest:schemas -- --source cluster-discovery --out data/schemas/generated
 ```
 
 标准化后的数据结构:
@@ -129,6 +136,8 @@ interface SchemaDoc {
   source: 'builtin' | 'cluster' | 'crd';
 }
 ```
+
+`resources/*.json` 保留资源 schema 入口,`definitions/*.json` 保留如 `io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta`、`io.k8s.api.core.v1.PodSpec` 这类共享 definition。应用运行时通过本地 registry 解析 `$ref`,避免把通用 schema 复制进每个资源文件。
 
 ## 评估与验证
 

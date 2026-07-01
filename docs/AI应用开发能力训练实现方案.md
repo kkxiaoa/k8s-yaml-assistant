@@ -68,7 +68,7 @@
 
 - **删除 `FIXTURE_SCHEMA_DOCS` 覆盖层**（`schemas.ts` 中 `storageclass / pvc / pv / vsc / vac` 5 个顶层手写 schema 的 import 与覆盖逻辑）。核实结论：这 5 个是玩具时代产物，字段数已**低于** generated（如 PVC fixture 仅 8 个 description vs generated 77 个），当前覆盖逻辑反而把丰富 generated 盖成低质，必须退场。
 - 删除后这 5 个资源**统一从 `generated/*` 流出**，和其它 curated 资源同款，消除“5 个特例”的突兀与质量不一致。
-- **`VolumeAttributesClass` 无 generated 来源**，走 ingestion pipeline 正常生成进 `generated/`，不保留孤立手写文件。生成前它是唯一容忍的临时特例，必须显式标注。
+- **`VolumeAttributesClass`** 集群侧门控默认关、live cluster 不暴露 schema，已改用**官方发布的 OpenAPI v3 spec**(`kubernetes/kubernetes` 仓库 `api/openapi-spec/v3`,与集群同版本 v1.32.7)经 `ingest:schemas` 生成进 `generated/`。注意当前版本 VAC 仍是 `storage.k8s.io/v1beta1`(GA 进 v1 要到 1.34),curated 按 v1beta1 收录。不保留手写 fixture、不留 pendingIngest 占位。
 - 删 fixture 必须与 §2.3 重建 eval set **同步**：旧 13 条用例的 `expectedChunkIds` 源自 fixture 切片，换 generated 后 chunk id 会变，否则 eval 失配。
 - 同时清理 `src/cli/gen.ts` 顶部 `submit_storageclass` / `validateStorageClass` 旧注释等单资源时代遗留口径。
 

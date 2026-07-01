@@ -1,0 +1,14 @@
+{
+  "description": "VolumeNodeAffinity defines constraints that limit what nodes this volume can be accessed from.",
+  "type": "object",
+  "properties": {
+    "required": {
+      "description": "required specifies hard node constraints that must be met.",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/io.k8s.api.core.v1.NodeSelector"
+        }
+      ]
+    }
+  }
+}

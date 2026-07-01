@@ -6,8 +6,11 @@ import { loadAll } from 'js-yaml';
 interface SchemaNode {
   $ref?: string;
   allOf?: SchemaNode[];
+  anyOf?: SchemaNode[];
+  oneOf?: SchemaNode[];
   type?: string;
   description?: string;
+  default?: unknown;
   enum?: unknown[];
   properties?: Record<string, SchemaNode>;
   items?: SchemaNode;
@@ -23,6 +26,12 @@ interface SchemaDoc {
   kind: string;
   schema: SchemaNode;
   source: 'builtin' | 'cluster' | 'crd';
+  definitionName?: string;
+}
+
+interface IngestBundle {
+  docs: SchemaDoc[];
+  definitions: Record<string, SchemaNode>;
 }
 
 interface CrdVersion {
@@ -41,9 +50,8 @@ interface CrdManifest {
   };
 }
 
-interface OpenApiSchema {
+interface OpenApiSchema extends SchemaNode {
   'x-kubernetes-group-version-kind'?: Array<{ group?: string; version?: string; kind?: string }>;
-  [key: string]: unknown;
 }
 
 interface OpenApiDoc {
@@ -69,20 +77,44 @@ function apiVersionOf(group: string | undefined, version: string): string {
   return group ? `${group}/${version}` : version;
 }
 
-function fileNameOf(doc: SchemaDoc): string {
+function resourceFileNameOf(doc: SchemaDoc): string {
   const group = doc.group || 'core';
   return `${group}.${doc.version ?? doc.apiVersion}.${doc.kind}.json`.replace(/\//g, '.');
 }
 
-function writeDocs(docs: SchemaDoc[], outDir: string): void {
-  mkdirSync(outDir, { recursive: true });
-  for (const doc of docs) {
-    writeFileSync(join(outDir, fileNameOf(doc)), `${JSON.stringify(doc, null, 2)}\n`);
-  }
+function definitionFileNameOf(name: string): string {
+  return `${name}.json`.replace(/\//g, '.');
 }
 
-function fromSchemaDir(input: string): SchemaDoc[] {
-  return readdirSync(input)
+function writeBundle(bundle: IngestBundle, outDir: string): void {
+  const resourcesDir = join(outDir, 'resources');
+  const definitionsDir = join(outDir, 'definitions');
+  mkdirSync(resourcesDir, { recursive: true });
+  mkdirSync(definitionsDir, { recursive: true });
+
+  for (const doc of bundle.docs) {
+    writeFileSync(join(resourcesDir, resourceFileNameOf(doc)), `${JSON.stringify(doc, null, 2)}\n`);
+  }
+  for (const [name, schema] of Object.entries(bundle.definitions).sort(([a], [b]) => a.localeCompare(b))) {
+    writeFileSync(join(definitionsDir, definitionFileNameOf(name)), `${JSON.stringify(schema, null, 2)}\n`);
+  }
+  writeFileSync(
+    join(outDir, 'manifest.json'),
+    `${JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        resources: bundle.docs.length,
+        definitions: Object.keys(bundle.definitions).length,
+        layout: 'resources+definitions',
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
+function fromSchemaDir(input: string): IngestBundle {
+  const docs = readdirSync(input)
     .filter((file) => file.endsWith('.json'))
     .map((file) => {
       const raw = readFileSync(join(input, file), 'utf8');
@@ -101,11 +133,12 @@ function fromSchemaDir(input: string): SchemaDoc[] {
         version,
         schema: parsed.schema,
         source: parsed.source ?? 'builtin',
-      };
+      } satisfies SchemaDoc;
     });
+  return { docs, definitions: {} };
 }
 
-function fromCrdFile(input: string): SchemaDoc[] {
+function fromCrdFile(input: string): IngestBundle {
   const text = readFileSync(input, 'utf8');
   const manifests = loadAll(text).filter(Boolean) as CrdManifest[];
   const docs: SchemaDoc[] = [];
@@ -131,10 +164,10 @@ function fromCrdFile(input: string): SchemaDoc[] {
     }
   }
 
-  return docs;
+  return { docs, definitions: {} };
 }
 
-function fromOpenApiFile(input: string, source: 'builtin' | 'cluster'): SchemaDoc[] {
+function fromOpenApiFile(input: string, source: 'builtin' | 'cluster'): IngestBundle {
   const openapi = JSON.parse(readFileSync(input, 'utf8')) as OpenApiDoc;
   return fromOpenApiDoc(openapi, source);
 }
@@ -150,114 +183,76 @@ function isGroupVersionPath(path: string): boolean {
   return path === 'api/v1' || /^apis\/[^/]+\/[^/]+$/.test(path);
 }
 
-function fromClusterDiscovery(): SchemaDoc[] {
+function mergeBundles(target: IngestBundle, next: IngestBundle): void {
+  target.docs.push(...next.docs);
+  Object.assign(target.definitions, next.definitions);
+}
+
+function fromClusterDiscovery(): IngestBundle {
   const discovery = JSON.parse(rawKubectl('/openapi/v3')) as OpenApiV3Discovery;
   const entries = Object.entries(discovery.paths ?? {})
     .filter(([path, item]) => isGroupVersionPath(path) && item.serverRelativeURL)
     .sort(([a], [b]) => a.localeCompare(b));
 
-  const docs: SchemaDoc[] = [];
+  const bundle: IngestBundle = { docs: [], definitions: {} };
   for (const [path, item] of entries) {
     const url = item.serverRelativeURL!;
     const openapi = JSON.parse(rawKubectl(url)) as OpenApiDoc;
-    const before = docs.length;
-    docs.push(...fromOpenApiDoc(openapi, 'cluster'));
-    console.error(`Fetched ${path}: ${docs.length - before} schema doc(s)`);
+    const before = bundle.docs.length;
+    mergeBundles(bundle, fromOpenApiDoc(openapi, 'cluster'));
+    console.error(`Fetched ${path}: ${bundle.docs.length - before} schema doc(s)`);
   }
-  return docs;
+  return bundle;
 }
 
-function fromOpenApiDoc(openapi: OpenApiDoc, source: 'builtin' | 'cluster'): SchemaDoc[] {
+function fromOpenApiDoc(openapi: OpenApiDoc, source: 'builtin' | 'cluster'): IngestBundle {
   const schemas = openapi.components?.schemas ?? {};
   const docs: SchemaDoc[] = [];
 
-  for (const schema of Object.values(schemas)) {
+  for (const [definitionName, schema] of Object.entries(schemas)) {
     for (const gvk of schema['x-kubernetes-group-version-kind'] ?? []) {
       if (!gvk.version || !gvk.kind) continue;
-      const resolved = resolveSchema(schema as SchemaNode, schemas, new Set());
       docs.push({
         resource: gvk.kind,
         kind: gvk.kind,
         apiVersion: apiVersionOf(gvk.group, gvk.version),
         group: gvk.group || undefined,
         version: gvk.version,
-        schema: resolved,
+        schema,
         source,
+        definitionName,
       });
     }
   }
 
-  return docs;
-}
-
-function refName(ref: string): string | null {
-  const prefix = '#/components/schemas/';
-  return ref.startsWith(prefix) ? ref.slice(prefix.length) : null;
-}
-
-function mergeSchemas(items: SchemaNode[]): SchemaNode {
-  const merged: SchemaNode = {};
-  for (const item of items) {
-    Object.assign(merged, item);
-    if (item.properties) merged.properties = { ...(merged.properties ?? {}), ...item.properties };
-    if (item.required) merged.required = Array.from(new Set([...(merged.required ?? []), ...item.required]));
-    if (!merged.description && item.description) merged.description = item.description;
-    if (!merged.type && item.type) merged.type = item.type;
-  }
-  return merged;
-}
-
-function resolveSchema(
-  node: SchemaNode,
-  schemas: Record<string, OpenApiSchema>,
-  seen: Set<string>,
-): SchemaNode {
-  if (node.$ref) {
-    const name = refName(node.$ref);
-    if (!name || seen.has(name)) return { description: node.description, type: node.type };
-    const target = schemas[name] as SchemaNode | undefined;
-    if (!target) return { description: node.description, type: node.type };
-    return resolveSchema(target, schemas, new Set([...seen, name]));
-  }
-
-  const base = node.allOf
-    ? mergeSchemas(node.allOf.map((item) => resolveSchema(item, schemas, seen)))
-    : { ...node };
-  delete base.$ref;
-  delete base.allOf;
-
-  if (base.properties) {
-    base.properties = Object.fromEntries(
-      Object.entries(base.properties).map(([key, child]) => [key, resolveSchema(child, schemas, seen)]),
-    );
-  }
-  if (base.items) base.items = resolveSchema(base.items, schemas, seen);
-  return base;
+  return { docs, definitions: schemas as Record<string, SchemaNode> };
 }
 
 function main(): void {
   const source = requireArg('source');
   const outDir = arg('out') ?? join('data', 'schemas', 'generated');
   const input = arg('input') ?? process.argv[process.argv.length - 1];
-  let docs: SchemaDoc[];
+  let bundle: IngestBundle;
 
   if (source === 'dir') {
-    docs = fromSchemaDir(requireArg('input'));
+    bundle = fromSchemaDir(requireArg('input'));
   } else if (source === 'crd') {
-    docs = fromCrdFile(input);
+    bundle = fromCrdFile(input);
   } else if (source === 'kubernetes') {
-    docs = fromOpenApiFile(requireArg('input'), 'builtin');
+    bundle = fromOpenApiFile(requireArg('input'), 'builtin');
   } else if (source === 'cluster') {
-    docs = fromOpenApiFile(requireArg('input'), 'cluster');
+    bundle = fromOpenApiFile(requireArg('input'), 'cluster');
   } else if (source === 'cluster-discovery') {
-    docs = fromClusterDiscovery();
+    bundle = fromClusterDiscovery();
   } else {
     throw new Error(`Unsupported --source ${source}. Use dir, crd, kubernetes, cluster, or cluster-discovery.`);
   }
 
-  if (docs.length === 0) throw new Error(`No schema docs generated from ${input}`);
-  writeDocs(docs, outDir);
-  console.error(`Generated ${docs.length} schema doc(s) into ${outDir}`);
+  if (bundle.docs.length === 0) throw new Error(`No schema docs generated from ${input}`);
+  writeBundle(bundle, outDir);
+  console.error(
+    `Generated ${bundle.docs.length} schema doc(s) and ${Object.keys(bundle.definitions).length} definition(s) into ${outDir}`,
+  );
 }
 
 main();

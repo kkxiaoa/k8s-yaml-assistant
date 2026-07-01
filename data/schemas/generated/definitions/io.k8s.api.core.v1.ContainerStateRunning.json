@@ -1,0 +1,14 @@
+{
+  "description": "ContainerStateRunning is a running state of a container.",
+  "type": "object",
+  "properties": {
+    "startedAt": {
+      "description": "Time at which the container was last (re-)started",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
+        }
+      ]
+    }
+  }
+}
