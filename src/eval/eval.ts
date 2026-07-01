@@ -1,11 +1,3 @@
-// 迭代 3 路线(测量 → 逐个优化,每步都重跑 eval 对比)
-
-// ① 评估基线(Recall@k / MRR)        ← 刚建好,先跑出基线数字 ✅
-// ② 元数据过滤(按 resource 类型)     ← 干掉 PVC/快照跨域串味
-// ③ Hybrid(向量 + 关键词 BM25)       ← 字段名精确匹配兜底
-// ④ Rerank(粗召回→精排)             ← 解决近义项抢位,提升 MRR
-// ⑤ 结构化切片 + 真向量库(pgvector)  ← 语料规模化
-
 // 检索评估。迭代3:一次跑两遍 —— ①无过滤基线 vs ②元数据过滤,直接对比指标。
 // 只用 embedding(2 次批量请求:语料 + 所有问题),不调作答 LLM,便宜且避开 Voyage 限流。
 //
@@ -22,7 +14,7 @@ import { embed } from '../retrieval/embeddings';
 import { CORPUS } from '../knowledge/corpus';
 import { EVAL_SET } from './eval-set';
 import { inferResource, RESOURCE_BOOST } from '../retrieval/router';
-import { rerank, COARSE_N } from '../retrieval/rerank';
+import { getCorpusIndex, searchCorpus } from '../retrieval/retrieve';
 
 type Mode = 'none' | 'oracle' | 'auto';
 
@@ -77,9 +69,10 @@ function evaluate(
       id: c.id,
       resource: c.resource,
       // ② 软加权:命中路由资源的 chunk 加分,但保留所有资源(误路由不会删掉正确答案)
-      score: cosine(qv, corpusEmb[j]!) + (filterRes && c.resource === filterRes ? RESOURCE_BOOST : 0),
-    }))
-      .sort((a, b) => b.score - a.score);
+      score:
+        cosine(qv, corpusEmb[j]!) +
+        (filterRes && c.resource === filterRes ? RESOURCE_BOOST : 0),
+    })).sort((a, b) => b.score - a.score);
 
     const topK = ranked.slice(0, k);
     const found = ec.expectedChunkIds.filter((id) =>
@@ -107,44 +100,39 @@ function evaluate(
   };
 }
 
-/** ④ rerank:向量粗召回 top-N → Voyage rerank 精排。逐条调用 rerank API(每问一次)。 */
-async function evaluateRerank(
-  queryEmb: number[][],
-  corpusEmb: number[][],
-  k: number,
-  coarseN: number,
-): Promise<Result> {
+/**
+ * ④ serving 路径(== 线上):走共享 searchCorpus —— 全量软加权粗召回 → rerank。
+ * 关键字路由(auto)决定软加权资源,和线上 retrieveContext 完全同一段代码、同一份索引。
+ * 这条才是预测线上行为的官方指标;①②③ 是诊断对照(同一索引的纯向量分析)。
+ */
+async function evaluateServing(k: number): Promise<Result> {
   let recallSum = 0;
   let mrrSum = 0;
   const lines: string[] = [];
 
-  for (let i = 0; i < EVAL_SET.length; i++) {
-    const ec = EVAL_SET[i]!;
-    const qv = queryEmb[i]!;
+  for (const ec of EVAL_SET) {
+    const routed = inferResource(ec.question) ?? undefined;
+    const ranked = await searchCorpus(ec.question, { boostResource: routed });
+    const ids = ranked.map((r) => r.chunk.id);
 
-    // 粗召回:向量 top-N(不过滤,隔离出 rerank 的纯贡献)
-    const coarse = CORPUS.map((c, j) => ({ id: c.id, text: c.text, score: cosine(qv, corpusEmb[j]!) }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, coarseN);
-
-    // 精排:rerank 全部候选(top_k=coarseN,拿到完整重排序才好算 MRR)
-    const rr = await rerank(ec.question, coarse.map((c) => c.text), coarseN);
-    const rankedIds = rr.map((r) => coarse[r.index]!.id);
-
-    const topK = rankedIds.slice(0, k);
+    const topK = ids.slice(0, k);
     const found = ec.expectedChunkIds.filter((id) => topK.includes(id));
     const recall = found.length / ec.expectedChunkIds.length;
-    const firstIdx = rankedIds.findIndex((id) => ec.expectedChunkIds.includes(id));
+    const firstIdx = ids.findIndex((id) => ec.expectedChunkIds.includes(id));
     const rank = firstIdx >= 0 ? firstIdx + 1 : 0;
 
     recallSum += recall;
     mrrSum += rank > 0 ? 1 / rank : 0;
     lines.push(
-      `${recall === 1 ? '✓' : '✗'} recall=${found.length}/${ec.expectedChunkIds.length} rank=${rank || '未召回'} [rerank] | ${ec.question}`,
+      `${recall === 1 ? '✓' : '✗'} recall=${found.length}/${ec.expectedChunkIds.length} rank=${rank || '未召回'} [→${routed ?? '全量'}] | ${ec.question}`,
     );
   }
 
-  return { recall: recallSum / EVAL_SET.length, mrr: mrrSum / EVAL_SET.length, lines };
+  return {
+    recall: recallSum / EVAL_SET.length,
+    mrr: mrrSum / EVAL_SET.length,
+    lines,
+  };
 }
 
 async function main(): Promise<void> {
@@ -153,10 +141,9 @@ async function main(): Promise<void> {
     `评估(k=${k},语料 ${CORPUS.length} 段,标注 ${EVAL_SET.length} 条)\n`,
   );
 
-  const corpusEmb = await embed(
-    CORPUS.map((c) => c.text),
-    'document',
-  );
+  // 共用线上同一份索引(getCorpusIndex):诊断模式直接读其 embedding,不再单独重嵌全量。
+  const index = await getCorpusIndex();
+  const corpusEmb = index.map((c) => c.embedding);
   const queryEmb = await embed(
     EVAL_SET.map((c) => c.question),
     'query',
@@ -165,8 +152,10 @@ async function main(): Promise<void> {
   const none = evaluate(queryEmb, corpusEmb, k, 'none');
   const oracle = evaluate(queryEmb, corpusEmb, k, 'oracle');
   const auto = evaluate(queryEmb, corpusEmb, k, 'auto');
-  console.error(`(④ rerank:逐条调用 Voyage rerank,共 ${EVAL_SET.length} 次,稍候...)\n`);
-  const reranked = await evaluateRerank(queryEmb, corpusEmb, k, COARSE_N);
+  console.error(
+    `(④ serving 路径:逐条走 searchCorpus(粗召回+rerank),共 ${EVAL_SET.length} 次,稍候...)\n`,
+  );
+  const reranked = await evaluateServing(k);
 
   console.error('━━━━━━ ① 无过滤基线 ━━━━━━');
   console.error(none.lines.join('\n'));
@@ -180,33 +169,35 @@ async function main(): Promise<void> {
     `Recall@${k} = ${(oracle.recall * 100).toFixed(1)}%   MRR = ${oracle.mrr.toFixed(3)}\n`,
   );
 
-  console.error('━━━━━━ ③ auto 路由(关键词,真实运行时)━━━━━━');
+  console.error('━━━━━━ ③ auto 路由(诊断:纯向量软加权,无 rerank)━━━━━━');
   console.error(auto.lines.join('\n'));
   console.error(
     `Recall@${k} = ${(auto.recall * 100).toFixed(1)}%   MRR = ${auto.mrr.toFixed(3)}\n`,
   );
 
-  console.error(`━━━━━━ ④ rerank(向量粗召回 top-${COARSE_N} → 精排)━━━━━━`);
+  console.error(
+    `━━━━━━ ④ serving 路径(== 线上:全量软加权粗召回 → rerank)━━━━━━`,
+  );
   console.error(reranked.lines.join('\n'));
   console.error(
     `Recall@${k} = ${(reranked.recall * 100).toFixed(1)}%   MRR = ${reranked.mrr.toFixed(3)}\n`,
   );
 
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
-  console.error('━━━━━━ 汇总对比 ━━━━━━');
+  console.error('━━━━━━ 汇总 对比 ━━━━━━');
   console.error('模式            Recall   MRR');
   console.error(`① 无过滤        ${pct(none.recall)}   ${none.mrr.toFixed(3)}`);
   console.error(
     `② oracle 过滤   ${pct(oracle.recall)}   ${oracle.mrr.toFixed(3)}   ← 理想上限(路由全对)`,
   );
   console.error(
-    `③ auto 路由     ${pct(auto.recall)}   ${auto.mrr.toFixed(3)}   ← 关键词路由实际`,
+    `③ auto 路由     ${pct(auto.recall)}   ${auto.mrr.toFixed(3)}   ← 诊断:纯向量软加权(无 rerank)`,
   );
   console.error(
-    `④ rerank       ${pct(reranked.recall)}   ${reranked.mrr.toFixed(3)}   ← 粗召回+精排(不靠路由)`,
+    `④ serving 路径  ${pct(reranked.recall)}   ${reranked.mrr.toFixed(3)}   ← == 线上(searchCorpus,官方指标)`,
   );
   console.error(
-    '\n看点:④ 能不能把"必填字段"那条多 chunk 召回救起来(① 里它一直 recall=1/2)。',
+    '\n说明:①②③ 是同一索引上的诊断对照;④ 与线上 retrieveContext 走同一段 searchCorpus 代码,是预测线上的官方指标。',
   );
 }
 

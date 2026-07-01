@@ -31,12 +31,14 @@ app/             Next.js 前端(分层)
   api/           route handlers(/api/ask 流式, /api/check)
   ui/            UI 层:展示组件(ValidatePanel/AskPanel/StatusBar)+ styles.ts
   lib/           前端逻辑/工具(yaml.ts:detectResource/buildMarkers)
-data/schemas/    真实 K8s OpenAPI schema(知识源)
+data/schemas/    generated registry + curated 白名单(知识源)
 ```
 
 路径别名:`@/* → src/*`(`app/api` 用 `@/server/pipeline` 访问后端,避免 `../../../`)。
 
-数据流:`data/schemas/*.json → knowledge/schema-corpus(schema→chunk)→ knowledge/corpus
+数据流:`data/schemas/generated/{resources,definitions} + data/schemas/curated.json
+→ knowledge/schemas(本地 ref registry + curated 加载)
+→ knowledge/schema-corpus(schema→chunk)→ knowledge/corpus
 → retrieval/retrieve(向量+余弦)+ router(软路由)+ rerank(精排)→ server/pipeline → CLI / Web`
 
 ## 设计基因:三大支柱(意图不可预知 → 押注这三个)
@@ -55,7 +57,7 @@ data/schemas/    真实 K8s OpenAPI schema(知识源)
 - **embedding / rerank** 用 Voyage(DeepSeek 无 embedding 接口)。
 - **前端分层(Next.js 最佳实践)**:`app/` 只放路由(page/layout/route);**`app/ui/` = UI 层**(展示组件,纯展示、状态与副作用都在 `page.tsx` 这个薄组合根里);`app/lib/` = 前端逻辑/工具。跨层访问后端用 `@/` 别名(`@/server/pipeline`),不写 `../../../`。新建展示组件放 `app/ui/`,新建前端纯逻辑放 `app/lib/`。**与 `/api/*` 的通信封装在 `app/lib/api.ts`,组件/page 不直接 `fetch`**(page 只做状态编排)。
 - **前端栈**:Tailwind v4(`@theme` token + `app/globals.css`)+ IBM Plex Mono/Sans(next/font),蓝图 dev-console 风格;资源感知(从 YAML 解析 kind/apiVersion)+ Monaco 内联报错标记(path→行)。UI 用 `frontend-design` 技能。
-- **知识库 schema 驱动**:资源/CRD 应通过 ingestion pipeline 进入 `data/schemas/generated/`,不要靠手工 import 扩覆盖。
+- **知识库 schema 驱动**:资源/CRD 应通过 ingestion pipeline 进入 `data/schemas/generated/{resources,definitions}`,不要靠手工 import 或 `data/schemas/*.json` fixture 扩覆盖。`resources` 存资源入口,`definitions` 存 OpenAPI `$ref` registry,运行时本地解析引用。
 - **单一检索路径(eval == serving)**:CLI / Web / eval 共用同一段 `retrieve`(**全量软加权,无 `chunksForResource` 硬过滤**)+ 同一份索引。语料经 `data/schemas/curated.json` 白名单收敛(~20-40 个核心 kind),不全量遍历 `generated/*`。改检索时**别把硬过滤分支引回来**(违背支柱③"不赌完美路由")。理由与依赖链见实现方案 §4.1 / §4.3。
 - **测量驱动**:改了切片/检索/路由/模型,必须与 baseline 对比。当前需要优先补 `eval:compare` 和 `data/eval/baseline.json`,不能只看单次指标。持久化索引必须在"语料收敛 + 检索路径合一"之后做(顺序见 §4.3),否则把分裂索引烤进磁盘。
 

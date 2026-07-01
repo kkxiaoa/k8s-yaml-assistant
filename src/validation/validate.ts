@@ -3,7 +3,7 @@
 // 同一份 data/schemas/ 既当问答知识库(schema-corpus)又当校验规则。
 // path 字段给 Monaco 编辑器定位高亮用。
 
-import { getSchemaForKind, type SchemaNode } from '../knowledge/schemas';
+import { getSchemaForKind, resolveSchemaNode, type SchemaNode } from '../knowledge/schemas';
 
 export interface ValidationError {
   /** 出错字段路径,如 'spec.accessModes';给编辑器定位用 */
@@ -48,18 +48,19 @@ function typeMatches(schemaType: string | undefined, value: unknown): boolean {
 const enumStr = (vals: unknown[]): string => vals.map((v) => JSON.stringify(v)).join(' / ');
 
 function validateNode(value: unknown, node: SchemaNode, path: string, topLevel: boolean, errors: ValidationError[]): void {
+  const resolved = resolveSchemaNode(node);
   // 1. 类型
-  if (!typeMatches(node.type, value)) {
-    errors.push({ path, message: `类型应为 ${node.type},当前为 ${jsTypeName(value)}` });
+  if (!typeMatches(resolved.type, value)) {
+    errors.push({ path, message: `类型应为 ${resolved.type},当前为 ${jsTypeName(value)}` });
     return; // 类型都不对,不再往下查
   }
   // 2. 标量枚举
-  if (node.enum && !node.enum.includes(value as never)) {
-    errors.push({ path, message: `只能是 ${enumStr(node.enum)},当前为 ${JSON.stringify(value)}` });
+  if (resolved.enum && !resolved.enum.includes(value as never)) {
+    errors.push({ path, message: `只能是 ${enumStr(resolved.enum)},当前为 ${JSON.stringify(value)}` });
   }
-  // 3. 数组项枚举
-  const itemEnum = node.items?.enum;
-  if (node.type === 'array' && Array.isArray(value) && itemEnum) {
+  // 3. 数组项枚举(items 懒解析:再解析一层拿到元素的 enum)
+  const itemEnum = resolved.items ? resolveSchemaNode(resolved.items).enum : undefined;
+  if (resolved.type === 'array' && Array.isArray(value) && itemEnum) {
     value.forEach((item, i) => {
       if (!itemEnum.includes(item as never)) {
         errors.push({ path: `${path}[${i}]`, message: `只能是 ${enumStr(itemEnum)},当前为 ${JSON.stringify(item)}` });
@@ -67,9 +68,9 @@ function validateNode(value: unknown, node: SchemaNode, path: string, topLevel: 
     });
   }
   // 4. 对象:required + 逐字段 + 未知字段(仅当 schema 定义了 properties 才查,否则视为不透明)
-  if (node.properties && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+  if (resolved.properties && value !== null && typeof value === 'object' && !Array.isArray(value)) {
     const obj = value as Record<string, unknown>;
-    for (const req of node.required ?? []) {
+    for (const req of resolved.required ?? []) {
       const v = obj[req];
       if (v === undefined || v === null || v === '') {
         errors.push({ path: path ? `${path}.${req}` : req, message: `${req} 必填` });
@@ -77,7 +78,7 @@ function validateNode(value: unknown, node: SchemaNode, path: string, topLevel: 
     }
     for (const [key, child] of Object.entries(obj)) {
       const childPath = path ? `${path}.${key}` : key;
-      const childSchema = node.properties[key];
+      const childSchema = resolved.properties[key];
       if (childSchema) {
         validateNode(child, childSchema, childPath, false, errors);
       } else if (!(topLevel && TOP_LEVEL_BUILTINS.has(key))) {
@@ -104,7 +105,7 @@ export function validateResource(parsed: unknown): ValidationError[] {
   }
   const doc = getSchemaForKind(kind);
   if (!doc) {
-    return [{ path: 'kind', message: `未收录 "${kind}" 的 schema,无法校验(可往 data/schemas/ 添加)` }];
+    return [{ path: 'kind', message: `未收录 "${kind}" 的 schema,无法校验(请通过 ingest 生成到 data/schemas/generated 并加入 curated.json)` }];
   }
 
   const errors: ValidationError[] = [];
@@ -114,7 +115,7 @@ export function validateResource(parsed: unknown): ValidationError[] {
     errors.push({ path: 'apiVersion', message: `${kind} 的 apiVersion 应为 "${doc.apiVersion}",当前为 ${JSON.stringify(obj.apiVersion)}` });
   }
 
-  // 通用 metadata.name(所有资源共有,schema 未展开 metadata)
+  // metadata.name 是核心资源身份字段,即使 schema 未完整声明也要显式校验。
   const metadata = obj.metadata && typeof obj.metadata === 'object' ? (obj.metadata as Record<string, unknown>) : {};
   const name = metadata.name;
   if (typeof name !== 'string' || name.length === 0) {

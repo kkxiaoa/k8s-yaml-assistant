@@ -1,0 +1,33 @@
+{
+  "description": "路线 A 精选语料白名单。schemas.ts 仅加载 builtin/crd 列出的资源构建 CORPUS,而不是全量遍历 generated/*。按 apiVersion + kind 精确选取,消歧同名资源(如 core/v1 Service vs knative Service)。",
+  "matchBy": "`${apiVersion}/${kind}` 必须与 generated 文档完全一致",
+  "builtin": [
+    { "kind": "Pod", "apiVersion": "v1" },
+    { "kind": "Service", "apiVersion": "v1" },
+    { "kind": "Endpoints", "apiVersion": "v1" },
+    { "kind": "ConfigMap", "apiVersion": "v1" },
+    { "kind": "Secret", "apiVersion": "v1" },
+    { "kind": "ServiceAccount", "apiVersion": "v1" },
+    { "kind": "ResourceQuota", "apiVersion": "v1" },
+    { "kind": "LimitRange", "apiVersion": "v1" },
+    { "kind": "PersistentVolumeClaim", "apiVersion": "v1" },
+    { "kind": "PersistentVolume", "apiVersion": "v1" },
+    { "kind": "Deployment", "apiVersion": "apps/v1" },
+    { "kind": "StatefulSet", "apiVersion": "apps/v1" },
+    { "kind": "DaemonSet", "apiVersion": "apps/v1" },
+    { "kind": "Job", "apiVersion": "batch/v1" },
+    { "kind": "CronJob", "apiVersion": "batch/v1" },
+    { "kind": "HorizontalPodAutoscaler", "apiVersion": "autoscaling/v2" },
+    { "kind": "PodDisruptionBudget", "apiVersion": "policy/v1" },
+    { "kind": "Ingress", "apiVersion": "networking.k8s.io/v1" },
+    { "kind": "NetworkPolicy", "apiVersion": "networking.k8s.io/v1" },
+    { "kind": "Role", "apiVersion": "rbac.authorization.k8s.io/v1" },
+    { "kind": "RoleBinding", "apiVersion": "rbac.authorization.k8s.io/v1" },
+    { "kind": "ClusterRole", "apiVersion": "rbac.authorization.k8s.io/v1" },
+    { "kind": "ClusterRoleBinding", "apiVersion": "rbac.authorization.k8s.io/v1" },
+    { "kind": "StorageClass", "apiVersion": "storage.k8s.io/v1" },
+    { "kind": "VolumeSnapshotClass", "apiVersion": "snapshot.storage.k8s.io/v1" },
+    { "kind": "VolumeAttributesClass", "apiVersion": "storage.k8s.io/v1beta1" }
+  ],
+  "crd": []
+}

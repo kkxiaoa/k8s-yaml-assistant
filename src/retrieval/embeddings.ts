@@ -2,7 +2,9 @@
 // 故意只暴露一个 embed() 函数,方便迭代3 换成别的提供商或本地模型而不动其他代码。
 
 const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
-const MODEL = 'voyage-3';
+/** 当前 embedding 模型名。索引 indexHash 依赖它:换模型即让旧索引失效。 */
+export const EMBEDDING_MODEL = 'voyage-3';
+const MODEL = EMBEDDING_MODEL;
 const MAX_BATCH_SIZE = 1000;
 
 interface VoyageResponse {

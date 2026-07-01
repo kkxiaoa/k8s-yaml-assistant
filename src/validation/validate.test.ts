@@ -65,7 +65,7 @@ check('provisioner 缺失(required)', () => {
 });
 
 check('reclaimPolicy 非法枚举', () => {
-  const e = validateResource({ ...VALID_SC, reclaimPolicy: 'Recycle' });
+  const e = validateResource({ ...VALID_SC, reclaimPolicy: 'Archive' });
   assert.ok(has(e, 'reclaimPolicy'));
 });
 

@@ -1,0 +1,23 @@
+{
+  "description": "IngressServiceBackend references a Kubernetes Service as a Backend.",
+  "type": "object",
+  "required": [
+    "name"
+  ],
+  "properties": {
+    "name": {
+      "description": "name is the referenced service. The service must exist in the same namespace as the Ingress object.",
+      "type": "string",
+      "default": ""
+    },
+    "port": {
+      "description": "port of the referenced service. A port name or port number is required for a IngressServiceBackend.",
+      "default": {},
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/io.k8s.api.networking.v1.ServiceBackendPort"
+        }
+      ]
+    }
+  }
+}

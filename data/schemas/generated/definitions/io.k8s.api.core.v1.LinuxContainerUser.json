@@ -1,0 +1,32 @@
+{
+  "description": "LinuxContainerUser represents user identity information in Linux containers",
+  "type": "object",
+  "required": [
+    "uid",
+    "gid"
+  ],
+  "properties": {
+    "gid": {
+      "description": "GID is the primary gid initially attached to the first process in the container",
+      "type": "integer",
+      "format": "int64",
+      "default": 0
+    },
+    "supplementalGroups": {
+      "description": "SupplementalGroups are the supplemental groups initially attached to the first process in the container",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "int64",
+        "default": 0
+      },
+      "x-kubernetes-list-type": "atomic"
+    },
+    "uid": {
+      "description": "UID is the primary uid initially attached to the first process in the container",
+      "type": "integer",
+      "format": "int64",
+      "default": 0
+    }
+  }
+}

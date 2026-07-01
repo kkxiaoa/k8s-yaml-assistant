@@ -18,7 +18,7 @@ export const EVAL_SET: EvalCase[] = [
   { question: 'PVC 的访问模式有哪些?', expectedChunkIds: ['PersistentVolumeClaim::spec.accessModes'], resource: 'PersistentVolumeClaim' },
   { question: 'PV 怎么声明访问模式?', expectedChunkIds: ['PersistentVolume::spec.accessModes'], resource: 'PersistentVolume' },
 
-  // 三种"驱动"互相干扰
+  // 驱动字段
   { question: '快照用哪个字段指定 CSI 驱动?', expectedChunkIds: ['VolumeSnapshotClass::driver'], resource: 'VolumeSnapshotClass' },
   { question: 'VolumeAttributesClass 用哪个字段指定驱动?', expectedChunkIds: ['VolumeAttributesClass::driverName'], resource: 'VolumeAttributesClass' },
 
