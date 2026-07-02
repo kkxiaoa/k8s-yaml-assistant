@@ -10,11 +10,14 @@
 
 import { config } from 'dotenv';
 config({ override: true });
-import { embed } from '../retrieval/embeddings';
+import { embed, EMBEDDING_MODEL } from '../retrieval/embeddings';
 import { CORPUS } from '../knowledge/corpus';
 import { EVAL_SET } from './eval-set';
 import { inferResource, RESOURCE_BOOST } from '../retrieval/router';
 import { getCorpusIndex, searchCorpus } from '../retrieval/retrieve';
+import { RERANK_MODEL } from '../retrieval/rerank';
+import { computeCorpusHash, computeIndexHash } from '../retrieval/index-store';
+import { writeRun, type EvalRun } from './run-store';
 
 type Mode = 'none' | 'oracle' | 'auto';
 
@@ -152,36 +155,7 @@ async function main(): Promise<void> {
   const none = evaluate(queryEmb, corpusEmb, k, 'none');
   const oracle = evaluate(queryEmb, corpusEmb, k, 'oracle');
   const auto = evaluate(queryEmb, corpusEmb, k, 'auto');
-  console.error(
-    `(④ serving 路径:逐条走 searchCorpus(粗召回+rerank),共 ${EVAL_SET.length} 次,稍候...)\n`,
-  );
   const reranked = await evaluateServing(k);
-
-  console.error('━━━━━━ ① 无过滤基线 ━━━━━━');
-  console.error(none.lines.join('\n'));
-  console.error(
-    `Recall@${k} = ${(none.recall * 100).toFixed(1)}%   MRR = ${none.mrr.toFixed(3)}\n`,
-  );
-
-  console.error('━━━━━━ ② oracle 过滤(标注 resource,理想上限)━━━━━━');
-  console.error(oracle.lines.join('\n'));
-  console.error(
-    `Recall@${k} = ${(oracle.recall * 100).toFixed(1)}%   MRR = ${oracle.mrr.toFixed(3)}\n`,
-  );
-
-  console.error('━━━━━━ ③ auto 路由(诊断:纯向量软加权,无 rerank)━━━━━━');
-  console.error(auto.lines.join('\n'));
-  console.error(
-    `Recall@${k} = ${(auto.recall * 100).toFixed(1)}%   MRR = ${auto.mrr.toFixed(3)}\n`,
-  );
-
-  console.error(
-    `━━━━━━ ④ serving 路径(== 线上:全量软加权粗召回 → rerank)━━━━━━`,
-  );
-  console.error(reranked.lines.join('\n'));
-  console.error(
-    `Recall@${k} = ${(reranked.recall * 100).toFixed(1)}%   MRR = ${reranked.mrr.toFixed(3)}\n`,
-  );
 
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
   console.error('━━━━━━ 汇总 对比 ━━━━━━');
@@ -198,6 +172,33 @@ async function main(): Promise<void> {
   );
   console.error(
     '\n说明:①②③ 是同一索引上的诊断对照;④ 与线上 retrieveContext 走同一段 searchCorpus 代码,是预测线上的官方指标。',
+  );
+
+  // 落 run 文件(§4.2):serving 为官方指标,同时记诊断三档便于回溯。compare 只 diff 共有 key。
+  const metrics: Record<string, number> = {
+    [`serving.recall@${k}`]: reranked.recall,
+    [`serving.mrr@${k}`]: reranked.mrr,
+    [`auto.recall@${k}`]: auto.recall,
+    [`auto.mrr@${k}`]: auto.mrr,
+    [`oracle.recall@${k}`]: oracle.recall,
+    [`oracle.mrr@${k}`]: oracle.mrr,
+    [`none.recall@${k}`]: none.recall,
+    [`none.mrr@${k}`]: none.mrr,
+  };
+  const corpusHash = computeCorpusHash(CORPUS);
+  const run: EvalRun = {
+    id: new Date().toISOString().replace(/[:.]/g, '-'),
+    createdAt: new Date().toISOString(),
+    corpusHash,
+    indexHash: computeIndexHash(corpusHash, EMBEDDING_MODEL),
+    embeddingModel: EMBEDDING_MODEL,
+    rerankModel: RERANK_MODEL,
+    k,
+    metrics,
+  };
+  const runPath = writeRun(run);
+  console.error(
+    `\n运行结果已写入 ${runPath}\n对比 baseline:npm run eval:compare\n晋升为 baseline:npm run eval:promote -- ${runPath}`,
   );
 }
 
