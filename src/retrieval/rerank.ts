@@ -5,7 +5,8 @@
 // 关键:rerank 只能重排"粗召回已经捞到的"候选。COARSE_N 给小了,正确 chunk 没进候选,精排也救不回。
 
 const VOYAGE_RERANK_URL = 'https://api.voyageai.com/v1/rerank';
-const RERANK_MODEL = 'rerank-2.5';
+/** 当前 rerank 模型名。记入 eval run / baseline 元数据。 */
+export const RERANK_MODEL = 'rerank-2.5';
 
 /** 粗召回候选数:向量先取这么多,再交给 rerank 精排。语料 22 段,取 10 给精排足够的空间。 */
 export const COARSE_N = 10;

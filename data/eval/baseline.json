@@ -1,0 +1,19 @@
+{
+  "id": "2026-07-02T02-34-51-034Z",
+  "createdAt": "2026-07-02T02:34:51.035Z",
+  "corpusHash": "b238cb64206de4923b98483b6ecc16aa3cfd29919e6b448c8268903bd54a26a6",
+  "indexHash": "841d45c7c80b5e5f04b5f1a5cf514d320d0c917347206cd0724a9fedcfaf312a",
+  "embeddingModel": "voyage-3",
+  "rerankModel": "rerank-2.5",
+  "k": 3,
+  "metrics": {
+    "serving.recall@3": 0.875,
+    "serving.mrr@3": 0.8684027777777779,
+    "auto.recall@3": 0.8055555555555556,
+    "auto.mrr@3": 0.7161042559229563,
+    "oracle.recall@3": 0.8194444444444444,
+    "oracle.mrr@3": 0.7466330276572797,
+    "none.recall@3": 0.8055555555555556,
+    "none.mrr@3": 0.7053124628394966
+  }
+}

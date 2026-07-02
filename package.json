@@ -10,6 +10,8 @@
     "gen": "tsx src/cli/gen.ts",
     "eval": "tsx src/eval/eval.ts",
     "eval:faith": "tsx src/eval/faithfulness.ts",
+    "eval:compare": "tsx scripts/eval-compare.ts",
+    "eval:promote": "tsx scripts/eval-promote.ts",
     "ingest:schemas": "tsx scripts/ingest-schemas.ts",
     "schemas:check": "tsx scripts/check-schemas.ts",
     "corpus:stats": "tsx scripts/corpus-stats.ts",
