@@ -225,11 +225,14 @@ interface EvalBaseline {
   corpusHash: string;
   indexHash: string;
   embeddingModel: string;
-  answerModel: string;
   rerankModel?: string;
+  answerModel?: string; // 生成类 run(含 Faithfulness 等)必填;检索类 run(仅 Recall/MRR)无作答模型参与,留空
+  k?: number;
   metrics: Record<string, number>;
 }
 ```
+
+> `answerModel` 只在含**生成类指标**的 run 里有意义(作答模型参与产出)。Stage 2 的检索类 run 只有 `embed → rerank`,不记 `answerModel`(记了等于记一个没参与的模型)。与"`metrics` 跨 Stage 并集"同一口径:字段随 Stage 增补,缺失即不适用。
 
 新增命令：
 

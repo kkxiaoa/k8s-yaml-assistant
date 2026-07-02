@@ -18,6 +18,7 @@ import { getCorpusIndex, searchCorpus } from '../retrieval/retrieve';
 import { RERANK_MODEL } from '../retrieval/rerank';
 import { computeCorpusHash, computeIndexHash } from '../retrieval/index-store';
 import { writeRun, type EvalRun } from './run-store';
+import { retrievalMiss, upsertBadCases, type BadCase } from './bad-cases';
 
 type Mode = 'none' | 'oracle' | 'auto';
 
@@ -54,16 +55,19 @@ function evaluate(
 ): Result {
   let recallSum = 0;
   let mrrSum = 0;
+  let n = 0; // 可答用例数(分母);拒答用例不进检索指标
   const lines: string[] = [];
 
   for (let i = 0; i < EVAL_SET.length; i++) {
     const ec = EVAL_SET[i]!;
+    if (!ec.answerable) continue; // 拒答用例无 expectedChunkIds,不算 Recall/MRR
+    n++;
     const qv = queryEmb[i]!;
 
     // 决定本次过滤到哪个 resource(null=不过滤)
     const filterRes: string | null =
       mode === 'oracle'
-        ? ec.resource
+        ? (ec.resource ?? null)
         : mode === 'auto'
           ? inferResource(ec.question)
           : null;
@@ -97,8 +101,8 @@ function evaluate(
   }
 
   return {
-    recall: recallSum / EVAL_SET.length,
-    mrr: mrrSum / EVAL_SET.length,
+    recall: recallSum / n,
+    mrr: mrrSum / n,
     lines,
   };
 }
@@ -108,12 +112,21 @@ function evaluate(
  * 关键字路由(auto)决定软加权资源,和线上 retrieveContext 完全同一段代码、同一份索引。
  * 这条才是预测线上行为的官方指标;①②③ 是诊断对照(同一索引的纯向量分析)。
  */
-async function evaluateServing(k: number): Promise<Result> {
+interface ServingResult extends Result {
+  /** recall<1 的用例明细,供沉淀 bad-cases。 */
+  misses: BadCase[];
+}
+
+async function evaluateServing(k: number): Promise<ServingResult> {
   let recallSum = 0;
   let mrrSum = 0;
+  let n = 0; // 可答用例数(分母)
   const lines: string[] = [];
+  const misses: BadCase[] = [];
 
   for (const ec of EVAL_SET) {
+    if (!ec.answerable) continue; // 拒答用例不进检索指标
+    n++;
     const routed = inferResource(ec.question) ?? undefined;
     const ranked = await searchCorpus(ec.question, { boostResource: routed });
     const ids = ranked.map((r) => r.chunk.id);
@@ -129,19 +142,33 @@ async function evaluateServing(k: number): Promise<Result> {
     lines.push(
       `${recall === 1 ? '✓' : '✗'} recall=${found.length}/${ec.expectedChunkIds.length} rank=${rank || '未召回'} [→${routed ?? '全量'}] | ${ec.question}`,
     );
+    if (recall < 1) {
+      misses.push(
+        retrievalMiss({
+          question: ec.question,
+          resource: ec.resource!, // 已过 answerable 守卫,可答用例必有 resource
+          expectedChunkIds: ec.expectedChunkIds,
+          actualTopIds: topK,
+          rank,
+          k,
+        }),
+      );
+    }
   }
 
   return {
-    recall: recallSum / EVAL_SET.length,
-    mrr: mrrSum / EVAL_SET.length,
+    recall: recallSum / n,
+    mrr: mrrSum / n,
     lines,
+    misses,
   };
 }
 
 async function main(): Promise<void> {
   const k = Number(process.argv[2]) || 3;
+  const answerable = EVAL_SET.filter((c) => c.answerable).length;
   console.error(
-    `评估(k=${k},语料 ${CORPUS.length} 段,标注 ${EVAL_SET.length} 条)\n`,
+    `评估(k=${k},语料 ${CORPUS.length} 段,标注 ${EVAL_SET.length} 条 / 可答 ${answerable} 条,检索指标仅算可答)\n`,
   );
 
   // 共用线上同一份索引(getCorpusIndex):诊断模式直接读其 embedding,不再单独重嵌全量。
@@ -197,8 +224,13 @@ async function main(): Promise<void> {
     metrics,
   };
   const runPath = writeRun(run);
+
+  // §4.5:沉淀 serving 未命中用例到 bad-cases.jsonl(去重、保留已 triage 状态)。
+  const added = upsertBadCases(reranked.misses);
   console.error(
-    `\n运行结果已写入 ${runPath}\n对比 baseline:npm run eval:compare\n晋升为 baseline:npm run eval:promote -- ${runPath}`,
+    `\n运行结果已写入 ${runPath}` +
+      `\nserving 未命中 ${reranked.misses.length} 条,新沉淀 bad-cases ${added} 条` +
+      `\n对比 baseline:npm run eval:compare\n晋升为 baseline:npm run eval:promote -- ${runPath}`,
   );
 }
 
