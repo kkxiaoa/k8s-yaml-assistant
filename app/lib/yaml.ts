@@ -1,6 +1,6 @@
 // 编辑器相关的纯逻辑(无 JSX):资源识别 + 校验错误 → Monaco 标记。
 import type { OnMount } from '@monaco-editor/react';
-import { load } from 'js-yaml';
+import { loadAll } from 'js-yaml';
 
 export type EditorT = Parameters<OnMount>[0];
 export type MonacoT = Parameters<OnMount>[1];
@@ -26,20 +26,27 @@ export function inferPathAtLine(yaml: string, lineNumber: number | null | undefi
   return stack.length ? stack.map((item) => item.key).join('.') : null;
 }
 
-/** 从编辑器里的 YAML 解析出当前资源(kind / apiVersion)。 */
-export function detectResource(yaml: string): { kind: string | null; apiVersion: string | null } {
+/** 从编辑器里的 YAML 解析出资源(kind / apiVersion)。多文档时取首个,count 记资源总数。 */
+export function detectResource(yaml: string): {
+  kind: string | null;
+  apiVersion: string | null;
+  count: number;
+} {
   try {
-    const o = load(yaml) as Record<string, unknown> | null;
-    if (o && typeof o === 'object') {
-      return {
-        kind: typeof o.kind === 'string' ? o.kind : null,
-        apiVersion: typeof o.apiVersion === 'string' ? o.apiVersion : null,
-      };
-    }
+    const docs = (loadAll(yaml) as unknown[]).filter(
+      (d): d is Record<string, unknown> =>
+        d != null && typeof d === 'object' && !Array.isArray(d),
+    );
+    const first = docs[0];
+    return {
+      kind: typeof first?.kind === 'string' ? first.kind : null,
+      apiVersion: typeof first?.apiVersion === 'string' ? first.apiVersion : null,
+      count: docs.length,
+    };
   } catch {
     /* 编辑中,解析失败忽略 */
   }
-  return { kind: null, apiVersion: null };
+  return { kind: null, apiVersion: null, count: 0 };
 }
 
 /** 把校验错误的 path 映射成 Monaco 行内标记(红波浪线 + 悬浮提示)。 */

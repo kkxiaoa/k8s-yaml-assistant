@@ -3,6 +3,7 @@
 // 同一份 data/schemas/ 既当问答知识库(schema-corpus)又当校验规则。
 // path 字段给 Monaco 编辑器定位高亮用。
 
+import { loadAll } from 'js-yaml';
 import {
   getSchemaForKind,
   resolveSchemaNode,
@@ -91,9 +92,17 @@ function validateNode(
       }
     });
   }
-  // 4. 对象:required + 逐字段 + 未知字段(仅当 schema 定义了 properties 才查,否则视为不透明)
+  // 4. 对象:required + 逐字段 + map(additionalProperties)+ 未知字段
+  // map 类型(selector/labels/data 等)靠 additionalProperties 约束值,没有 properties——
+  // 之前只看 properties 会整段跳过、放行任意值(如 selector.app 填数组)。
+  const additional = resolved.additionalProperties;
+  const addlSchema =
+    additional && typeof additional === 'object'
+      ? (additional as SchemaNode)
+      : null;
+  const allowsExtra = additional === true || addlSchema !== null;
   if (
-    resolved.properties &&
+    (resolved.properties || addlSchema) &&
     value !== null &&
     typeof value === 'object' &&
     !Array.isArray(value)
@@ -110,10 +119,13 @@ function validateNode(
     }
     for (const [key, child] of Object.entries(obj)) {
       const childPath = path ? `${path}.${key}` : key;
-      const childSchema = resolved.properties[key];
+      const childSchema = resolved.properties?.[key];
       if (childSchema) {
         validateNode(child, childSchema, childPath, false, errors);
-      } else if (!(topLevel && TOP_LEVEL_BUILTINS.has(key))) {
+      } else if (addlSchema) {
+        // map 值按 additionalProperties 校验;键是用户自定义,不算未知字段
+        validateNode(child, addlSchema, childPath, false, errors);
+      } else if (!allowsExtra && !(topLevel && TOP_LEVEL_BUILTINS.has(key))) {
         errors.push({
           path: childPath,
           message: `未知字段 "${key}"(schema 中未定义)`,
@@ -178,4 +190,43 @@ export function validateResource(parsed: unknown): ValidationError[] {
   validateNode(obj, doc.schema, '', true, errors);
 
   return errors;
+}
+
+export interface YamlValidation {
+  /** true=YAML 语法解析失败(与 schema 校验失败区分,供生成引擎标记 parse/validate 阶段) */
+  parseFailed: boolean;
+  errors: ValidationError[];
+}
+
+/**
+ * 解析(多文档 `---`)+ 逐文档 schema 校验。check 路由与生成引擎共用同一份,
+ * 避免"单文档 load vs 多文档 loadAll"两套不一致实现。多文档时错误加 `[doc i]` 前缀。
+ */
+export function validateYamlDocuments(yamlText: string): YamlValidation {
+  let docs: unknown[];
+  try {
+    docs = (loadAll(yamlText) as unknown[]).filter((d) => d != null);
+  } catch (e) {
+    return {
+      parseFailed: true,
+      errors: [
+        {
+          path: '',
+          message:
+            'YAML 解析失败: ' + (e instanceof Error ? e.message : String(e)),
+        },
+      ],
+    };
+  }
+  if (docs.length === 0) {
+    return { parseFailed: true, errors: [{ path: '', message: 'YAML 为空' }] };
+  }
+  const errors: ValidationError[] = [];
+  docs.forEach((doc, i) => {
+    const prefix = docs.length > 1 ? `[doc ${i}] ` : '';
+    for (const e of validateResource(doc)) {
+      errors.push({ path: e.path, message: prefix + e.message });
+    }
+  });
+  return { parseFailed: false, errors };
 }

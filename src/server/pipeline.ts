@@ -5,11 +5,13 @@ import { config } from 'dotenv';
 config({ override: true });
 import { performance } from 'node:perf_hooks';
 import Anthropic from '@anthropic-ai/sdk';
-import { load } from 'js-yaml';
 import { searchCorpusTraced } from '../retrieval/retrieve';
 import { CORPUS } from '../knowledge/corpus';
 import { inferResource } from '../retrieval/router';
-import { validateResource, type ValidationError } from '../validation/validate';
+import {
+  validateYamlDocuments,
+  type ValidationError,
+} from '../validation/validate';
 import {
   appendTrace,
   toTraceHit,
@@ -226,19 +228,7 @@ export async function retrieveContext(
   return { context, hits: finalHits, trace };
 }
 
-/** 校验一段资源 YAML 文本(解析 + schema 驱动校验,自动按 kind 选 schema)。供 /api/check 调用。 */
+/** 校验一段资源 YAML 文本(多文档 + schema 驱动校验)。供 /api/check 调用,与生成引擎共用同一校验。 */
 export function validateYamlText(yamlText: string): ValidationError[] {
-  let parsed: unknown;
-  try {
-    parsed = load(yamlText);
-  } catch (e) {
-    return [
-      {
-        path: '',
-        message:
-          'YAML 解析失败: ' + (e instanceof Error ? e.message : String(e)),
-      },
-    ];
-  }
-  return validateResource(parsed);
+  return validateYamlDocuments(yamlText).errors;
 }
