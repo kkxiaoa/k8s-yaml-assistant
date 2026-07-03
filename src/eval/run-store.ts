@@ -4,6 +4,7 @@
 //   data/eval/runs/<id>.json         每次 eval 的结果(gitignore)
 // eval 写 run,eval:compare 对 baseline 出 Δ,eval:promote 显式把某个 run 晋升为 baseline。
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -13,6 +14,8 @@ export interface EvalRun {
   createdAt: string;
   corpusHash: string;
   indexHash: string;
+  /** eval-set 指纹(id+question+expectedChunkIds)。变了说明标注改过,Δ 含标注变更、非纯模型改进。 */
+  evalSetHash?: string;
   embeddingModel: string;
   rerankModel?: string;
   /** 检索类 eval 无作答模型,留空;Stage 4 生成类才填 */
@@ -20,6 +23,22 @@ export interface EvalRun {
   k: number;
   /** 跨 Stage 并集:Stage 2 只有检索类(如 serving.recall@3)。compare 只 diff 共有 key。 */
   metrics: Record<string, number>;
+}
+
+/** eval-set 指纹:按 id 排序拼接 id+question+expectedChunkIds,取 sha256。标注任一变化即变化。 */
+export function computeEvalSetHash(
+  cases: Array<{ id: string; question: string; expectedChunkIds: string[] }>,
+): string {
+  const h = createHash('sha256');
+  for (const c of [...cases].sort((a, b) => a.id.localeCompare(b.id))) {
+    h.update(c.id);
+    h.update('\n');
+    h.update(c.question);
+    h.update('\n');
+    h.update([...c.expectedChunkIds].sort().join(','));
+    h.update('\n');
+  }
+  return h.digest('hex');
 }
 
 export const EVAL_DIR = join(process.cwd(), 'data', 'eval');

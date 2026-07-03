@@ -18,7 +18,7 @@ import { getCorpusIndex, searchCorpusTraced } from '../retrieval/retrieve';
 import { appendTrace, toTraceHit, traceEnabled } from '../retrieval/trace';
 import { RERANK_MODEL } from '../retrieval/rerank';
 import { computeCorpusHash, computeIndexHash } from '../retrieval/index-store';
-import { writeRun, type EvalRun } from './run-store';
+import { writeRun, computeEvalSetHash, type EvalRun } from './run-store';
 import { retrievalMiss, upsertBadCases, type BadCase } from './bad-cases';
 
 type Mode = 'none' | 'oracle' | 'auto';
@@ -235,6 +235,7 @@ async function main(): Promise<void> {
     createdAt: new Date().toISOString(),
     corpusHash,
     indexHash: computeIndexHash(corpusHash, EMBEDDING_MODEL),
+    evalSetHash: computeEvalSetHash(EVAL_SET),
     embeddingModel: EMBEDDING_MODEL,
     rerankModel: RERANK_MODEL,
     k,

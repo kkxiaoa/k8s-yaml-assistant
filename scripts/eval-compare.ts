@@ -45,6 +45,19 @@ function main(): void {
       '⚠ 语料/索引指纹与 baseline 不一致(corpusHash/indexHash 变了),对比跨越了语料变更,仅供参考。',
     );
   }
+  if (
+    current.evalSetHash &&
+    baseline.evalSetHash &&
+    current.evalSetHash !== baseline.evalSetHash
+  ) {
+    console.log(
+      '⚠ eval-set 指纹与 baseline 不一致(标注改过),Δ 含标注变更、非纯模型改进。',
+    );
+  } else if (current.evalSetHash && !baseline.evalSetHash) {
+    console.log(
+      'ℹ baseline 无 evalSetHash(旧版 run),无法判定标注是否变更。',
+    );
+  }
 
   const rows = compareMetrics(current.metrics, baseline.metrics);
   const onlyCurrent = Object.keys(current.metrics).filter(
