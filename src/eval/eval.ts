@@ -14,7 +14,8 @@ import { embed, EMBEDDING_MODEL } from '../retrieval/embeddings';
 import { CORPUS } from '../knowledge/corpus';
 import { EVAL_SET } from './eval-set';
 import { inferResource, RESOURCE_BOOST } from '../retrieval/router';
-import { getCorpusIndex, searchCorpus } from '../retrieval/retrieve';
+import { getCorpusIndex, searchCorpusTraced } from '../retrieval/retrieve';
+import { appendTrace, toTraceHit, traceEnabled } from '../retrieval/trace';
 import { RERANK_MODEL } from '../retrieval/rerank';
 import { computeCorpusHash, computeIndexHash } from '../retrieval/index-store';
 import { writeRun, type EvalRun } from './run-store';
@@ -108,7 +109,7 @@ function evaluate(
 }
 
 /**
- * ④ serving 路径(== 线上):走共享 searchCorpus —— 全量软加权粗召回 → rerank。
+ * ④ serving 路径(== 线上):走共享 searchCorpusTraced —— 全量软加权粗召回 → rerank。
  * 关键字路由(auto)决定软加权资源,和线上 retrieveContext 完全同一段代码、同一份索引。
  * 这条才是预测线上行为的官方指标;①②③ 是诊断对照(同一索引的纯向量分析)。
  */
@@ -128,7 +129,9 @@ async function evaluateServing(k: number): Promise<ServingResult> {
     if (!ec.answerable) continue; // 拒答用例不进检索指标
     n++;
     const routed = inferResource(ec.question) ?? undefined;
-    const ranked = await searchCorpus(ec.question, { boostResource: routed });
+    const { hits: ranked, trace: st } = await searchCorpusTraced(ec.question, {
+      boostResource: routed,
+    });
     const ids = ranked.map((r) => r.chunk.id);
 
     const topK = ids.slice(0, k);
@@ -139,6 +142,20 @@ async function evaluateServing(k: number): Promise<ServingResult> {
 
     recallSum += recall;
     mrrSum += rank > 0 ? 1 / rank : 0;
+
+    // §4.6:每条 eval case 输出 trace(RETRIEVAL_TRACE=1 时落盘,与线上同一结构)
+    if (traceEnabled()) {
+      appendTrace({
+        ...st,
+        question: ec.question,
+        mode: 'free',
+        resourceHint: routed,
+        fieldPathHint: undefined,
+        path: 'search',
+        finalHits: ranked.slice(0, k).map((h) => toTraceHit(h.chunk, h.score)),
+        createdAt: new Date().toISOString(),
+      });
+    }
     lines.push(
       `${recall === 1 ? '✓' : '✗'} recall=${found.length}/${ec.expectedChunkIds.length} rank=${rank || '未召回'} [→${routed ?? '全量'}] | ${ec.question}`,
     );
@@ -195,10 +212,10 @@ async function main(): Promise<void> {
     `③ auto 路由     ${pct(auto.recall)}   ${auto.mrr.toFixed(3)}   ← 诊断:纯向量软加权(无 rerank)`,
   );
   console.error(
-    `④ serving 路径  ${pct(reranked.recall)}   ${reranked.mrr.toFixed(3)}   ← == 线上(searchCorpus,官方指标)`,
+    `④ serving 路径  ${pct(reranked.recall)}   ${reranked.mrr.toFixed(3)}   ← == 线上(searchCorpusTraced,官方指标)`,
   );
   console.error(
-    '\n说明:①②③ 是同一索引上的诊断对照;④ 与线上 retrieveContext 走同一段 searchCorpus 代码,是预测线上的官方指标。',
+    '\n说明:①②③ 是同一索引上的诊断对照;④ 与线上 retrieveContext 走同一段 searchCorpusTraced 代码,是预测线上的官方指标。',
   );
 
   // 落 run 文件(§4.2):serving 为官方指标,同时记诊断三档便于回溯。compare 只 diff 共有 key。
