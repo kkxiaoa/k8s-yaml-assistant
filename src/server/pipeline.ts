@@ -3,12 +3,19 @@
 
 import { config } from 'dotenv';
 config({ override: true });
+import { performance } from 'node:perf_hooks';
 import Anthropic from '@anthropic-ai/sdk';
 import { load } from 'js-yaml';
-import { searchCorpus } from '../retrieval/retrieve';
+import { searchCorpusTraced } from '../retrieval/retrieve';
 import { CORPUS } from '../knowledge/corpus';
 import { inferResource } from '../retrieval/router';
 import { validateResource, type ValidationError } from '../validation/validate';
+import {
+  appendTrace,
+  toTraceHit,
+  traceEnabled,
+  type RetrievalTrace,
+} from '../retrieval/trace';
 
 export const ANSWER_MODEL = 'claude-sonnet-4-6'; // DeepSeek 映射 deepseek-v4-flash
 
@@ -112,6 +119,7 @@ function exactFieldHits(
   k: number,
 ): Hit[] {
   if (!resource || !fieldPath) return [];
+
   const exact = CORPUS.filter(
     (c) => c.resource === resource && c.path === fieldPath,
   );
@@ -119,6 +127,7 @@ function exactFieldHits(
 
   const leaf = fieldPath.split('.').pop();
   if (!leaf) return [];
+
   return CORPUS.filter(
     (c) => c.resource === resource && c.path.endsWith(`.${leaf}`),
   )
@@ -149,20 +158,46 @@ export async function retrieveContext(
   k = 3,
   editorContext?: EditorContext,
   mode: AskMode = 'free',
-): Promise<{ context: string; hits: Hit[] }> {
+): Promise<{ context: string; hits: Hit[]; trace: RetrievalTrace }> {
+  const t0 = performance.now();
   const query = toRetrievalQuery(question, mode, editorContext);
   const routed = query.resourceHint ?? inferResource(question);
+  const text = retrievalText(query);
+
+  const baseTrace = {
+    question,
+    mode,
+    resourceHint: routed ?? undefined,
+    fieldPathHint: query.fieldPathHint,
+    createdAt: new Date().toISOString(),
+  };
+  const emit = (trace: RetrievalTrace): RetrievalTrace => {
+    if (traceEnabled()) appendTrace(trace);
+    return trace;
+  };
+
+  // 精确字段短路:命中 cursorPath/字段名,不走向量检索。
   const exactHits = exactFieldHits(routed ?? undefined, query.fieldPathHint, k);
   if (exactHits.length > 0) {
+    const trace = emit({
+      ...baseTrace,
+      queryText: text,
+      path: 'exact',
+      coarseHits: [],
+      rerankHits: [],
+      finalHits: exactHits.map((h) => toTraceHit(h, h.score)),
+      latencyMs: { total: performance.now() - t0 },
+      cache: { indexHit: undefined, embeddingHit: false },
+    });
     return {
       context: exactHits.map((h) => `## ${h.title}\n${h.text}`).join('\n\n'),
       hits: exactHits,
+      trace,
     };
   }
 
-  const text = retrievalText(query);
   // 全量软加权检索(无硬过滤),与 eval 共用同一索引与同一段代码。serving 取 top-k。
-  const ranked = await searchCorpus(text, {
+  const { hits: ranked, trace: searchTrace } = await searchCorpusTraced(text, {
     boostResource: routed ?? undefined,
     boostPath: query.fieldPathHint,
   });
@@ -170,19 +205,25 @@ export async function retrieveContext(
   const context = hits
     .map(({ chunk }) => `## ${chunk.title}\n${chunk.text}`)
     .join('\n\n');
+  const finalHits = hits.map(({ chunk, score }) => ({
+    id: chunk.id,
+    title: chunk.title,
+    resource: chunk.resource,
+    path: chunk.path,
+    text: chunk.text,
+    sourceType: chunk.sourceType as 'schema',
+    score,
+  }));
 
-  return {
-    context,
-    hits: hits.map(({ chunk, score }) => ({
-      id: chunk.id,
-      title: chunk.title,
-      resource: chunk.resource,
-      path: chunk.path,
-      text: chunk.text,
-      sourceType: chunk.sourceType,
-      score,
-    })),
-  };
+  const trace = emit({
+    ...baseTrace,
+    ...searchTrace,
+    path: 'search',
+    finalHits: finalHits.map((h) => toTraceHit(h, h.score)),
+    latencyMs: { ...searchTrace.latencyMs, total: performance.now() - t0 },
+  });
+
+  return { context, hits: finalHits, trace };
 }
 
 /** 校验一段资源 YAML 文本(解析 + schema 驱动校验,自动按 kind 选 schema)。供 /api/check 调用。 */

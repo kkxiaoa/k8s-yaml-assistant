@@ -1,11 +1,13 @@
 // 内存向量索引 + 余弦相似度检索。迭代0 用内存即可(语料就几段);
 // 语料变大时(迭代3)再换成真正的向量库(pgvector / Chroma 等)。
 
+import { performance } from 'node:perf_hooks';
 import { embed, EMBEDDING_MODEL } from './embeddings';
 import { CORPUS, type Chunk } from '../knowledge/corpus';
 import { RESOURCE_BOOST } from './router';
 import { rerank, COARSE_N } from './rerank';
 import { readIndex, computeCorpusHash, computeIndexHash } from './index-store';
+import { toTraceHit, type RetrievalTrace } from './trace';
 
 const FIELD_PATH_BOOST = 0.08;
 
@@ -30,12 +32,41 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /** 把语料编码成带向量的索引。调用方应按资源缩小 chunks,避免全量集群 schema 冷启动。 */
-export async function buildIndex(chunks: Chunk[] = CORPUS): Promise<IndexedChunk[]> {
+export async function buildIndex(
+  chunks: Chunk[] = CORPUS,
+): Promise<IndexedChunk[]> {
   const embeddings = await embed(
     chunks.map((c) => c.text),
     'document',
   );
   return chunks.map((c, i) => ({ ...c, embedding: embeddings[i] ?? [] }));
+}
+
+/**
+ * 纯向量打分(同步,无网络):对已嵌入的 query 在索引上算余弦 + 软加权,取 top-k。
+ * 拆出来是为了 trace 能单独对「dense 打分」这一档计时(embed 在外层单独计时)。
+ */
+export function denseSearch(
+  queryEmbedding: number[],
+  index: IndexedChunk[],
+  k: number,
+  boostResource?: string,
+  boostPath?: string,
+): Array<{ chunk: Chunk; score: number }> {
+  const normalizedPath = boostPath?.toLowerCase();
+  return index
+    .map((c) => ({
+      chunk: c as Chunk,
+      // 软加权:命中路由资源的 chunk 加分,但保留所有 chunk(误路由也不会删掉正确答案)
+      score:
+        cosineSimilarity(queryEmbedding, c.embedding) +
+        (boostResource && c.resource === boostResource ? RESOURCE_BOOST : 0) +
+        (normalizedPath && c.path.toLowerCase().endsWith(normalizedPath)
+          ? FIELD_PATH_BOOST
+          : 0),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k);
 }
 
 /**
@@ -51,18 +82,7 @@ export async function retrieve(
 ): Promise<Array<{ chunk: Chunk; score: number }>> {
   const [queryEmbedding] = await embed([query], 'query');
   if (!queryEmbedding) return [];
-  const normalizedPath = boostPath?.toLowerCase();
-  return index
-    .map((c) => ({
-      chunk: c as Chunk,
-      // 软加权:命中路由资源的 chunk 加分,但保留所有 chunk(误路由也不会删掉正确答案)
-      score:
-        cosineSimilarity(queryEmbedding, c.embedding) +
-        (boostResource && c.resource === boostResource ? RESOURCE_BOOST : 0) +
-        (normalizedPath && c.path.toLowerCase().endsWith(normalizedPath) ? FIELD_PATH_BOOST : 0),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k);
+  return denseSearch(queryEmbedding, index, k, boostResource, boostPath);
 }
 
 // ── 共享检索入口(eval == serving)─────────────────────────────────────────
@@ -70,6 +90,7 @@ export async function retrieve(
 // 同一段「软加权粗召回 → rerank 精排」代码,保证 eval 数字预测线上行为。
 
 let corpusIndexPromise: Promise<IndexedChunk[]> | null = null;
+let corpusIndexSource: 'persisted' | 'rebuilt' | null = null;
 
 /**
  * 优先读持久化索引(data/index):indexHash 与当前 CORPUS+模型匹配才用,
@@ -78,9 +99,16 @@ let corpusIndexPromise: Promise<IndexedChunk[]> | null = null;
 async function loadOrBuildCorpusIndex(): Promise<IndexedChunk[]> {
   const persisted = readIndex();
   if (persisted) {
-    const wantHash = computeIndexHash(computeCorpusHash(CORPUS), EMBEDDING_MODEL);
-    if (persisted.manifest.indexHash === wantHash) return persisted.chunks;
+    const wantHash = computeIndexHash(
+      computeCorpusHash(CORPUS),
+      EMBEDDING_MODEL,
+    );
+    if (persisted.manifest.indexHash === wantHash) {
+      corpusIndexSource = 'persisted';
+      return persisted.chunks;
+    }
   }
+  corpusIndexSource = 'rebuilt';
   return buildIndex(CORPUS);
 }
 
@@ -88,6 +116,11 @@ async function loadOrBuildCorpusIndex(): Promise<IndexedChunk[]> {
 export function getCorpusIndex(): Promise<IndexedChunk[]> {
   if (!corpusIndexPromise) corpusIndexPromise = loadOrBuildCorpusIndex();
   return corpusIndexPromise;
+}
+
+/** 索引来源(供 trace 的 cache.indexHit):persisted=读盘命中,rebuilt=实时重嵌。 */
+export function getCorpusIndexSource(): 'persisted' | 'rebuilt' | null {
+  return corpusIndexSource;
 }
 
 export interface SearchOptions {
@@ -99,6 +132,80 @@ export interface SearchOptions {
   coarseN?: number;
 }
 
+/** searchCorpusTraced 返回:命中 + 检索过程 trace(不含 question/mode/hint,由上层补) */
+export type SearchTrace = Pick<
+  RetrievalTrace,
+  'queryText' | 'coarseHits' | 'rerankHits' | 'latencyMs' | 'cache'
+>;
+
+/**
+ * 共享检索(带 trace):全量软加权粗召回 → rerank 精排。分档计时 embed / dense / rerank,
+ * 记录粗召回与 rerank 命中、索引是否读盘命中。返回 rerank 后完整候选(长度=coarseN),调用方 slice 到 k。
+ */
+export async function searchCorpusTraced(
+  queryText: string,
+  options: SearchOptions = {},
+): Promise<{
+  hits: Array<{ chunk: Chunk; score: number }>;
+  trace: SearchTrace;
+}> {
+  const { boostResource, boostPath, coarseN = COARSE_N } = options;
+  const t0 = performance.now();
+  const index = await getCorpusIndex();
+  const indexHit = getCorpusIndexSource() === 'persisted';
+
+  const tEmbed = performance.now();
+  const [queryEmbedding] = await embed([queryText], 'query');
+  const embedMs = performance.now() - tEmbed;
+  const emptyTrace = (): SearchTrace => ({
+    queryText,
+    coarseHits: [],
+    rerankHits: [],
+    latencyMs: { embed: embedMs, total: performance.now() - t0 },
+    cache: { indexHit, embeddingHit: false },
+  });
+  if (!queryEmbedding) return { hits: [], trace: emptyTrace() };
+
+  const tDense = performance.now();
+  const coarse = denseSearch(
+    queryEmbedding,
+    index,
+    coarseN,
+    boostResource,
+    boostPath,
+  );
+  const denseMs = performance.now() - tDense;
+  if (coarse.length === 0) return { hits: [], trace: emptyTrace() };
+
+  const tRerank = performance.now();
+  const rr = await rerank(
+    queryText,
+    coarse.map((h) => h.chunk.text),
+    coarse.length,
+  );
+  const rerankMs = performance.now() - tRerank;
+  const hits = rr.map((r) => ({
+    chunk: coarse[r.index]!.chunk,
+    score: r.score,
+  }));
+
+  return {
+    hits,
+    trace: {
+      queryText,
+      coarseHits: coarse.map((h) => toTraceHit(h.chunk, h.score)),
+      rerankHits: hits.map((h) => toTraceHit(h.chunk, h.score)),
+      latencyMs: {
+        embed: embedMs,
+        dense: denseMs,
+        rerank: rerankMs,
+        total: performance.now() - t0,
+      },
+      cache: { indexHit, embeddingHit: false },
+    },
+  };
+}
+
 /**
  * 共享检索:全量软加权粗召回 → rerank 精排。返回 rerank 后的完整候选排序
  * (长度 = 粗召回候选数),调用方自行 slice 到 k。serving 取 top-k,eval 据此算 Recall@k / MRR。
@@ -107,14 +214,5 @@ export async function searchCorpus(
   queryText: string,
   options: SearchOptions = {},
 ): Promise<Array<{ chunk: Chunk; score: number }>> {
-  const { boostResource, boostPath, coarseN = COARSE_N } = options;
-  const index = await getCorpusIndex();
-  const coarse = await retrieve(queryText, index, coarseN, boostResource, boostPath);
-  if (coarse.length === 0) return [];
-  const rr = await rerank(
-    queryText,
-    coarse.map((h) => h.chunk.text),
-    coarse.length,
-  );
-  return rr.map((r) => ({ chunk: coarse[r.index]!.chunk, score: r.score }));
+  return (await searchCorpusTraced(queryText, options)).hits;
 }

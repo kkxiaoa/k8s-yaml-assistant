@@ -11,7 +11,9 @@ import {
 export const runtime = 'nodejs'; // 需要 Node:Anthropic SDK、dotenv、fetch 向量/rerank
 
 function sse(event: string, data: unknown): Uint8Array {
-  return new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  return new TextEncoder().encode(
+    `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+  );
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -22,6 +24,7 @@ export async function POST(req: Request): Promise<Response> {
   };
   const question = String(body.question ?? '').trim();
   if (!question) return new Response('empty question', { status: 400 });
+
   if (!process.env.DEEPSEEK_API_KEY)
     return new Response('DEEPSEEK_API_KEY 未设置', { status: 500 });
 
@@ -30,7 +33,12 @@ export async function POST(req: Request): Promise<Response> {
     body.mode === 'explain_field' || body.mode === 'explain_error'
       ? body.mode
       : 'free';
-  const { context, hits } = await retrieveContext(question, 3, editorContext, mode);
+  const { context, hits } = await retrieveContext(
+    question,
+    3,
+    editorContext,
+    mode,
+  );
   const client = getClient();
 
   const stream = client.messages.stream({
@@ -64,6 +72,7 @@ export async function POST(req: Request): Promise<Response> {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store',
       Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
     },
   });
 }

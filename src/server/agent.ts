@@ -62,15 +62,19 @@ async function runLoop(
     });
 
     if (resp.stop_reason !== 'tool_use') break;
+
     console.log(resp);
     messages.push({ role: 'assistant', content: resp.content });
     const results: Anthropic.ToolResultBlockParam[] = [];
+
     for (const block of resp.content) {
       if (block.type === 'tool_use' && block.name === 'submit_yaml') {
         const yamlText = String((block.input as { yaml?: unknown }).yaml ?? '');
         const errors = validateYamlText(yamlText);
+
         if (errors.length === 0) lastValid = yamlText;
         else rounds++;
+
         results.push({
           type: 'tool_result',
           tool_use_id: block.id,
@@ -78,6 +82,7 @@ async function runLoop(
         });
       }
     }
+
     messages.push({ role: 'user', content: results });
   }
 
@@ -114,6 +119,7 @@ export function fixResource(
   const errText = errors
     .map((e) => `- ${e.path || '(根)'}: ${e.message}`)
     .join('\n');
+
   return runLoop(
     client,
     FIX_SYSTEM,

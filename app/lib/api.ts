@@ -69,16 +69,22 @@ export async function askStream(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question, mode, context }),
   });
+
   if (!res.body) return;
+
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buffer = '';
+
   for (;;) {
     const { value, done } = await reader.read();
+
     if (done) break;
+
     buffer += dec.decode(value, { stream: true });
     const parsed = parseSseEvents(buffer);
     buffer = parsed.rest;
+
     for (const evt of parsed.events) {
       if (evt.event === 'sources') {
         handlers.onSources(JSON.parse(evt.data) as SourceHit[]);
