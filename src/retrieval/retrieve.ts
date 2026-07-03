@@ -205,14 +205,3 @@ export async function searchCorpusTraced(
     },
   };
 }
-
-/**
- * 共享检索:全量软加权粗召回 → rerank 精排。返回 rerank 后的完整候选排序
- * (长度 = 粗召回候选数),调用方自行 slice 到 k。serving 取 top-k,eval 据此算 Recall@k / MRR。
- */
-export async function searchCorpus(
-  queryText: string,
-  options: SearchOptions = {},
-): Promise<Array<{ chunk: Chunk; score: number }>> {
-  return (await searchCorpusTraced(queryText, options)).hits;
-}
