@@ -488,7 +488,10 @@ export const EVAL_SET: EvalCase[] = [
     source: H,
     resource: 'LimitRange',
     question: 'LimitRange 怎么给容器设默认资源?',
-    expectedChunkIds: ['LimitRange::spec.limits'],
+    expectedChunkIds: [
+      'LimitRange::spec.limits.default',
+      'LimitRange::spec.limits.defaultRequest',
+    ],
   },
 
   // ── HPA(autoscaling/v2)────────────────────────
@@ -548,7 +551,7 @@ export const EVAL_SET: EvalCase[] = [
     source: H,
     resource: 'Role',
     question: 'Role 用哪个字段声明允许的操作动词?',
-    expectedChunkIds: ['Role::rules'],
+    expectedChunkIds: ['Role::rules.verbs'],
   },
   {
     id: 'rolebinding-roleref',
@@ -595,7 +598,10 @@ export const EVAL_SET: EvalCase[] = [
     source: H,
     resource: 'Endpoints',
     question: 'Endpoints 用哪个字段声明后端地址和端口?',
-    expectedChunkIds: ['Endpoints::subsets'],
+    expectedChunkIds: [
+      'Endpoints::subsets.addresses',
+      'Endpoints::subsets.ports',
+    ],
   },
 
   // ── 存储(易混淆集)──────────────────────────────
@@ -696,7 +702,7 @@ export const EVAL_SET: EvalCase[] = [
     source: H,
     resource: 'PersistentVolumeClaim',
     question: 'PVC 怎么申请存储大小?',
-    expectedChunkIds: ['PersistentVolumeClaim::spec.resources'],
+    expectedChunkIds: ['PersistentVolumeClaim::spec.resources.requests'],
   },
   {
     id: 'sc-provisioner',
