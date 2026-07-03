@@ -1,17 +1,17 @@
 @import 'tailwindcss';
 
-/* 蓝图/电路图风开发者控制台 —— 主题 token */
+/* 经典 VSCode Dark —— 中性灰黑底 + VSCode 蓝强调,报错红在中性底上仍跳 */
 @theme {
-  --color-ink: #090c13;
-  --color-surface: #11151f;
-  --color-surface-2: #161c28;
-  --color-line: #222a3a;
-  --color-brand: #4dd4ff;
-  --color-ok: #4ade80;
-  --color-err: #ff6b6b;
-  --color-warn: #f5b53d;
-  --color-muted: #79859e;
-  --color-fg: #d7dfee;
+  --color-ink: #1e1e1e;
+  --color-surface: #252526;
+  --color-surface-2: #2d2d30;
+  --color-line: #3c3c3c;
+  --color-brand: #3f9dff;
+  --color-ok: #89d185;
+  --color-err: #f14c4c;
+  --color-warn: #d9a838;
+  --color-muted: #8a8a8a;
+  --color-fg: #d4d4d4;
 
   --font-mono: var(--font-plex-mono), ui-monospace, 'SF Mono', monospace;
   --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, 'PingFang SC', sans-serif;
@@ -27,10 +27,10 @@ body {
   background-color: var(--color-ink);
   color: var(--color-fg);
   font-family: var(--font-sans);
-  /* 极淡蓝图网格 */
+  /* VSCode 风:近乎纯平,仅极淡中性网格 */
   background-image:
-    linear-gradient(rgba(77, 212, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(77, 212, 255, 0.035) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
   background-size: 28px 28px;
 }
 

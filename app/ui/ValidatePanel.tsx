@@ -30,7 +30,7 @@ export function ValidatePanel({ errors, onFix, fixing }: Props) {
           <>
             <ul className="space-y-2">
               {errors.map((e, i) => (
-                <li key={i} className="rounded border border-err/20 bg-err/[0.06] px-3 py-2">
+                <li key={i} className="rounded border border-l-2 border-err/30 border-l-err bg-err/10 px-3 py-2">
                   <code className="font-mono text-[11px] text-warn">{e.path || '(根)'}</code>
                   <p className="mt-0.5 text-xs leading-relaxed text-fg/80">{e.message}</p>
                 </li>
