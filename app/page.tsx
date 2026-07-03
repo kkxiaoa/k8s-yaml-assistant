@@ -91,14 +91,18 @@ export default function Home() {
 
   async function ask(mode: AskMode = 'free', questionOverride?: string) {
     const q = (questionOverride ?? question).trim();
+
     if (!q) return;
     if (questionOverride) setQuestion(questionOverride);
+
     const selectedText = getSelectedText();
     const cursorPathHint =
       mode === 'explain_field' || selectedText ? getCursorPath() : null;
+
     setBusy('ask');
     setAnswer('');
     setSources([]);
+
     try {
       await askStream(
         q,
@@ -188,14 +192,23 @@ export default function Home() {
               onChange={(v) => {
                 setYaml(v ?? '');
                 setMarkers([]); // 编辑即清除旧标记
-                setCursorPath(inferPathAtLine(v ?? '', editorRef.current?.getPosition()?.lineNumber));
+                setCursorPath(
+                  inferPathAtLine(
+                    v ?? '',
+                    editorRef.current?.getPosition()?.lineNumber,
+                  ),
+                );
               }}
               onMount={(ed, m) => {
                 editorRef.current = ed;
                 monacoRef.current = m;
-                setCursorPath(inferPathAtLine(yaml, ed.getPosition()?.lineNumber));
+                setCursorPath(
+                  inferPathAtLine(yaml, ed.getPosition()?.lineNumber),
+                );
                 ed.onDidChangeCursorPosition((e) => {
-                  setCursorPath(inferPathAtLine(ed.getValue(), e.position.lineNumber));
+                  setCursorPath(
+                    inferPathAtLine(ed.getValue(), e.position.lineNumber),
+                  );
                 });
               }}
               options={{

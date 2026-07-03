@@ -303,6 +303,10 @@ data/index/
 
 Trace 必须同时记录质量、延迟和成本。
 
+> 落地现状(2026-07):`src/retrieval/trace.ts` 定义 `RetrievalTrace`;`searchCorpusTraced` 分档计时 embed/dense/rerank 并记录 coarse/rerank/final 命中与 `cache.indexHit`;`retrieveContext` 组装完整 trace(exact 短路 + search 两条路),`RETRIEVAL_TRACE=1` 时 append 到 `data/eval/traces.jsonl`(gitignore)。
+>
+> **后续硬化(usage / 成本)**:`latencyMs` / `cache` / 三段命中已做实,但 `usage`(token / estimatedCostUsd)暂空。原因:取 Voyage `usage.total_tokens` 需改 `embed` / `rerank` 的返回值,而二者有多个消费方(ask / retrieve / faithfulness)。做法:把 Voyage `usage` 串过 `embed` / `rerank` 返回值,rerank 为主成本,query 嵌入 token 极小。不编造成本,补齐前 `usage` 保持缺省。
+
 ```ts
 interface RetrievalTrace {
   question: string;

@@ -24,10 +24,13 @@ function chunkText(
   const parts = [
     `${resource} 的字段 ${path}:${node.description ?? '(无描述)'}`,
   ];
+
   if (node.type) parts.push(`类型 ${node.type}`);
+
   const enumVals = node.enum ?? node.items?.enum;
   if (enumVals && enumVals.length > 0)
     parts.push(`可选值 ${enumVals.join(' / ')}`);
+
   if (required) parts.push('该字段必填');
   return parts.join('。');
 }
@@ -46,7 +49,9 @@ function walk(
   for (const [name, child] of Object.entries(node.properties)) {
     const resolved = resolveSchemaNode(child);
     // 数组元素类型是字段的固有形态:再解析一层 items,让 items.enum / items.properties 可见。
-    const items = resolved.items ? resolveSchemaNode(resolved.items) : undefined;
+    const items = resolved.items
+      ? resolveSchemaNode(resolved.items)
+      : undefined;
     const forText = items ? { ...resolved, items } : resolved;
     const path = prefix ? `${prefix}.${name}` : name;
     out.push({
@@ -57,7 +62,11 @@ function walk(
       text: chunkText(resource, path, forText, requiredSet.has(name)),
       sourceType: 'schema',
     });
-    const sub = resolved.properties ? resolved : items?.properties ? items : null;
+    const sub = resolved.properties
+      ? resolved
+      : items?.properties
+        ? items
+        : null;
     if (sub) walk(resource, sub, path, out, depth + 1);
   }
 }

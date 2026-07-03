@@ -15,6 +15,8 @@ data/schemas/generated/
 data/index/
 # eval 每次运行结果:临时产物。baseline.json 显式晋升后单独入 git,runs/ 不入。
 data/eval/runs/
+# retrieval trace(观测日志,RETRIEVAL_TRACE=1 时落盘):临时,不入 git。
+data/eval/traces.jsonl
 
 # 环境变量(含 API key,绝不提交!).env.example 会被保留
 .env
