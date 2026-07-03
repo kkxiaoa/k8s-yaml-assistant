@@ -39,9 +39,7 @@ allowVolumeExpansion: true
 export default function Home() {
   const [yaml, setYaml] = useState(DEFAULT_YAML);
   const [errors, setErrors] = useState<VErr[] | null>(null);
-  const [question, setQuestion] = useState(
-    'reclaimPolicy 能填哪些值?默认是什么?',
-  );
+  const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [sources, setSources] = useState<SourceHit[]>([]);
   const [cursorPath, setCursorPath] = useState<string | null>(null);
@@ -52,7 +50,7 @@ export default function Home() {
   const monacoRef = useRef<MonacoT | null>(null);
   const { width, onResizeStart } = useResizable(560, 380, 960);
 
-  const { kind, apiVersion } = detectResource(yaml);
+  const { kind, apiVersion, count } = detectResource(yaml);
 
   function setMarkers(errs: VErr[]) {
     const monaco = monacoRef.current;
@@ -165,6 +163,7 @@ export default function Home() {
         {kind && (
           <span className="ml-auto rounded border border-brand/30 bg-brand/10 px-2.5 py-1 font-mono text-[11px] text-brand">
             {kind}
+            {count > 1 ? ` +${count - 1}` : ''}
           </span>
         )}
       </header>
@@ -177,7 +176,11 @@ export default function Home() {
               onClick={check}
               disabled={busy !== null}
             >
-              {busy === 'check' ? '检查中…' : `检查 ${kind ?? '资源'}`}
+              {busy === 'check'
+                ? '检查中…'
+                : count > 1
+                  ? `检查 ${count} 个资源`
+                  : `检查 ${kind ?? '资源'}`}
             </button>
             <span className="font-mono text-[11px] text-muted">
               {apiVersion ?? '—'}

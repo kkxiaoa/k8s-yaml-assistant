@@ -1,10 +1,16 @@
-// Phase D:通用 agentic 循环 —— 生成 / 修复任意 K8s 资源 YAML,带"生成→校验→修正"自检闭环。
-// 模型产出 YAML → 调 submit_yaml 工具 → schema 驱动校验 → 有错回灌修正 → 直到通过,返回最终合法 YAML。
+// Stage 4:生成/修复引擎 —— agentic 循环「生成 → 提交 → parse → schema 校验 → 修复」。
+// 结构化入参 GenerateRequest / 出参 GenerateResult(含分阶段 diagnostics);修复轮次封顶,
+// 失败如实返回原因、不伪装成功。支持多文档 YAML(为多资源一致性生成铺路)。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { load } from 'js-yaml';
-import { validateResource, type ValidationError } from '../validation/validate';
+import {
+  validateYamlDocuments,
+  type ValidationError,
+} from '../validation/validate';
 import { ANSWER_MODEL } from './pipeline';
+
+/** 最大修复轮次:首次生成 + 至多 2 次修复(§6 边界)。 */
+const MAX_REPAIR_ROUNDS = 2;
 
 const SUBMIT_TOOL: Anthropic.Tool = {
   name: 'submit_yaml',
@@ -13,46 +19,54 @@ const SUBMIT_TOOL: Anthropic.Tool = {
   input_schema: {
     type: 'object',
     properties: {
-      yaml: { type: 'string', description: '完整的资源 YAML 文本' },
+      yaml: {
+        type: 'string',
+        description: '完整的资源 YAML 文本(多资源用 --- 分隔)',
+      },
     },
     required: ['yaml'],
   },
 };
 
-function validateYamlText(yamlText: string): ValidationError[] {
-  try {
-    return validateResource(load(yamlText));
-  } catch (e) {
-    return [
-      {
-        path: '',
-        message:
-          'YAML 解析失败: ' + (e instanceof Error ? e.message : String(e)),
-      },
-    ];
-  }
+export interface Diagnostic {
+  stage: 'generate' | 'parse' | 'validate' | 'repair';
+  message: string;
 }
 
-export interface AgentResult {
-  /** 最终通过校验的 YAML;始终拿不到合法结果则为 null */
+export interface GenerateRequest {
+  requirement: string;
+  target?: { kind?: string; apiVersion?: string };
+  context?: {
+    currentYaml?: string;
+    selectedText?: string;
+    validationErrors?: ValidationError[];
+  };
+}
+
+export interface GenerateResult {
+  /** 最终通过校验的 YAML;始终拿不到合法结果则为 null(不伪装成功) */
   yaml: string | null;
-  /** 自检修正轮数(模型自己发现错并改的次数) */
+  /** 修复轮数(首次提交之后的重提次数) */
   rounds: number;
+  /** 分阶段诊断:generate / parse / validate / repair */
+  diagnostics: Diagnostic[];
 }
 
-/** 手动 agentic loop:submit_yaml → 校验 → 修正,直到通过或到上限。 */
+/** agentic loop:submit_yaml → check → 修复,直到通过或达修复轮次上限。 */
 async function runLoop(
   client: Anthropic,
   system: string,
   firstUser: string,
-): Promise<AgentResult> {
+): Promise<GenerateResult> {
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: firstUser },
   ];
+  const diagnostics: Diagnostic[] = [];
   let lastValid: string | null = null;
-  let rounds = 0;
+  let submits = 0;
+  const maxSubmits = 1 + MAX_REPAIR_ROUNDS;
 
-  for (let turn = 0; turn < 8; turn++) {
+  for (let turn = 0; turn < maxSubmits + 2; turn++) {
     const resp = await client.messages.create({
       model: ANSWER_MODEL,
       max_tokens: 2048,
@@ -61,39 +75,74 @@ async function runLoop(
       messages,
     });
 
-    if (resp.stop_reason !== 'tool_use') break;
+    if (resp.stop_reason !== 'tool_use') {
+      const text = resp.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('')
+        .trim();
+      diagnostics.push({
+        stage: 'generate',
+        message: text
+          ? `模型未提交 YAML,仅返回文本:${text.slice(0, 120)}`
+          : '模型未产出可提交的 YAML',
+      });
+      break;
+    }
 
-    console.log(resp);
     messages.push({ role: 'assistant', content: resp.content });
     const results: Anthropic.ToolResultBlockParam[] = [];
 
     for (const block of resp.content) {
       if (block.type === 'tool_use' && block.name === 'submit_yaml') {
-        const yamlText = String((block.input as { yaml?: unknown }).yaml ?? '');
-        const errors = validateYamlText(yamlText);
+        submits++;
 
-        if (errors.length === 0) lastValid = yamlText;
-        else rounds++;
+        const yamlText = String((block.input as { yaml?: unknown }).yaml ?? '');
+        const check = validateYamlDocuments(yamlText);
+
+        if (check.errors.length === 0) {
+          lastValid = yamlText;
+          diagnostics.push({
+            stage: 'validate',
+            message: `第 ${submits} 次提交:校验通过`,
+          });
+        } else {
+          diagnostics.push({
+            stage: check.parseFailed ? 'parse' : 'validate',
+            message: `第 ${submits} 次提交:${check.errors
+              .map((e) => `${e.path || '(根)'}: ${e.message}`)
+              .join('; ')}`,
+          });
+        }
 
         results.push({
           type: 'tool_result',
           tool_use_id: block.id,
-          content: JSON.stringify(errors),
+          content: JSON.stringify(check.errors),
         });
       }
     }
 
     messages.push({ role: 'user', content: results });
+
+    if (lastValid) break;
+    if (submits >= maxSubmits) {
+      diagnostics.push({
+        stage: 'repair',
+        message: `已达最大修复轮次(${MAX_REPAIR_ROUNDS}),仍未通过校验,返回失败`,
+      });
+      break;
+    }
   }
 
-  return { yaml: lastValid, rounds };
+  return { yaml: lastValid, rounds: Math.max(0, submits - 1), diagnostics };
 }
 
-const GEN_SYSTEM = `你是 Kubernetes 专家。根据用户的自然语言需求,生成一个合法的资源 YAML。
+const GEN_SYSTEM = `你是 Kubernetes 专家。根据用户的自然语言需求,生成合法的资源 YAML。
 工作流程(必须遵守):
 1. 生成 YAML 后,必须调用 submit_yaml 工具提交校验。
 2. 若工具返回错误,逐条修正后重新调用,直到返回空错误列表。
-3. 只生成一个资源,YAML 要完整(含 apiVersion/kind/metadata.name),不要附带解释。`;
+3. YAML 要完整(含 apiVersion/kind/metadata.name),不要附带解释。`;
 
 const FIX_SYSTEM = `你是 Kubernetes 专家。用户给你一段有校验错误的资源 YAML 和错误列表。
 请修正所有错误,同时尽量保持原有字段与意图不变。
@@ -102,12 +151,36 @@ const FIX_SYSTEM = `你是 Kubernetes 专家。用户给你一段有校验错误
 2. 若仍有错误,继续修正重新提交,直到返回空错误列表。
 3. 只输出修正后的资源,不要附带解释。`;
 
-/** 根据自然语言需求生成资源 YAML(带自检闭环)。 */
+function buildGenUser(req: GenerateRequest): string {
+  const parts = [`需求:${req.requirement}`];
+  if (req.target?.kind) {
+    parts.push(
+      `目标资源:${req.target.kind}${req.target.apiVersion ? ` (${req.target.apiVersion})` : ''}`,
+    );
+  }
+  if (req.context?.currentYaml) {
+    parts.push('当前 YAML:\n```yaml\n' + req.context.currentYaml + '\n```');
+  }
+  if (req.context?.selectedText) {
+    parts.push(`选中内容:${req.context.selectedText}`);
+  }
+  if (req.context?.validationErrors?.length) {
+    parts.push(
+      '已知校验错误:\n' +
+        req.context.validationErrors
+          .map((e) => `- ${e.path || '(根)'}: ${e.message}`)
+          .join('\n'),
+    );
+  }
+  return parts.join('\n\n');
+}
+
+/** 根据结构化需求生成资源 YAML(带自检闭环)。 */
 export function generateResource(
   client: Anthropic,
-  requirement: string,
-): Promise<AgentResult> {
-  return runLoop(client, GEN_SYSTEM, `需求:${requirement}`);
+  request: GenerateRequest,
+): Promise<GenerateResult> {
+  return runLoop(client, GEN_SYSTEM, buildGenUser(request));
 }
 
 /** 修正一段有校验错误的资源 YAML(带自检闭环)。 */
@@ -115,11 +188,10 @@ export function fixResource(
   client: Anthropic,
   yaml: string,
   errors: ValidationError[],
-): Promise<AgentResult> {
+): Promise<GenerateResult> {
   const errText = errors
     .map((e) => `- ${e.path || '(根)'}: ${e.message}`)
     .join('\n');
-
   return runLoop(
     client,
     FIX_SYSTEM,

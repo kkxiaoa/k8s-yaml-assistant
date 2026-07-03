@@ -10,6 +10,8 @@ export async function POST(req: Request): Promise<Response> {
   if (!requirement) return NextResponse.json({ error: '需求为空' }, { status: 400 });
   if (!process.env.DEEPSEEK_API_KEY) return NextResponse.json({ error: 'DEEPSEEK_API_KEY 未设置' }, { status: 500 });
 
-  const { yaml, rounds } = await generateResource(getClient(), requirement);
-  return NextResponse.json({ yaml, rounds });
+  const { yaml, rounds, diagnostics } = await generateResource(getClient(), {
+    requirement,
+  });
+  return NextResponse.json({ yaml, rounds, diagnostics });
 }

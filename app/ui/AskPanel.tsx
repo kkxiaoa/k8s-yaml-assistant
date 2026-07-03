@@ -142,7 +142,8 @@ export function AskPanel({
           value={question}
           onChange={(e) => onChange(e.target.value)}
           rows={3}
-          className="w-full resize-none rounded border border-line bg-ink px-3 py-2 text-sm text-fg outline-none transition focus:border-brand/50"
+          placeholder="问一个关于当前配置的问题,例如某字段能填哪些值、怎么配某项"
+          className="w-full resize-none rounded border border-line bg-ink px-3 py-2 text-sm text-fg outline-none transition focus:border-brand/50 placeholder:text-muted"
         />
         <button
           className={`mt-2 ${PRIMARY_BTN}`}
