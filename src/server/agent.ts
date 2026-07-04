@@ -43,12 +43,23 @@ export interface GenerateRequest {
   };
 }
 
+/** 每次 submit_yaml 的结构化记录,供 eval 汇总首轮/多轮真实行为。 */
+export interface SubmitAttempt {
+  submitIndex: number; // 1-based
+  yaml: string;
+  parseOk: boolean;
+  validationOk: boolean;
+  errors: ValidationError[];
+}
+
 export interface GenerateResult {
   /** 最终通过校验的 YAML;始终拿不到合法结果则为 null(不伪装成功) */
   yaml: string | null;
   /** 修复轮数(首次提交之后的重提次数) */
   rounds: number;
-  /** 分阶段诊断:generate / parse / validate / repair */
+  /** 每次提交的结构化明细(submit 流) */
+  attempts: SubmitAttempt[];
+  /** 循环级诊断:模型未提交(generate)/ 达修复上限(repair) */
   diagnostics: Diagnostic[];
 }
 
@@ -62,6 +73,7 @@ async function runLoop(
     { role: 'user', content: firstUser },
   ];
   const diagnostics: Diagnostic[] = [];
+  const attempts: SubmitAttempt[] = [];
   let lastValid: string | null = null;
   let submits = 0;
   const maxSubmits = 1 + MAX_REPAIR_ROUNDS;
@@ -99,21 +111,16 @@ async function runLoop(
 
         const yamlText = String((block.input as { yaml?: unknown }).yaml ?? '');
         const check = validateYamlDocuments(yamlText);
+        const validationOk = check.errors.length === 0;
 
-        if (check.errors.length === 0) {
-          lastValid = yamlText;
-          diagnostics.push({
-            stage: 'validate',
-            message: `第 ${submits} 次提交:校验通过`,
-          });
-        } else {
-          diagnostics.push({
-            stage: check.parseFailed ? 'parse' : 'validate',
-            message: `第 ${submits} 次提交:${check.errors
-              .map((e) => `${e.path || '(根)'}: ${e.message}`)
-              .join('; ')}`,
-          });
-        }
+        attempts.push({
+          submitIndex: submits,
+          yaml: yamlText,
+          parseOk: !check.parseFailed,
+          validationOk,
+          errors: check.errors,
+        });
+        if (validationOk) lastValid = yamlText;
 
         results.push({
           type: 'tool_result',
@@ -135,7 +142,12 @@ async function runLoop(
     }
   }
 
-  return { yaml: lastValid, rounds: Math.max(0, submits - 1), diagnostics };
+  return {
+    yaml: lastValid,
+    rounds: Math.max(0, submits - 1),
+    attempts,
+    diagnostics,
+  };
 }
 
 const GEN_SYSTEM = `你是 Kubernetes 专家。根据用户的自然语言需求,生成合法的资源 YAML。

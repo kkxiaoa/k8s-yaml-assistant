@@ -3,8 +3,59 @@
 
 import { loadAll } from 'js-yaml';
 import type { ConsistencyCheck } from './generation-cases';
+import type { GenerateResult } from '../server/agent';
 
 export type Doc = Record<string, unknown>;
+
+/** 从每次 submit 的结构化 attempts 汇总多轮行为(gen/fix 共用)。 */
+export interface AttemptStats {
+  n: number;
+  firstParseOk: number; // 首轮 parse 成功率
+  firstValidationOk: number; // 首轮校验通过率
+  repairAttempted: number; // 首轮失败 → 尝试修复 的比例
+  failedFirst: number; // 首轮失败的用例数(下面比率的分母)
+  repairSuccessAfterFail: number; // 首轮失败者中最终修成的比例
+  maxRoundFailure: number; // 达上限仍失败(yaml=null)的比例
+  avgSubmits: number;
+  avgRounds: number;
+}
+
+export function attemptStats(results: GenerateResult[]): AttemptStats {
+  const n = results.length || 1;
+  let firstParse = 0;
+  let firstVal = 0;
+  let repairAtt = 0;
+  let failedFirst = 0;
+  let repairedFromFail = 0;
+  let capFail = 0;
+  let submitsSum = 0;
+  let roundsSum = 0;
+  for (const r of results) {
+    const a0 = r.attempts[0];
+    if (a0?.parseOk) firstParse++;
+    if (a0?.validationOk) firstVal++;
+    const firstFailed = a0 ? !a0.validationOk : true;
+    if (r.attempts.length > 1) repairAtt++;
+    if (firstFailed) {
+      failedFirst++;
+      if (r.yaml !== null) repairedFromFail++;
+    }
+    if (r.yaml === null) capFail++;
+    submitsSum += r.attempts.length;
+    roundsSum += r.rounds;
+  }
+  return {
+    n: results.length,
+    firstParseOk: firstParse / n,
+    firstValidationOk: firstVal / n,
+    repairAttempted: repairAtt / n,
+    failedFirst,
+    repairSuccessAfterFail: failedFirst ? repairedFromFail / failedFirst : 1,
+    maxRoundFailure: capFail / n,
+    avgSubmits: submitsSum / n,
+    avgRounds: roundsSum / n,
+  };
+}
 
 const WORKLOAD_KINDS = new Set([
   'Deployment',

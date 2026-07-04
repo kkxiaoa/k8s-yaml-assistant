@@ -1,10 +1,19 @@
 // fix 评估用例:故意坏的 YAML,喂给 fixResource 修。评估单位是"修好没 + 修了几轮 +
 // 有没有把资源类型改掉 + 有没有保留用户原意图/字段"(§6.3:fix 尽量保留原字段与意图)。
 
+export type DefectType =
+  | 'type_error'
+  | 'missing_required'
+  | 'unknown_field'
+  | 'enum_error'
+  | 'parse_error';
+
 export interface FixEvalCase {
   id: string;
   /** 什么错(便于阅读) */
   defect: string;
+  /** 缺陷类型,供 fix 评估按类型分组看模型擅长修哪类 */
+  defectType: DefectType;
   /** 故意坏的 YAML(至少有一条 schema 校验错) */
   brokenYaml: string;
   /** 修复后仍应是这个 kind(不能为了消错而换资源类型) */
@@ -17,6 +26,7 @@ export const FIX_CASES: FixEvalCase[] = [
   {
     id: 'fix-type-replicas',
     defect: 'replicas 填成字符串',
+    defectType: 'type_error',
     brokenYaml: `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -44,6 +54,7 @@ spec:
   {
     id: 'fix-enum-imagepullpolicy',
     defect: 'imagePullPolicy 非法枚举 Sometimes',
+    defectType: 'enum_error',
     brokenYaml: `apiVersion: v1
 kind: Pod
 metadata:
@@ -63,6 +74,7 @@ spec:
   {
     id: 'fix-missing-provisioner',
     defect: 'StorageClass 缺 required provisioner',
+    defectType: 'missing_required',
     brokenYaml: `apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -79,6 +91,7 @@ volumeBindingMode: WaitForFirstConsumer
   {
     id: 'fix-wrong-nesting',
     defect: 'Deployment 把 containers 放在 spec 下(应在 spec.template.spec)',
+    defectType: 'unknown_field',
     brokenYaml: `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -101,6 +114,7 @@ spec:
   {
     id: 'fix-map-array-value',
     defect: 'Service selector 的值填成数组',
+    defectType: 'type_error',
     brokenYaml: `apiVersion: v1
 kind: Service
 metadata:
@@ -122,6 +136,7 @@ spec:
   {
     id: 'fix-typo-field',
     defect: 'provisioner 拼成 provisionr(未知字段 + 缺 required)',
+    defectType: 'unknown_field',
     brokenYaml: `apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -138,6 +153,7 @@ allowVolumeExpansion: true
   {
     id: 'fix-bad-accessmode',
     defect: 'PVC accessModes 非法枚举 ReadWrite',
+    defectType: 'enum_error',
     brokenYaml: `apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -151,5 +167,18 @@ spec:
 `,
     expectedKind: 'PersistentVolumeClaim',
     mustPreserve: [{ path: 'metadata.name', value: 'data' }],
+  },
+  {
+    id: 'fix-parse-error',
+    defect: 'YAML flow 映射未闭合(无法解析)',
+    defectType: 'parse_error',
+    brokenYaml: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data: {LOG_LEVEL: info, TIMEOUT: "30"
+`,
+    expectedKind: 'ConfigMap',
+    mustPreserve: [{ path: 'metadata.name', value: 'app-config' }],
   },
 ];

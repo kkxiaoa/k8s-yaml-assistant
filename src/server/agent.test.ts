@@ -75,10 +75,10 @@ async function main(): Promise<void> {
     });
     assert.equal(r.rounds, 1);
     assert.ok(r.yaml !== null);
-    // 诊断应先有一条校验失败、再有一条校验通过
-    const stages = r.diagnostics.map((d) => d.stage);
-    assert.ok(stages.includes('validate'));
-    assert.ok(r.diagnostics.some((d) => d.message.includes('校验通过')));
+    // attempts:第一次校验失败,第二次通过
+    assert.equal(r.attempts.length, 2);
+    assert.equal(r.attempts[0]!.validationOk, false);
+    assert.equal(r.attempts[1]!.validationOk, true);
   });
 
   await check('解析失败计入 parse 阶段,随后修复收敛', async () => {
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
     });
     assert.equal(r.rounds, 1);
     assert.ok(r.yaml !== null);
-    assert.ok(r.diagnostics.some((d) => d.stage === 'parse'));
+    assert.equal(r.attempts[0]!.parseOk, false); // 首次提交解析失败
   });
 
   await check('始终非法 → 到上限诚实失败(yaml=null, rounds=2)', async () => {
