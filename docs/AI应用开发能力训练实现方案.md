@@ -480,6 +480,13 @@ Hybrid 不是无条件必做项，而是由 Stage 2 的 trace 和 bad case 触�
 - CRD 专有名词失召回
 - enum value 精确匹配失败
 
+> **已知局限与实测复盘(2026-07,勿重踩)**:baseline serving Recall@3 = 91.0%(voyage-3 + rerank-2.5 + COARSE_N=10)。为救回 7 条 bad-case,试过三个便宜杠杆,**全是负结果**:
+> - **COARSE_N 放大**(20/60):serving 单调变差(候选越多 rerank 越被干扰项带偏)。→ COARSE_N=10 已近最优,勿再调大。
+> - **切片文本改末两段路径**:目标只挪几名、仍进不了 rerank 范围,整体 91→88.2。→ 完整路径对多数用例是净正,勿删。
+> - **换 voyage-4-lite**:纯 dense 更强(oracle 86.8→91)但 serving 91→83.3——**rerank-2.5 隐性配 voyage-3,不吃新 embedding 的候选**。→ 要升级 embedding 必须配套升级 reranker,是更大工程。
+>
+> **父被子孙淹没根因**:schema 一字段一 chunk,深子孙(如 271 个 `spec.volumes.*`)在 chunk 文本里携带顶层字段名把父字段淹没;叠加**英文描述 vs 中文查询**的跨语言错配 + 父描述太泛。真要解需 embedding+reranker 配对升级 / 描述中文化 / 父 chunk 富化(高回归风险,低 ROI)。**当前决策:接受 91%,记为已知局限。**
+
 ## 5.2 实现内容
 
 - 增加 BM25 / sparse index。
@@ -614,6 +621,15 @@ interface GenerationEvalCase {
 - 记录人工判定与 judge 判定的一致率。
 
 只有裁判达到可接受一致率后，才扩大 claim-level grounding eval。
+
+> **架构决策(2026-07,Stage 5 重做前必读)**:生成层评估**不要另起独立数据集**。
+> - **`eval:faith` 收敛到 eval-set**:复用 eval-set 的 `question` + `answerable`(它已有 72 可答 + 5 拒答),
+>   同一批问题跑「检索→生成→裁判」,得到忠实度/拒答正确率。好处是**可归因**——faithfulness 挂了,
+>   对照该问题的检索 Recall 就知道是"没检索到"还是"检索到了但瞎编"。删掉旧的独立 `FAITH_SET`(9 条玩具)。
+> - **judge 校准是唯一该独立的元评估**(验裁判本身可不可信),但样本必须**来自真实 pipeline 输出**
+>   (真实检索上下文 + 真实模型答案 + 人工独立判定),**不要手写送分题**(手写会不自觉写成好判的,100% 一致=尺子太松)。
+>   已建 `judge.ts`(共享裁判)/`answer.ts`(共享生成)供其复用;`judge:capture` 那套抓真实答案的工具本轮已删,重做时按此思路重建。
+> - 复盘-03 教训:一致率低先怀疑裁判、再怀疑被测。被测(deepseek-flash)实测很保守、少幻觉,忠实度难点在"推断/延伸"(把文档没写的好处/结论当事实)。
 
 ## 7.3 Claim-level Grounding
 

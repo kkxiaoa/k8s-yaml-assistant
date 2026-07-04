@@ -132,6 +132,7 @@ Hybrid retrieval 不是无条件必做。
 ## 工程规则
 
 - **禁止玩具思维落盘（最高优先）**：落盘的内容必须是当前阶段的真实工程形态，不得为了快速跑通而沉淀简化、占位或硬编码版本——例如手写少字段 schema 覆盖真实 ingestion 产物、storage-only 的 fallback 资源集、`CORPUS.slice(0, N)` 截断语料、单资源特判。临时方案必须显式标注边界并征求用户同意，不能悄悄变成既成事实。核实到历史玩具残留（如 `FIXTURE_SCHEMA_DOCS` 覆盖层、`FALLBACK_RESOURCES` / `chunksForResource` 硬过滤、旧 `validateStorageClass` / `submit_storageclass` 注释）应一并清退，不得在其上继续叠加，避免影响后续落盘。
+  - **落盘前过三闸（2026-07 复盘）**：① 反碎片——能复用/扩展已有（eval-set / getClient / pipeline / 共享模块）就别另造平行物；② 反玩具——评估类高分先怀疑题太简单，校准/eval 输入要来自真实 pipeline 而非手写送分题；③ 难就说难——真活难/模糊时不发简单替身，做难的或停下问。另：别从带 `main()` 的 runner 文件 import（会触发跑批），共享代码放无副作用模块。
 - 变更应贴合现有 TypeScript / Next.js / Monaco 结构。
 - `ask / validate / generate / fix` 尽量复用 schema 派生数据。
 - 检索、生成、拒答、修复都必须可评估；改 retrieval、prompt、generation 或 fix 行为时，要同步考虑 eval 和 baseline diff。
