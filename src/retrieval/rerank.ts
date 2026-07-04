@@ -8,7 +8,7 @@ const VOYAGE_RERANK_URL = 'https://api.voyageai.com/v1/rerank';
 /** 当前 rerank 模型名。记入 eval run / baseline 元数据。 */
 export const RERANK_MODEL = 'rerank-2.5';
 
-/** 粗召回候选数:向量先取这么多,再交给 rerank 精排。语料 22 段,取 10 给精排足够的空间。 */
+/** 粗召回候选数:向量先取这么多,再交给 rerank 精排。*/
 export const COARSE_N = 10;
 
 interface VoyageRerankResult {
@@ -31,8 +31,16 @@ export async function rerank(
 
   const res = await fetch(VOYAGE_RERANK_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ query, documents, model: RERANK_MODEL, top_k: topK }),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      query,
+      documents,
+      model: RERANK_MODEL,
+      top_k: topK,
+    }),
   });
   if (!res.ok) {
     throw new Error(`Voyage rerank ${res.status}: ${await res.text()}`);
