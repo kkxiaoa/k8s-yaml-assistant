@@ -8,8 +8,9 @@ config({ override: true });
 import { getClient } from '../server/pipeline';
 import { generateResource } from '../server/agent';
 import { validateYamlDocuments } from '../validation/validate';
+import type { GenerateResult } from '../server/agent';
 import { GENERATION_CASES } from './generation-cases';
-import { CHECKS, docsOf, hasPath } from './generation-metrics';
+import { CHECKS, docsOf, hasPath, attemptStats } from './generation-metrics';
 
 async function main(): Promise<void> {
   if (!process.env.DEEPSEEK_API_KEY) {
@@ -21,15 +22,15 @@ async function main(): Promise<void> {
   console.error(`生成评估(${n} 条用例,逐条调 DeepSeek,稍候…)\n`);
 
   let converged = 0;
-  let firstTry = 0;
-  let roundsSum = 0;
   let kindOk = 0;
   let pathCovSum = 0;
   let consTotal = 0; // 带一致性检查的用例数
   let consPass = 0; // 一致性全通过的用例数
+  const results: GenerateResult[] = [];
 
   for (const c of GENERATION_CASES) {
     const r = await generateResource(client, { requirement: c.requirement });
+    results.push(r);
     const ok = r.yaml !== null;
     const valid = ok && validateYamlDocuments(r.yaml!).errors.length === 0;
     const docs = ok ? docsOf(r.yaml!) : [];
@@ -61,8 +62,6 @@ async function main(): Promise<void> {
     }
 
     if (valid) converged++;
-    if (valid && r.rounds === 0) firstTry++;
-    roundsSum += r.rounds;
     if (valid && kindsMatch) kindOk++;
     if (valid) pathCovSum += pathCov;
 
@@ -74,12 +73,23 @@ async function main(): Promise<void> {
   }
 
   const pct = (x: number, d = n) => `${((x / d) * 100).toFixed(1)}%`;
-  console.error('\n━━━━━━ 生成评估 汇总 ━━━━━━');
+  const s = attemptStats(results);
+  const p1 = (x: number) => `${(x * 100).toFixed(1)}%`;
+
+  console.error('\n━━━━━━ 多轮行为(基于 attempts)━━━━━━');
+  console.error(`首轮 parse 成功率          : ${p1(s.firstParseOk)}`);
+  console.error(`首轮 validation 通过率     : ${p1(s.firstValidationOk)}`);
+  console.error(`触发修复率(首轮失败)      : ${p1(s.repairAttempted)}`);
+  console.error(
+    `失败后修复成功率           : ${s.failedFirst ? p1(s.repairSuccessAfterFail) : 'N/A'}  (${s.failedFirst} 例首轮失败)`,
+  );
+  console.error(`达上限仍失败率             : ${p1(s.maxRoundFailure)}`);
+  console.error(`平均提交次数 / 平均轮数    : ${s.avgSubmits.toFixed(2)} / ${s.avgRounds.toFixed(2)}`);
+
+  console.error('\n━━━━━━ 内容正确性 汇总 ━━━━━━');
   console.error(
     `修复成功率(产出合法 YAML) : ${pct(converged)}  (${converged}/${n})`,
   );
-  console.error(`首发即对率(0 轮修复)      : ${pct(firstTry)}`);
-  console.error(`平均修复轮数               : ${(roundsSum / n).toFixed(2)}`);
   console.error(
     `kind 匹配率(合法者中)     : ${converged ? pct(kindOk, converged) : '0%'}`,
   );
@@ -90,7 +100,7 @@ async function main(): Promise<void> {
     `跨资源一致性通过率         : ${consTotal ? pct(consPass, consTotal) : 'N/A'}  (${consPass}/${consTotal})`,
   );
   console.error(
-    '\n说明:agent 只返回合法或 null,故"parse/校验通过"等价修复成功率;kind/路径/一致性是内容正确性,△=合法但内容不全或不一致。',
+    '\n说明:多轮行为基于每次 submit 的 attempts;内容正确性只在合法产物上算,△=合法但内容不全或不一致。',
   );
 }
 
