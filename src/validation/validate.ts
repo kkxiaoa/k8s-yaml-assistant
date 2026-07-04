@@ -78,18 +78,13 @@ function validateNode(
       message: `只能是 ${enumStr(resolved.enum)}, 当前为 ${JSON.stringify(value)}`,
     });
   }
-  // 3. 数组项枚举(items 懒解析:再解析一层拿到元素的 enum)
-  const itemEnum = resolved.items
-    ? resolveSchemaNode(resolved.items).enum
-    : undefined;
-  if (resolved.type === 'array' && Array.isArray(value) && itemEnum) {
+  // 3. 数组:逐元素按 items schema 递归校验(类型/枚举/对象字段)。
+  //    覆盖对象数组(如 spec.containers 里的 imagePullPolicy 枚举、image 类型),
+  //    也覆盖标量数组枚举(如 accessModes)——都交给 validateNode 递归。
+  if (resolved.type === 'array' && Array.isArray(value) && resolved.items) {
+    const itemSchema = resolved.items;
     value.forEach((item, i) => {
-      if (!itemEnum.includes(item as never)) {
-        errors.push({
-          path: `${path}[${i}]`,
-          message: `只能是 ${enumStr(itemEnum)}, 当前为 ${JSON.stringify(item)}`,
-        });
-      }
+      validateNode(item, itemSchema, `${path}[${i}]`, false, errors);
     });
   }
   // 4. 对象:required + 逐字段 + map(additionalProperties)+ 未知字段
