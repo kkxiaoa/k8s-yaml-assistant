@@ -51,7 +51,7 @@ export const EVAL_SET: EvalCase[] = [
     answerable: true,
     source: H,
     resource: 'Pod',
-    question: 'Pod 的存活探针用 HTTP 检查哪个路径?',
+    question: 'Pod 存活探针 HTTP 检查用哪个字段指定访问路径?',
     expectedChunkIds: ['Pod::spec.containers.livenessProbe.httpGet.path'],
   },
   {
@@ -201,7 +201,7 @@ export const EVAL_SET: EvalCase[] = [
     answerable: true,
     source: H,
     resource: 'StatefulSet',
-    question: 'StatefulSet 用哪个字段关联 headless service?',
+    question: 'StatefulSet 用哪个字段指定管理它的 service?',
     expectedChunkIds: ['StatefulSet::spec.serviceName'],
   },
   {
@@ -647,7 +647,7 @@ export const EVAL_SET: EvalCase[] = [
     answerable: true,
     source: H,
     resource: 'VolumeSnapshotClass',
-    question: '快照用哪个字段指定 CSI 驱动?',
+    question: 'VolumeSnapshotClass 用哪个字段指定存储驱动?',
     expectedChunkIds: ['VolumeSnapshotClass::driver'],
   },
   {

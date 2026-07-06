@@ -9,6 +9,7 @@ import {
   latestRunPath,
   readBaseline,
   readRun,
+  runKind,
 } from '../src/eval/run-store';
 
 function fmt(x: number): string {
@@ -22,9 +23,12 @@ function main(): void {
     process.exit(1);
   }
   const current = readRun(runPath);
-  const baseline = readBaseline();
+  const kind = runKind(current);
+  const baseline = readBaseline(kind); // 按 run 自身 kind 匹配同类型 baseline,不混检索/faith
 
-  console.log(`当前 run : ${runPath}(${current.createdAt}, k=${current.k})`);
+  console.log(
+    `当前 run : ${runPath}(${current.createdAt}, k=${current.k}, kind=${kind})`,
+  );
 
   if (!baseline) {
     console.log('\n尚无 baseline。当前 run 指标:');
