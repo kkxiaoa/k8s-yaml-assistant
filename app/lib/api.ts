@@ -3,12 +3,16 @@
 import type { VErr } from './yaml';
 
 export interface SourceHit {
+  /** 引用编号,对应答案里的 [S{n}] */
+  n?: number;
   id: string;
   title: string;
   resource: string;
   path?: string;
   text: string;
   sourceType: 'schema' | 'doc' | 'example' | 'policy';
+  /** 官方文档链接(从 chunk "More info" 提取) */
+  sourceUri?: string;
   score?: number;
 }
 

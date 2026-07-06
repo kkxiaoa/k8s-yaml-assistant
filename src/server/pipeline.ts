@@ -6,6 +6,7 @@ config({ override: true });
 import { performance } from 'node:perf_hooks';
 import Anthropic from '@anthropic-ai/sdk';
 import { searchCorpusTraced } from '../retrieval/retrieve';
+import { formatSources, type Source } from '../retrieval/sources';
 import { CORPUS } from '../knowledge/corpus';
 import { inferResource } from '../retrieval/router';
 import {
@@ -28,6 +29,7 @@ export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,�
 - ask_mode=explain_error 时,优先解释 <editor_context> 中的 errors。
 - 若 <editor_context> 与 <docs> 冲突,以 <docs> 和校验错误为准。
 - 若片段不足以回答,明确说"提供的文档片段中没有相关信息",不要猜。
+- 关键事实(字段名、取值、默认值)后标出处如 [S1],对应 <docs> 里的来源编号;不要引用给定来源之外的内容。
 - 简洁准确,涉及枚举值时列全。用中文回答。`;
 
 export function getClient(): Anthropic {
@@ -159,7 +161,12 @@ export async function retrieveContext(
   k = 3,
   editorContext?: EditorContext,
   mode: AskMode = 'free',
-): Promise<{ context: string; hits: Hit[]; trace: RetrievalTrace }> {
+): Promise<{
+  context: string;
+  hits: Hit[];
+  sources: Source[];
+  trace: RetrievalTrace;
+}> {
   const t0 = performance.now();
   const query = toRetrievalQuery(question, mode, editorContext);
   const routed = query.resourceHint ?? inferResource(question);
@@ -190,11 +197,8 @@ export async function retrieveContext(
       latencyMs: { total: performance.now() - t0 },
       cache: { indexHit: undefined, embeddingHit: false },
     });
-    return {
-      context: exactHits.map((h) => `## ${h.title}\n${h.text}`).join('\n\n'),
-      hits: exactHits,
-      trace,
-    };
+    const { context, sources } = formatSources(exactHits);
+    return { context, hits: exactHits, sources, trace };
   }
 
   // 全量软加权检索(无硬过滤),与 eval 共用同一索引与同一段代码。serving 取 top-k。
@@ -203,9 +207,7 @@ export async function retrieveContext(
     boostPath: query.fieldPathHint,
   });
   const hits = ranked.slice(0, k);
-  const context = hits
-    .map(({ chunk }) => `## ${chunk.title}\n${chunk.text}`)
-    .join('\n\n');
+  const { context, sources } = formatSources(hits.map((h) => h.chunk));
   const finalHits = hits.map(({ chunk, score }) => ({
     id: chunk.id,
     title: chunk.title,
@@ -224,7 +226,7 @@ export async function retrieveContext(
     latencyMs: { ...searchTrace.latencyMs, total: performance.now() - t0 },
   });
 
-  return { context, hits: finalHits, trace };
+  return { context, hits: finalHits, sources, trace };
 }
 
 /** 校验一段资源 YAML 文本(多文档 + schema 驱动校验)。供 /api/check 调用,与生成引擎共用同一校验。 */

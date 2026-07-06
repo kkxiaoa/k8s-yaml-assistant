@@ -6,6 +6,7 @@ import { config } from 'dotenv';
 config({ override: true });
 import type Anthropic from '@anthropic-ai/sdk';
 import { searchCorpusTraced } from '../retrieval/retrieve';
+import { formatSources } from '../retrieval/sources';
 import { inferResource } from '../retrieval/router';
 import { getClient } from '../server/pipeline';
 import { judge, JUDGE_MODEL } from './judge';
@@ -42,9 +43,7 @@ async function processCase(
     boostResource: routed,
   });
   const top = hits.slice(0, CONTEXT_K);
-  const context = top
-    .map((h) => `## ${h.chunk.title}\n${h.chunk.text}`)
-    .join('\n\n');
+  const { context } = formatSources(top.map((h) => h.chunk));
   const topIds = top.map((h) => h.chunk.id);
   const foundCount = ec.answerable
     ? ec.expectedChunkIds.filter((id) => topIds.includes(id)).length

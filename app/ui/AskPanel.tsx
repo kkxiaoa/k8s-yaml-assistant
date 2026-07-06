@@ -5,7 +5,7 @@ import type { AskMode, SourceHit } from '../lib/api';
 
 const markdownComponents: Components = {
   p: ({ children }) => (
-    <p className="my-2 text-sm leading-relaxed text-fg/90">{children}</p>
+    <p className="my-2 text-sm leading-relaxed text-fg">{children}</p>
   ),
   strong: ({ children }) => (
     <strong className="font-semibold text-fg">{children}</strong>
@@ -116,6 +116,11 @@ export function AskPanel({
   onChange,
   onAsk,
 }: Props) {
+  // 引用驱动展示:只列答案 [S{n}] 真正引用到的来源,过滤掉未被采用的无关召回
+  const citedNs = new Set(
+    [...answer.matchAll(/\[S(\d+)\]/g)].map((m) => Number(m[1])),
+  );
+  const cited = sources.filter((s) => s.n != null && citedNs.has(s.n));
   return (
     <div className="rounded-lg border border-line bg-surface">
       <div className="border-b border-line px-4 py-2.5">
@@ -124,14 +129,14 @@ export function AskPanel({
       <div className="px-4 py-3">
         <div className="mb-2 flex flex-wrap gap-2">
           <button
-            className="rounded border border-line px-2 py-1 font-mono text-[11px] text-muted transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg/80 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
             onClick={() => onAsk('explain_field', '解释当前字段')}
             disabled={disabled || !canExplainField}
           >
             解释当前字段
           </button>
           <button
-            className="rounded border border-line px-2 py-1 font-mono text-[11px] text-muted transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg/80 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
             onClick={() => onAsk('explain_error', '解释当前校验错误')}
             disabled={disabled || !canExplainError}
           >
@@ -153,23 +158,38 @@ export function AskPanel({
           {asking ? '分析中…' : '解释'}
         </button>
         {answer && <MarkdownText text={answer} streaming={asking} />}
-        {sources.length > 0 && (
+        {cited.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
             <div className={LABEL}>答案依据</div>
             <ul className="mt-2 space-y-2">
-              {sources.map((source) => (
+              {cited.map((source, i) => (
                 <li key={source.id} className="rounded border border-line bg-ink/50 px-3 py-2">
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <span className="min-w-0 break-all font-mono text-[11px] text-brand">
-                      {source.resource}{source.path ? ` · ${source.path}` : ''}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-brand">
+                        S{source.n ?? i + 1}
+                      </span>
+                      <span className="min-w-0 break-all font-mono text-[11px] text-brand">
+                        {source.resource}{source.path ? ` · ${source.path}` : ''}
+                      </span>
                     </span>
                     <span className="shrink-0 font-mono text-[10px] uppercase text-muted">
                       {source.sourceType}
                     </span>
                   </div>
-                  <p className="mt-1 break-words text-xs leading-relaxed text-fg/70">
+                  <p className="mt-1 break-words text-xs leading-relaxed text-fg/80">
                     {source.text}
                   </p>
+                  {source.sourceUri && (
+                    <a
+                      href={source.sourceUri}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1.5 inline-block break-all font-mono text-[10px] text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+                    >
+                      查看文档 ↗
+                    </a>
+                  )}
                 </li>
               ))}
             </ul>

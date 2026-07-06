@@ -10,8 +10,8 @@
   --color-ok: #89d185;
   --color-err: #f14c4c;
   --color-warn: #d9a838;
-  --color-muted: #8a8a8a;
-  --color-fg: #d4d4d4;
+  --color-muted: #9e9e9e;
+  --color-fg: #e6e6e6;
 
   --font-mono: var(--font-plex-mono), ui-monospace, 'SF Mono', monospace;
   --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, 'PingFang SC', sans-serif;
