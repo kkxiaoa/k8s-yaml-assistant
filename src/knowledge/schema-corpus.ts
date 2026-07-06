@@ -3,8 +3,12 @@
 // schema 加载与查找见 ./schemas.ts(校验也复用同一份)。
 
 import { resolveSchemaNode, SCHEMA_DOCS, type SchemaNode } from './schemas';
+import { extractSourceUri } from '../retrieval/sources';
 
 const MAX_SCHEMA_DEPTH = 8;
+
+export type SourceType = 'schema' | 'policy';
+export type TrustLevel = 'k8s-official' | 'org-policy';
 
 export interface Chunk {
   id: string;
@@ -12,7 +16,13 @@ export interface Chunk {
   path: string;
   title: string;
   text: string;
-  sourceType: 'schema';
+  sourceType: SourceType;
+  /** 官方文档/规范链接 */
+  sourceUri?: string;
+  /** 版本/日期 */
+  version?: string;
+  /** 可信层级:区分官方事实与组织策略 */
+  trustLevel?: TrustLevel;
 }
 
 function chunkText(
@@ -61,6 +71,10 @@ function walk(
       title: `${resource} · ${path}`,
       text: chunkText(resource, path, forText, requiredSet.has(name)),
       sourceType: 'schema',
+      // 用该字段自身解析后的 schema 描述(forText,同 chunkText 用的一份),
+      // 而非外层 walk 的容器 node —— 容器级 description 通常不含 "More info" 链接。
+      sourceUri: extractSourceUri(forText.description ?? ''),
+      trustLevel: 'k8s-official',
     });
     const sub = resolved.properties
       ? resolved

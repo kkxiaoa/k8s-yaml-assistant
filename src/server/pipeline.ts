@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { searchCorpusTraced } from '../retrieval/retrieve';
 import { formatSources, type Source } from '../retrieval/sources';
 import { CORPUS } from '../knowledge/corpus';
+import type { SourceType, TrustLevel } from '../knowledge/schema-corpus';
 import { inferResource } from '../retrieval/router';
 import {
   validateYamlDocuments,
@@ -45,7 +46,9 @@ export interface Hit {
   resource: string;
   path?: string;
   text: string;
-  sourceType: 'schema';
+  sourceType: SourceType;
+  sourceUri?: string;
+  trustLevel?: TrustLevel;
   score?: number;
 }
 
@@ -112,6 +115,8 @@ function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
     path: chunk.path,
     text: chunk.text,
     sourceType: chunk.sourceType,
+    sourceUri: chunk.sourceUri,
+    trustLevel: chunk.trustLevel,
     score,
   };
 }
@@ -214,7 +219,9 @@ export async function retrieveContext(
     resource: chunk.resource,
     path: chunk.path,
     text: chunk.text,
-    sourceType: chunk.sourceType as 'schema',
+    sourceType: chunk.sourceType,
+    sourceUri: chunk.sourceUri,
+    trustLevel: chunk.trustLevel,
     score,
   }));
 
