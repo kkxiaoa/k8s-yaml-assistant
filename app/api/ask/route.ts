@@ -33,12 +33,18 @@ export async function POST(req: Request): Promise<Response> {
     body.mode === 'explain_field' || body.mode === 'explain_error'
       ? body.mode
       : 'free';
-  const { context, hits } = await retrieveContext(
+  const { context, hits, sources } = await retrieveContext(
     question,
     3,
     editorContext,
     mode,
   );
+  // 把引用编号 [S{n}] + sourceUri 并到 hits,供前端"答案依据"卡片对应与溯源
+  const cited = hits.map((h, i) => ({
+    ...h,
+    n: sources[i]?.n ?? i + 1,
+    sourceUri: sources[i]?.sourceUri,
+  }));
   const client = getClient();
 
   const stream = client.messages.stream({
@@ -56,7 +62,7 @@ export async function POST(req: Request): Promise<Response> {
   const readable = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        controller.enqueue(sse('sources', hits));
+        controller.enqueue(sse('sources', cited));
         stream.on('text', (t) => controller.enqueue(sse('delta', t)));
         await stream.finalMessage();
         controller.enqueue(sse('done', {}));
