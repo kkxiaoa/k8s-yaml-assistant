@@ -1,8 +1,7 @@
 // 生成层(被测)的共享配置与调用:答系统提示 + 模型 + generateAnswer。
-// 独立成无副作用模块,供 faithfulness / judge-capture 复用(避免从带 main 的文件 import 触发跑批)。
 
 import type Anthropic from '@anthropic-ai/sdk';
-import { textOf } from './judge';
+import { textOf } from './llm';
 
 /** 被测(生成)模型:DeepSeek 映射 deepseek-v4-flash。 */
 export const MODEL = 'claude-sonnet-4-6';

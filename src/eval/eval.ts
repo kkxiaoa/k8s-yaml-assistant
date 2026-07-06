@@ -1,5 +1,3 @@
-// 检索评估。迭代3:一次跑两遍 —— ①无过滤基线 vs ②元数据过滤,直接对比指标。
-// 只用 embedding(2 次批量请求:语料 + 所有问题),不调作答 LLM,便宜且避开 Voyage 限流。
 //
 // 用法: npm run eval        (k=3)
 //       npm run eval -- 5   (k=5)
@@ -15,7 +13,7 @@ import { CORPUS } from '../knowledge/corpus';
 import { EVAL_SET } from './eval-set';
 import { inferResource, RESOURCE_BOOST } from '../retrieval/router';
 import { getCorpusIndex, searchCorpusTraced } from '../retrieval/retrieve';
-import { appendTrace, toTraceHit, traceEnabled } from '../retrieval/trace';
+import { appendTrace, toTraceHit } from '../retrieval/trace';
 import { RERANK_MODEL } from '../retrieval/rerank';
 import { computeCorpusHash, computeIndexHash } from '../retrieval/index-store';
 import { writeRun, computeEvalSetHash, type EvalRun } from './run-store';
@@ -41,7 +39,6 @@ function cosine(a: number[], b: number[]): number {
 interface Result {
   recall: number;
   mrr: number;
-  lines: string[];
 }
 
 /**
@@ -57,7 +54,6 @@ function evaluate(
   let recallSum = 0;
   let mrrSum = 0;
   let n = 0; // 可答用例数(分母);拒答用例不进检索指标
-  const lines: string[] = [];
 
   for (let i = 0; i < EVAL_SET.length; i++) {
     const ec = EVAL_SET[i]!;
@@ -95,24 +91,14 @@ function evaluate(
 
     recallSum += recall;
     mrrSum += rank > 0 ? 1 / rank : 0;
-
-    lines.push(
-      `${recall === 1 ? '✓' : '✗'} recall=${found.length}/${ec.expectedChunkIds.length} rank=${rank || '未召回'} [→${filterRes ?? '全量'}] | ${ec.question}`,
-    );
   }
 
   return {
     recall: recallSum / n,
     mrr: mrrSum / n,
-    lines,
   };
 }
 
-/**
- * ④ serving 路径(== 线上):走共享 searchCorpusTraced —— 全量软加权粗召回 → rerank。
- * 关键字路由(auto)决定软加权资源,和线上 retrieveContext 完全同一段代码、同一份索引。
- * 这条才是预测线上行为的官方指标;①②③ 是诊断对照(同一索引的纯向量分析)。
- */
 interface ServingResult extends Result {
   /** recall<1 的用例明细,供沉淀 bad-cases。 */
   misses: BadCase[];
@@ -122,7 +108,6 @@ async function evaluateServing(k: number): Promise<ServingResult> {
   let recallSum = 0;
   let mrrSum = 0;
   let n = 0; // 可答用例数(分母)
-  const lines: string[] = [];
   const misses: BadCase[] = [];
 
   for (const ec of EVAL_SET) {
@@ -143,22 +128,17 @@ async function evaluateServing(k: number): Promise<ServingResult> {
     recallSum += recall;
     mrrSum += rank > 0 ? 1 / rank : 0;
 
-    // §4.6:每条 eval case 输出 trace(RETRIEVAL_TRACE=1 时落盘,与线上同一结构)
-    if (traceEnabled()) {
-      appendTrace({
-        ...st,
-        question: ec.question,
-        mode: 'free',
-        resourceHint: routed,
-        fieldPathHint: undefined,
-        path: 'search',
-        finalHits: ranked.slice(0, k).map((h) => toTraceHit(h.chunk, h.score)),
-        createdAt: new Date().toISOString(),
-      });
-    }
-    lines.push(
-      `${recall === 1 ? '✓' : '✗'} recall=${found.length}/${ec.expectedChunkIds.length} rank=${rank || '未召回'} [→${routed ?? '全量'}] | ${ec.question}`,
-    );
+    appendTrace({
+      ...st,
+      question: ec.question,
+      mode: 'free',
+      resourceHint: routed,
+      fieldPathHint: undefined,
+      path: 'search',
+      finalHits: ranked.slice(0, k).map((h) => toTraceHit(h.chunk, h.score)),
+      createdAt: new Date().toISOString(),
+    });
+
     if (recall < 1) {
       misses.push(
         retrievalMiss({
@@ -176,7 +156,6 @@ async function evaluateServing(k: number): Promise<ServingResult> {
   return {
     recall: recallSum / n,
     mrr: mrrSum / n,
-    lines,
     misses,
   };
 }
@@ -188,7 +167,6 @@ async function main(): Promise<void> {
     `评估(k=${k},语料 ${CORPUS.length} 段,标注 ${EVAL_SET.length} 条 / 可答 ${answerable} 条,检索指标仅算可答)\n`,
   );
 
-  // 共用线上同一份索引(getCorpusIndex):诊断模式直接读其 embedding,不再单独重嵌全量。
   const index = await getCorpusIndex();
   const corpusEmb = index.map((c) => c.embedding);
   const queryEmb = await embed(
@@ -232,6 +210,7 @@ async function main(): Promise<void> {
   const corpusHash = computeCorpusHash(CORPUS);
   const run: EvalRun = {
     id: new Date().toISOString().replace(/[:.]/g, '-'),
+    kind: 'retrieval',
     createdAt: new Date().toISOString(),
     corpusHash,
     indexHash: computeIndexHash(corpusHash, EMBEDDING_MODEL),
@@ -243,7 +222,7 @@ async function main(): Promise<void> {
   };
   const runPath = writeRun(run);
 
-  // §4.5:沉淀 serving 未命中用例到 bad-cases.jsonl(去重、保留已 triage 状态)。
+  // §4.5:沉淀 serving 未命中用例到 bad-cases.jsonl。
   const added = upsertBadCases(reranked.misses);
   console.error(
     `\n运行结果已写入 ${runPath}` +

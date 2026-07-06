@@ -8,9 +8,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+/** eval 类型:检索指标与生成指标各自独立 baseline / compare,不混。 */
+export type EvalKind = 'retrieval' | 'faith';
+
 export interface EvalRun {
   /** 时间戳 id,同时是 runs/<id>.json 文件名 */
   id: string;
+  /** 检索类=retrieval,生成/faith 类=faith。旧 run 缺省视作 retrieval(见 runKind)。 */
+  kind?: EvalKind;
   createdAt: string;
   corpusHash: string;
   indexHash: string;
@@ -43,7 +48,19 @@ export function computeEvalSetHash(
 
 export const EVAL_DIR = join(process.cwd(), 'data', 'eval');
 export const RUNS_DIR = join(EVAL_DIR, 'runs');
-export const BASELINE_PATH = join(EVAL_DIR, 'baseline.json');
+export const BASELINE_PATH = join(EVAL_DIR, 'baseline.json'); // retrieval baseline(兼容旧)
+
+/** run 的 kind,旧 run 文件缺 kind 视作 retrieval。 */
+export function runKind(run: EvalRun): EvalKind {
+  return run.kind ?? 'retrieval';
+}
+
+/** 按 kind 取 baseline 文件:retrieval=baseline.json(兼容旧),faith=baseline.faith.json。 */
+export function baselinePathFor(kind: EvalKind): string {
+  return kind === 'faith'
+    ? join(EVAL_DIR, 'baseline.faith.json')
+    : BASELINE_PATH;
+}
 
 export function writeRun(run: EvalRun): string {
   mkdirSync(RUNS_DIR, { recursive: true });
@@ -56,24 +73,40 @@ export function readRun(path: string): EvalRun {
   return JSON.parse(readFileSync(path, 'utf8')) as EvalRun;
 }
 
-export function readBaseline(): EvalRun | null {
-  if (!existsSync(BASELINE_PATH)) return null;
-  return JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) as EvalRun;
+export function readBaseline(kind: EvalKind = 'retrieval'): EvalRun | null {
+  const path = baselinePathFor(kind);
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, 'utf8')) as EvalRun;
 }
 
-/** 最近一次 run 的路径(按文件名即时间戳排序)。 */
-export function latestRunPath(): string | null {
+/** 最近一次 run 路径(按文件名即时间戳排序);传 kind 则只在该类型 run 里取最新。 */
+export function latestRunPath(kind?: EvalKind): string | null {
   if (!existsSync(RUNS_DIR)) return null;
-  const files = readdirSync(RUNS_DIR)
+  let files = readdirSync(RUNS_DIR)
     .filter((f) => f.endsWith('.json'))
     .sort();
+  if (kind) {
+    files = files.filter((f) => {
+      try {
+        const r = JSON.parse(
+          readFileSync(join(RUNS_DIR, f), 'utf8'),
+        ) as EvalRun;
+        return runKind(r) === kind;
+      } catch {
+        return false;
+      }
+    });
+  }
   const last = files[files.length - 1];
   return last ? join(RUNS_DIR, last) : null;
 }
 
 export function promote(run: EvalRun): void {
   mkdirSync(EVAL_DIR, { recursive: true });
-  writeFileSync(BASELINE_PATH, `${JSON.stringify(run, null, 2)}\n`);
+  writeFileSync(
+    baselinePathFor(runKind(run)),
+    `${JSON.stringify(run, null, 2)}\n`,
+  );
 }
 
 export interface CompareRow {

@@ -2,7 +2,12 @@
 // (避免把退化当成新基线)。纯本地,不花额度。
 // 用法:npm run eval:promote -- data/eval/runs/<id>.json
 
-import { BASELINE_PATH, promote, readRun } from '../src/eval/run-store';
+import {
+  baselinePathFor,
+  promote,
+  readRun,
+  runKind,
+} from '../src/eval/run-store';
 
 function main(): void {
   const runArg = process.argv[2];
@@ -12,7 +17,7 @@ function main(): void {
   }
   const run = readRun(runArg);
   promote(run);
-  console.log(`已晋升为 baseline → ${BASELINE_PATH}`);
+  console.log(`已晋升为 baseline → ${baselinePathFor(runKind(run))}`);
   console.log(`  run id     : ${run.id}`);
   console.log(`  indexHash  : ${run.indexHash.slice(0, 16)}…`);
   for (const [key, val] of Object.entries(run.metrics).sort())

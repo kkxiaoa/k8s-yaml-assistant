@@ -58,11 +58,6 @@ export function appendTrace(trace: RetrievalTrace): void {
   appendFileSync(TRACES_PATH, `${JSON.stringify(trace)}\n`);
 }
 
-/** 是否开启 trace 落盘:环境变量 RETRIEVAL_TRACE=1。 */
-export function traceEnabled(): boolean {
-  return process.env.RETRIEVAL_TRACE === '1';
-}
-
 export function readTraces(): RetrievalTrace[] {
   if (!existsSync(TRACES_PATH)) return [];
   return readFileSync(TRACES_PATH, 'utf8')

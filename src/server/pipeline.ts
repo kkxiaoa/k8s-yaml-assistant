@@ -15,7 +15,6 @@ import {
 import {
   appendTrace,
   toTraceHit,
-  traceEnabled,
   type RetrievalTrace,
 } from '../retrieval/trace';
 
@@ -174,7 +173,7 @@ export async function retrieveContext(
     createdAt: new Date().toISOString(),
   };
   const emit = (trace: RetrievalTrace): RetrievalTrace => {
-    if (traceEnabled()) appendTrace(trace);
+    appendTrace(trace);
     return trace;
   };
 
