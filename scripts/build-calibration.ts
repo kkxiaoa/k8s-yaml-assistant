@@ -135,7 +135,7 @@ function latestTraceById(id: string): FaithTrace | null {
   return null;
 }
 
-/** 由 topIds 重建喂给生成的 context 文本(与 faithfulness.ts 同格式)。 */
+/** 由 topIds 重建喂给生成的 context 文本(与 faithfulness-eval.ts 同格式)。 */
 function rebuildContext(topIds: string[]): string {
   const chunks = topIds
     .map((id) => CORPUS.find((cc) => cc.id === id))

@@ -181,9 +181,9 @@ top-k docs
 
 当前已有：
 
-- `src/eval/eval.ts`
+- `src/eval/retrieve-eval.ts`
 - `src/eval/eval-set.ts`
-- `src/eval/faithfulness.ts`
+- `src/eval/faithfulness-eval.ts`
 - Recall@k
 - MRR
 - Faithfulness
@@ -506,8 +506,8 @@ bad case
 - `docs/RAG-复盘-01-检索原理与工程难点.md`
 - `docs/RAG-复盘-02-检索硬化与评估驱动.md`
 - `docs/RAG-复盘-03-生成层评估与修尺子.md`
-- `src/eval/eval.ts`
-- `src/eval/faithfulness.ts`
+- `src/eval/retrieve-eval.ts`
+- `src/eval/faithfulness-eval.ts`
 - `src/server/pipeline.ts`
 - `src/retrieval/retrieve.ts`
 - `src/retrieval/rerank.ts`
