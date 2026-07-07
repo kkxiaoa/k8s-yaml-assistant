@@ -32,7 +32,7 @@
 - `src/eval/answer.ts` — `ANSWER_SYSTEM` 冲突规则
 - `src/eval/eval-set.ts` — 新增 policy 相关 EvalCase（纯 policy + 冲突）
 - `src/eval/judge.ts` — `Verdict` 扩 policy detail + `JUDGE_SYSTEM` policy 判定段
-- `src/eval/faithfulness.ts` — policy detail 落 trace
+- `src/eval/faithfulness-eval.ts` — policy detail 落 trace
 - `scripts/build-calibration.ts` — policy 区分 calibration case
 
 ---
@@ -642,7 +642,7 @@ eval-set 加 policy case（纯 policy + 冲突）；judge 加 policy detail 字�
 **Files:**
 - Modify: `src/eval/eval-set.ts`
 - Modify: `src/eval/judge.ts`
-- Modify: `src/eval/faithfulness.ts`
+- Modify: `src/eval/faithfulness-eval.ts`
 - Modify: `scripts/build-calibration.ts`
 
 - [x] **Step 1: eval-set 加 policy 相关 EvalCase（eval-set.ts，EVAL_SET 数组末尾）**
@@ -712,7 +712,7 @@ JSON 模板改为：
     };
 ```
 
-- [x] **Step 5: faithfulness.ts 让 policy detail 落 trace（faithfulness.ts）**
+- [x] **Step 5: faithfulness-eval.ts 让 policy detail 落 trace（faithfulness-eval.ts）**
 
 `FaithTrace` 已含 `verdict: Verdict | null`，policy detail 随 verdict 自动落盘（Task 3 的 Verdict 扩展）。无需改结构 —— 确认 `src/eval/faith-store.ts` 的 `FaithTrace.verdict` 类型是 `Verdict | null`（是则本步只需 `npx tsc` 确认通过）。
 
@@ -747,7 +747,7 @@ Expected: policy case（policy-image-latest / policy-resource-limits）Recall@3 
 
 ```bash
 npx tsc --noEmit -p tsconfig.json && npm test
-git add src/eval/eval-set.ts src/eval/judge.ts src/eval/faithfulness.ts src/eval/judge-eval.ts scripts/build-calibration.ts data/eval/judge-calibration.jsonl
+git add src/eval/eval-set.ts src/eval/judge.ts src/eval/faithfulness-eval.ts src/eval/judge-eval.ts scripts/build-calibration.ts data/eval/judge-calibration.jsonl
 git commit -m "feat(stage6): policy eval case + judge policy 区分维度 + 校准"
 ```
 
