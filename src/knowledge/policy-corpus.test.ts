@@ -18,9 +18,9 @@ function check(name: string, fn: () => void): void {
 
 console.log('buildPolicyCorpus:');
 
-check('至少 10 条,每条 chunk 主键与元数据完整', () => {
+check('至少 42 条,每条 chunk 主键与元数据完整', () => {
   const chunks = buildPolicyCorpus();
-  assert.ok(chunks.length >= 10, '至少 10 条');
+  assert.ok(chunks.length >= 42, '至少 42 条');
   for (const c of chunks) {
     assert.ok(c.id.length > 0, `id 非空: ${JSON.stringify(c)}`);
     assert.ok(c.resource.length > 0, `resource 非空: ${c.id}`);
@@ -37,7 +37,7 @@ check('chunk id 唯一(主键无重复)', () => {
 });
 
 check('id/title/元数据稳定(image no-latest 样本)', () => {
-  const c = buildPolicyCorpus().find((x) => x.id === 'policy.container.image.tag.no-latest');
+  const c = buildPolicyCorpus().find((x) => x.id === 'policy.deployment.image.tag.no-latest');
   assert.ok(c, '按 policy.id 作 chunk id');
   assert.equal(c.resource, 'Deployment');
   assert.equal(c.path, 'spec.template.spec.containers.image');
@@ -46,6 +46,46 @@ check('id/title/元数据稳定(image no-latest 样本)', () => {
   assert.match(c.text, /latest/);
   assert.match(c.text, /级别:forbidden/);
   assert.match(c.text, /组织策略\/平台规范,非 K8s 官方强制/);
+});
+
+// 多域抽查:确认 Stage 6 扩容后新域(storage/network/rbac)的 chunk 字段与文本片段稳定,
+// 不只验证单一(deployment)样本。
+check('storage 域样本(PVC 必须指定 storageClassName)', () => {
+  const c = buildPolicyCorpus().find((x) => x.id === 'policy.pvc.storageClassName.required');
+  assert.ok(c, '按 policy.id 作 chunk id');
+  assert.equal(c.resource, 'PersistentVolumeClaim');
+  assert.equal(c.path, 'spec.storageClassName');
+  assert.equal(c.title, '平台规范 · PersistentVolumeClaim · spec.storageClassName');
+  assert.equal(c.sourceType, 'policy');
+  assert.equal(c.trustLevel, 'org-policy');
+  assert.match(c.text, /storageClassName/);
+  assert.match(c.text, /级别:required/);
+});
+
+check('network 域样本(Service 禁止 NodePort)', () => {
+  const c = buildPolicyCorpus().find((x) => x.id === 'policy.service.type.nodeport.forbidden');
+  assert.ok(c, '按 policy.id 作 chunk id');
+  assert.equal(c.resource, 'Service');
+  assert.equal(c.path, 'spec.type');
+  assert.equal(c.title, '平台规范 · Service · spec.type');
+  assert.equal(c.sourceType, 'policy');
+  assert.equal(c.trustLevel, 'org-policy');
+  assert.match(c.text, /NodePort/);
+  assert.match(c.text, /级别:forbidden/);
+});
+
+check('rbac 域样本(ClusterRoleBinding 禁止授予 cluster-admin)', () => {
+  const c = buildPolicyCorpus().find(
+    (x) => x.id === 'policy.clusterrolebinding.no-cluster-admin.forbidden',
+  );
+  assert.ok(c, '按 policy.id 作 chunk id');
+  assert.equal(c.resource, 'ClusterRoleBinding');
+  assert.equal(c.path, 'roleRef');
+  assert.equal(c.title, '平台规范 · ClusterRoleBinding · roleRef');
+  assert.equal(c.sourceType, 'policy');
+  assert.equal(c.trustLevel, 'org-policy');
+  assert.match(c.text, /cluster-admin/);
+  assert.match(c.text, /级别:forbidden/);
 });
 
 console.log(`\n通过 ${passed} 项`);
