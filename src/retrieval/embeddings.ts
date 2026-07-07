@@ -2,9 +2,14 @@
 // 故意只暴露一个 embed() 函数,方便迭代3 换成别的提供商或本地模型而不动其他代码。
 
 const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
+
+/** 解析当前 embedding 模型:env VOYAGE_EMBEDDING_MODEL 优先,默认 voyage-3。 */
+export function resolveEmbeddingModel(): string {
+  return process.env.VOYAGE_EMBEDDING_MODEL ?? 'voyage-3';
+}
+
 /** 当前 embedding 模型名。索引 indexHash 依赖它:换模型即让旧索引失效。 */
-export const EMBEDDING_MODEL = 'voyage-3';
-const MODEL = EMBEDDING_MODEL;
+export const EMBEDDING_MODEL = resolveEmbeddingModel();
 const MAX_BATCH_SIZE = 1000;
 
 interface VoyageResponse {
@@ -19,6 +24,7 @@ interface VoyageResponse {
 export async function embed(
   texts: string[],
   inputType: 'document' | 'query',
+  model: string = resolveEmbeddingModel(),
 ): Promise<number[][]> {
   const key = process.env.VOYAGE_API_KEY;
   if (!key) {
@@ -34,7 +40,7 @@ export async function embed(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify({ input: batch, model: MODEL, input_type: inputType }),
+      body: JSON.stringify({ input: batch, model, input_type: inputType }),
     });
 
     if (!res.ok) {

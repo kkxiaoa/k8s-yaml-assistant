@@ -12,10 +12,12 @@ import { join } from 'node:path';
 import { Chunk } from '../knowledge/corpus';
 import type { IndexedChunk } from './retrieve';
 
-export const INDEX_DIR = join(process.cwd(), 'data', 'index');
-const MANIFEST_PATH = join(INDEX_DIR, 'manifest.json');
-const CHUNKS_PATH = join(INDEX_DIR, 'chunks.jsonl');
-const EMBEDDINGS_PATH = join(INDEX_DIR, 'embeddings.f32');
+/** 索引目录:env INDEX_DIR 优先,默认 data/index。A/B 用隔离目录(如 data/index-ab)。 */
+export function resolveIndexDir(): string {
+  return process.env.INDEX_DIR ?? join(process.cwd(), 'data', 'index');
+}
+
+export const INDEX_DIR = resolveIndexDir();
 
 export interface IndexManifest {
   indexHash: string;
@@ -54,10 +56,14 @@ export function computeIndexHash(
 export function writeIndex(
   index: IndexedChunk[],
   embeddingModel: string,
+  dir: string = resolveIndexDir(),
 ): IndexManifest {
   if (index.length === 0) throw new Error('writeIndex: 空索引');
   const dimension = index[0]!.embedding.length;
   if (dimension === 0) throw new Error('writeIndex: embedding 维度为 0');
+  const manifestPath = join(dir, 'manifest.json');
+  const chunksPath = join(dir, 'chunks.jsonl');
+  const embeddingsPath = join(dir, 'embeddings.f32');
 
   const corpusHash = computeCorpusHash(index);
   const manifest: IndexManifest = {
@@ -69,7 +75,7 @@ export function writeIndex(
     createdAt: new Date().toISOString(),
   };
 
-  mkdirSync(INDEX_DIR, { recursive: true });
+  mkdirSync(dir, { recursive: true });
 
   // chunks.jsonl(不含 embedding)
   const jsonl = index
@@ -84,7 +90,7 @@ export function writeIndex(
       }),
     )
     .join('\n');
-  writeFileSync(CHUNKS_PATH, `${jsonl}\n`);
+  writeFileSync(chunksPath, `${jsonl}\n`);
 
   // embeddings.f32(紧凑二进制,行序与 chunks.jsonl 对齐)
   const flat = new Float32Array(index.length * dimension);
@@ -93,35 +99,40 @@ export function writeIndex(
       throw new Error(`writeIndex: 第 ${i} 条维度不一致`);
     flat.set(c.embedding, i * dimension);
   });
-  writeFileSync(EMBEDDINGS_PATH, Buffer.from(flat.buffer));
+  writeFileSync(embeddingsPath, Buffer.from(flat.buffer));
 
-  writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
 }
 
 /** 读盘还原索引。文件缺失返回 null;格式损坏(count×dim 对不上)抛错。 */
-export function readIndex(): {
+export function readIndex(
+  dir: string = resolveIndexDir(),
+): {
   manifest: IndexManifest;
   chunks: IndexedChunk[];
 } | null {
+  const manifestPath = join(dir, 'manifest.json');
+  const chunksPath = join(dir, 'chunks.jsonl');
+  const embeddingsPath = join(dir, 'embeddings.f32');
   if (
-    !existsSync(MANIFEST_PATH) ||
-    !existsSync(CHUNKS_PATH) ||
-    !existsSync(EMBEDDINGS_PATH)
+    !existsSync(manifestPath) ||
+    !existsSync(chunksPath) ||
+    !existsSync(embeddingsPath)
   )
     return null;
 
   const manifest = JSON.parse(
-    readFileSync(MANIFEST_PATH, 'utf8'),
+    readFileSync(manifestPath, 'utf8'),
   ) as IndexManifest;
-  const lines = readFileSync(CHUNKS_PATH, 'utf8').split('\n').filter(Boolean);
+  const lines = readFileSync(chunksPath, 'utf8').split('\n').filter(Boolean);
   if (lines.length !== manifest.count) {
     throw new Error(
       `readIndex: chunks 行数 ${lines.length} != manifest.count ${manifest.count}`,
     );
   }
 
-  const buf = readFileSync(EMBEDDINGS_PATH);
+  const buf = readFileSync(embeddingsPath);
   const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   const flat = new Float32Array(ab);
   if (flat.length !== manifest.count * manifest.dimension) {
