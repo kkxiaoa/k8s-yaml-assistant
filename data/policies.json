@@ -1,0 +1,122 @@
+[
+  {
+    "id": "policy.deployment.resources.limits.required",
+    "rule": "生产环境 Deployment 容器必须设置 resources.limits(cpu/memory)",
+    "appliesTo": {
+      "resource": "Deployment",
+      "field": "spec.template.spec.containers.resources.limits"
+    },
+    "severity": "required",
+    "scope": "prod",
+    "rationale": "防止单容器耗尽节点资源,保障多租户稳定性",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.deployment.resources.requests.required",
+    "rule": "生产环境 Deployment 容器必须设置 resources.requests(cpu/memory)",
+    "appliesTo": {
+      "resource": "Deployment",
+      "field": "spec.template.spec.containers.resources.requests"
+    },
+    "severity": "required",
+    "scope": "prod",
+    "rationale": "无 requests 会导致调度器无法合理分配,易引发节点超卖",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.container.image.tag.no-latest",
+    "rule": "容器镜像禁止使用 latest tag,必须指定明确版本",
+    "appliesTo": {
+      "resource": "Deployment",
+      "field": "spec.template.spec.containers.image"
+    },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "latest 不可复现,回滚与审计困难,易导致节点间版本漂移",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.deployment.probes.liveness.recommended",
+    "rule": "生产环境 Deployment 容器建议配置 livenessProbe",
+    "appliesTo": {
+      "resource": "Deployment",
+      "field": "spec.template.spec.containers.livenessProbe"
+    },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "存活探针失败时自动重启,提升自愈能力",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.deployment.probes.readiness.recommended",
+    "rule": "生产环境 Deployment 容器建议配置 readinessProbe",
+    "appliesTo": {
+      "resource": "Deployment",
+      "field": "spec.template.spec.containers.readinessProbe"
+    },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "就绪探针未通过前不接流量,避免把请求打到未启动完成的实例",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.pod.security.privileged.forbidden",
+    "rule": "禁止 privileged 特权容器",
+    "appliesTo": {
+      "resource": "Pod",
+      "field": "spec.containers.securityContext.privileged"
+    },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "特权容器可访问宿主机所有设备,突破隔离边界",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.pod.security.hostNetwork.forbidden",
+    "rule": "禁止使用 hostNetwork",
+    "appliesTo": {
+      "resource": "Pod",
+      "field": "spec.hostNetwork"
+    },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "共享宿主机网络命名空间,削弱网络隔离并占用宿主端口",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.pod.security.runAsNonRoot.recommended",
+    "rule": "建议容器以非 root 用户运行(runAsNonRoot: true)",
+    "appliesTo": {
+      "resource": "Pod",
+      "field": "spec.containers.securityContext.runAsNonRoot"
+    },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "降低容器逃逸后的宿主机权限,遵循最小权限原则",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.deployment.replicas.min-two",
+    "rule": "生产环境 Deployment 副本数应不少于 2",
+    "appliesTo": {
+      "resource": "Deployment",
+      "field": "spec.replicas"
+    },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "单副本在节点故障/滚动更新时会中断服务,无法保证高可用",
+    "version": "2026-07-06"
+  },
+  {
+    "id": "policy.pod.volume.hostPath.discouraged",
+    "rule": "不建议使用 hostPath 卷",
+    "appliesTo": {
+      "resource": "Pod",
+      "field": "spec.volumes.hostPath"
+    },
+    "severity": "discouraged",
+    "scope": "all",
+    "rationale": "hostPath 把宿主机路径挂进容器,破坏可移植性并有安全风险",
+    "version": "2026-07-06"
+  }
+]
