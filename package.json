@@ -22,7 +22,7 @@
     "corpus:stats": "tsx scripts/corpus-stats.ts",
     "corpus:closure": "tsx scripts/curated-closure.ts",
     "index:build": "tsx scripts/index-build.ts",
-    "test": "tsx src/validation/validate.test.ts && tsx src/server/agent.test.ts && tsx src/knowledge/policy-corpus.test.ts && tsx src/retrieval/boost.test.ts && tsx src/retrieval/sources.test.ts && tsx src/retrieval/router.test.ts",
+    "test": "tsx src/validation/validate.test.ts && tsx src/server/agent.test.ts && tsx src/knowledge/policy-corpus.test.ts && tsx src/retrieval/boost.test.ts && tsx src/retrieval/sources.test.ts && tsx src/retrieval/router.test.ts && tsx src/retrieval/embeddings.test.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
