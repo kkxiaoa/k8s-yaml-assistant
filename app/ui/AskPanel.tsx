@@ -180,7 +180,8 @@ export function AskPanel({
                   <p className="mt-1 break-words text-xs leading-relaxed text-fg/80">
                     {source.text}
                   </p>
-                  {source.sourceUri && (
+                  {/* sourceUri 目前只有 schema 来源有(http);此判断是防未来非 URL 来源渲染成坏链接 */}
+                  {source.sourceUri?.startsWith('http') && (
                     <a
                       href={source.sourceUri}
                       target="_blank"

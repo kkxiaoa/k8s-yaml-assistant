@@ -6,7 +6,7 @@ config({ override: true });
 import { performance } from 'node:perf_hooks';
 import Anthropic from '@anthropic-ai/sdk';
 import { searchCorpusTraced } from '../retrieval/retrieve';
-import { formatSources, type Source } from '../retrieval/sources';
+import { formatSources, CONFLICT_RULES, type Source } from '../retrieval/sources';
 import { CORPUS } from '../knowledge/corpus';
 import type { SourceType, TrustLevel } from '../knowledge/schema-corpus';
 import { inferResource } from '../retrieval/router';
@@ -31,6 +31,7 @@ export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,�
 - 若 <editor_context> 与 <docs> 冲突,以 <docs> 和校验错误为准。
 - 若片段不足以回答,明确说"提供的文档片段中没有相关信息",不要猜。
 - 关键事实(字段名、取值、默认值)后标出处如 [S1],对应 <docs> 里的来源编号;不要引用给定来源之外的内容。
+${CONFLICT_RULES}
 - 简洁准确,涉及枚举值时列全。用中文回答。`;
 
 export function getClient(): Anthropic {
