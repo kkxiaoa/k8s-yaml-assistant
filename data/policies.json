@@ -2,121 +2,379 @@
   {
     "id": "policy.deployment.resources.limits.required",
     "rule": "生产环境 Deployment 容器必须设置 resources.limits(cpu/memory)",
-    "appliesTo": {
-      "resource": "Deployment",
-      "field": "spec.template.spec.containers.resources.limits"
-    },
+    "appliesTo": { "resource": "Deployment", "field": "spec.template.spec.containers.resources.limits" },
     "severity": "required",
     "scope": "prod",
     "rationale": "防止单容器耗尽节点资源,保障多租户稳定性",
-    "version": "2026-07-06"
+    "version": "2026-07-07"
   },
   {
     "id": "policy.deployment.resources.requests.required",
     "rule": "生产环境 Deployment 容器必须设置 resources.requests(cpu/memory)",
-    "appliesTo": {
-      "resource": "Deployment",
-      "field": "spec.template.spec.containers.resources.requests"
-    },
+    "appliesTo": { "resource": "Deployment", "field": "spec.template.spec.containers.resources.requests" },
     "severity": "required",
     "scope": "prod",
-    "rationale": "无 requests 会导致调度器无法合理分配,易引发节点超卖",
-    "version": "2026-07-06"
+    "rationale": "无 requests 调度器无法合理分配,易引发节点超卖",
+    "version": "2026-07-07"
   },
   {
-    "id": "policy.container.image.tag.no-latest",
+    "id": "policy.deployment.image.tag.no-latest",
     "rule": "容器镜像禁止使用 latest tag,必须指定明确版本",
-    "appliesTo": {
-      "resource": "Deployment",
-      "field": "spec.template.spec.containers.image"
-    },
+    "appliesTo": { "resource": "Deployment", "field": "spec.template.spec.containers.image" },
     "severity": "forbidden",
     "scope": "all",
     "rationale": "latest 不可复现,回滚与审计困难,易导致节点间版本漂移",
-    "version": "2026-07-06"
+    "version": "2026-07-07"
   },
   {
     "id": "policy.deployment.probes.liveness.recommended",
     "rule": "生产环境 Deployment 容器建议配置 livenessProbe",
-    "appliesTo": {
-      "resource": "Deployment",
-      "field": "spec.template.spec.containers.livenessProbe"
-    },
+    "appliesTo": { "resource": "Deployment", "field": "spec.template.spec.containers.livenessProbe" },
     "severity": "recommended",
     "scope": "prod",
     "rationale": "存活探针失败时自动重启,提升自愈能力",
-    "version": "2026-07-06"
+    "version": "2026-07-07"
   },
   {
     "id": "policy.deployment.probes.readiness.recommended",
     "rule": "生产环境 Deployment 容器建议配置 readinessProbe",
-    "appliesTo": {
-      "resource": "Deployment",
-      "field": "spec.template.spec.containers.readinessProbe"
-    },
+    "appliesTo": { "resource": "Deployment", "field": "spec.template.spec.containers.readinessProbe" },
     "severity": "recommended",
     "scope": "prod",
-    "rationale": "就绪探针未通过前不接流量,避免把请求打到未启动完成的实例",
-    "version": "2026-07-06"
-  },
-  {
-    "id": "policy.pod.security.privileged.forbidden",
-    "rule": "禁止 privileged 特权容器",
-    "appliesTo": {
-      "resource": "Pod",
-      "field": "spec.containers.securityContext.privileged"
-    },
-    "severity": "forbidden",
-    "scope": "all",
-    "rationale": "特权容器可访问宿主机所有设备,突破隔离边界",
-    "version": "2026-07-06"
-  },
-  {
-    "id": "policy.pod.security.hostNetwork.forbidden",
-    "rule": "禁止使用 hostNetwork",
-    "appliesTo": {
-      "resource": "Pod",
-      "field": "spec.hostNetwork"
-    },
-    "severity": "forbidden",
-    "scope": "all",
-    "rationale": "共享宿主机网络命名空间,削弱网络隔离并占用宿主端口",
-    "version": "2026-07-06"
-  },
-  {
-    "id": "policy.pod.security.runAsNonRoot.recommended",
-    "rule": "建议容器以非 root 用户运行(runAsNonRoot: true)",
-    "appliesTo": {
-      "resource": "Pod",
-      "field": "spec.containers.securityContext.runAsNonRoot"
-    },
-    "severity": "recommended",
-    "scope": "all",
-    "rationale": "降低容器逃逸后的宿主机权限,遵循最小权限原则",
-    "version": "2026-07-06"
+    "rationale": "就绪探针未通过前不接流量,避免请求打到未启动完成的实例",
+    "version": "2026-07-07"
   },
   {
     "id": "policy.deployment.replicas.min-two",
     "rule": "生产环境 Deployment 副本数应不少于 2",
-    "appliesTo": {
-      "resource": "Deployment",
-      "field": "spec.replicas"
-    },
+    "appliesTo": { "resource": "Deployment", "field": "spec.replicas" },
     "severity": "recommended",
     "scope": "prod",
     "rationale": "单副本在节点故障/滚动更新时会中断服务,无法保证高可用",
-    "version": "2026-07-06"
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.pod.security.privileged.forbidden",
+    "rule": "禁止 privileged 特权容器",
+    "appliesTo": { "resource": "Pod", "field": "spec.containers.securityContext.privileged" },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "特权容器可访问宿主机所有设备,突破隔离边界",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.pod.security.hostNetwork.forbidden",
+    "rule": "禁止使用 hostNetwork",
+    "appliesTo": { "resource": "Pod", "field": "spec.hostNetwork" },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "共享宿主机网络命名空间,削弱网络隔离并占用宿主端口",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.pod.security.hostPID.forbidden",
+    "rule": "禁止使用 hostPID / hostIPC",
+    "appliesTo": { "resource": "Pod", "field": "spec.hostPID" },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "共享宿主机进程/IPC 命名空间,容器可窥探或干扰宿主及其他容器进程",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.pod.security.runAsNonRoot.recommended",
+    "rule": "建议容器以非 root 用户运行(runAsNonRoot: true)",
+    "appliesTo": { "resource": "Pod", "field": "spec.containers.securityContext.runAsNonRoot" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "降低容器逃逸后的宿主机权限,遵循最小权限原则",
+    "version": "2026-07-07"
   },
   {
     "id": "policy.pod.volume.hostPath.discouraged",
     "rule": "不建议使用 hostPath 卷",
-    "appliesTo": {
-      "resource": "Pod",
-      "field": "spec.volumes.hostPath"
-    },
+    "appliesTo": { "resource": "Pod", "field": "spec.volumes.hostPath" },
     "severity": "discouraged",
     "scope": "all",
     "rationale": "hostPath 把宿主机路径挂进容器,破坏可移植性并有安全风险",
-    "version": "2026-07-06"
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.statefulset.serviceName.required",
+    "rule": "StatefulSet 必须设置 serviceName 指向管理它的 headless Service",
+    "appliesTo": { "resource": "StatefulSet", "field": "spec.serviceName" },
+    "severity": "required",
+    "scope": "all",
+    "rationale": "serviceName 提供稳定网络标识,缺失会破坏有状态副本的可寻址性",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.statefulset.resources.limits.required",
+    "rule": "生产环境 StatefulSet 容器必须设置 resources.limits",
+    "appliesTo": { "resource": "StatefulSet", "field": "spec.template.spec.containers.resources.limits" },
+    "severity": "required",
+    "scope": "prod",
+    "rationale": "有状态负载资源不受限时,单实例故障可能拖垮整个节点",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.daemonset.resources.limits.required",
+    "rule": "DaemonSet 容器必须设置 resources.limits",
+    "appliesTo": { "resource": "DaemonSet", "field": "spec.template.spec.containers.resources.limits" },
+    "severity": "required",
+    "scope": "prod",
+    "rationale": "DaemonSet 在每个节点运行,无限制会放大对全集群节点的资源冲击",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.daemonset.updateStrategy.rollingUpdate.recommended",
+    "rule": "DaemonSet 建议使用 RollingUpdate 更新策略",
+    "appliesTo": { "resource": "DaemonSet", "field": "spec.updateStrategy" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "OnDelete 需手动删 Pod 才更新,易导致节点间版本长期不一致",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.job.backoffLimit.recommended",
+    "rule": "Job 建议显式设置 backoffLimit",
+    "appliesTo": { "resource": "Job", "field": "spec.backoffLimit" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "不设会用默认重试次数,失败任务可能反复重试消耗资源",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.job.ttlSecondsAfterFinished.recommended",
+    "rule": "Job 建议设置 ttlSecondsAfterFinished 自动清理",
+    "appliesTo": { "resource": "Job", "field": "spec.ttlSecondsAfterFinished" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "完成的 Job 不清理会持续占用 etcd 对象配额",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.cronjob.concurrencyPolicy.recommended",
+    "rule": "CronJob 建议设置 concurrencyPolicy 为 Forbid 或 Replace",
+    "appliesTo": { "resource": "CronJob", "field": "spec.concurrencyPolicy" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "默认 Allow 会在任务执行超时时并发堆积,压垮下游",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.cronjob.history.limit.recommended",
+    "rule": "CronJob 建议限制 successful/failedJobsHistoryLimit",
+    "appliesTo": { "resource": "CronJob", "field": "spec.successfulJobsHistoryLimit" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "历史 Job 无限累积会占用对象配额、拖慢 list 操作",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.pvc.storageClassName.required",
+    "rule": "PersistentVolumeClaim 必须显式指定 storageClassName",
+    "appliesTo": { "resource": "PersistentVolumeClaim", "field": "spec.storageClassName" },
+    "severity": "required",
+    "scope": "prod",
+    "rationale": "依赖集群默认 StorageClass 会随集群差异漂移,导致跨环境行为不一致",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.pvc.resources.requests.storage.required",
+    "rule": "PersistentVolumeClaim 必须设置 resources.requests.storage",
+    "appliesTo": { "resource": "PersistentVolumeClaim", "field": "spec.resources.requests.storage" },
+    "severity": "required",
+    "scope": "all",
+    "rationale": "缺容量请求无法完成绑定/供给",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.pv.reclaimPolicy.retain.recommended",
+    "rule": "生产环境 PersistentVolume 建议 persistentVolumeReclaimPolicy 设为 Retain",
+    "appliesTo": { "resource": "PersistentVolume", "field": "spec.persistentVolumeReclaimPolicy" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "Delete 在 PVC 删除时连带删除底层数据卷,生产数据应保留待人工确认",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.storageclass.reclaimPolicy.retain.recommended",
+    "rule": "生产环境 StorageClass 建议 reclaimPolicy 设为 Retain",
+    "appliesTo": { "resource": "StorageClass", "field": "reclaimPolicy" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "默认 Delete 会在 PVC 删除时销毁数据卷,生产应避免误删",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.storageclass.allowVolumeExpansion.recommended",
+    "rule": "StorageClass 建议开启 allowVolumeExpansion",
+    "appliesTo": { "resource": "StorageClass", "field": "allowVolumeExpansion" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "不开启则 PVC 无法在线扩容,后续扩容需重建卷、中断服务",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.volumesnapshotclass.deletionPolicy.retain.recommended",
+    "rule": "生产环境 VolumeSnapshotClass 建议 deletionPolicy 设为 Retain",
+    "appliesTo": { "resource": "VolumeSnapshotClass", "field": "deletionPolicy" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "Delete 会在快照对象删除时销毁底层快照,备份数据应保留",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.service.type.nodeport.forbidden",
+    "rule": "生产环境禁止 Service 使用 type: NodePort 直接对外",
+    "appliesTo": { "resource": "Service", "field": "spec.type" },
+    "severity": "forbidden",
+    "scope": "prod",
+    "rationale": "NodePort 暴露节点端口、绕过入口治理,生产应经 Ingress/LoadBalancer",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.service.externalTrafficPolicy.local.recommended",
+    "rule": "对外 Service 建议 externalTrafficPolicy 设为 Local",
+    "appliesTo": { "resource": "Service", "field": "spec.externalTrafficPolicy" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "Cluster 策略会做二次转发并丢失客户端源 IP,Local 保留源 IP、减少跳数",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.ingress.tls.required",
+    "rule": "生产环境 Ingress 必须配置 TLS",
+    "appliesTo": { "resource": "Ingress", "field": "spec.tls" },
+    "severity": "required",
+    "scope": "prod",
+    "rationale": "明文 HTTP 对外暴露有中间人与嗅探风险",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.ingress.ingressClassName.recommended",
+    "rule": "Ingress 建议显式指定 ingressClassName",
+    "appliesTo": { "resource": "Ingress", "field": "spec.ingressClassName" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "依赖默认 IngressClass 在多控制器集群中易被错误控制器接管",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.networkpolicy.default-deny.recommended",
+    "rule": "生产 namespace 建议配置默认 deny-all NetworkPolicy 再显式放行",
+    "appliesTo": { "resource": "NetworkPolicy" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "K8s 默认全通,零信任下应先默认拒绝入/出站再按需放行",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.configmap.no-secret-data.forbidden",
+    "rule": "禁止在 ConfigMap 中存放敏感数据(密码/token/密钥)",
+    "appliesTo": { "resource": "ConfigMap", "field": "data" },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "ConfigMap 明文存储、无加密与 RBAC 细分,敏感数据应用 Secret",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.secret.no-plaintext-data.discouraged",
+    "rule": "不建议在 Secret 的 data 明文写入(应经 stringData 或外部密钥管理注入)",
+    "appliesTo": { "resource": "Secret", "field": "data" },
+    "severity": "discouraged",
+    "scope": "all",
+    "rationale": "Secret 的 data 仅 base64 编码、非加密,明文提交入库/仓库有泄露风险",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.secret.type.explicit.recommended",
+    "rule": "Secret 建议显式声明 type",
+    "appliesTo": { "resource": "Secret", "field": "type" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "明确 type(如 kubernetes.io/tls)可让控制器校验字段完整性、避免误用",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.serviceaccount.automountToken.disabled.recommended",
+    "rule": "不需要访问 API 的工作负载建议 automountServiceAccountToken 设为 false",
+    "appliesTo": { "resource": "ServiceAccount", "field": "automountServiceAccountToken" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "默认挂载的 SA token 一旦容器被攻破即成为攻击 API Server 的凭证",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.role.no-wildcard.forbidden",
+    "rule": "Role 禁止对 verbs/resources 使用通配符 *",
+    "appliesTo": { "resource": "Role", "field": "rules" },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "通配符授予过度权限,违反最小权限原则",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.rolebinding.no-default-sa.recommended",
+    "rule": "RoleBinding 建议绑定到专用 ServiceAccount 而非 default",
+    "appliesTo": { "resource": "RoleBinding", "field": "subjects" },
+    "severity": "recommended",
+    "scope": "all",
+    "rationale": "复用 default SA 会让同 namespace 所有 Pod 隐式获得该权限",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.clusterrole.no-wildcard.forbidden",
+    "rule": "ClusterRole 禁止对 verbs/resources 使用通配符 *",
+    "appliesTo": { "resource": "ClusterRole", "field": "rules" },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "集群级通配符权限一旦泄露影响面覆盖整个集群",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.clusterrolebinding.no-cluster-admin.forbidden",
+    "rule": "禁止把 cluster-admin 通过 ClusterRoleBinding 授予应用工作负载",
+    "appliesTo": { "resource": "ClusterRoleBinding", "field": "roleRef" },
+    "severity": "forbidden",
+    "scope": "all",
+    "rationale": "cluster-admin 等同集群 root,应用不应持有,泄露即完全失守",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.hpa.minReplicas.min-two.recommended",
+    "rule": "生产环境 HorizontalPodAutoscaler 建议 minReplicas 不少于 2",
+    "appliesTo": { "resource": "HorizontalPodAutoscaler", "field": "spec.minReplicas" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "minReplicas=1 在缩容后失去冗余,节点故障即中断服务",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.poddisruptionbudget.recommended",
+    "rule": "生产环境关键工作负载建议配置 PodDisruptionBudget",
+    "appliesTo": { "resource": "PodDisruptionBudget", "field": "spec.minAvailable" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "无 PDB 时节点排水/升级可能同时驱逐所有副本,造成服务中断",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.resourcequota.per-namespace.recommended",
+    "rule": "生产 namespace 建议配置 ResourceQuota",
+    "appliesTo": { "resource": "ResourceQuota", "field": "spec.hard" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "无配额时单租户可耗尽集群资源,影响多租户隔离",
+    "version": "2026-07-07"
+  },
+  {
+    "id": "policy.limitrange.per-namespace.recommended",
+    "rule": "生产 namespace 建议配置 LimitRange 提供默认 limits/requests",
+    "appliesTo": { "resource": "LimitRange", "field": "spec.limits" },
+    "severity": "recommended",
+    "scope": "prod",
+    "rationale": "为未显式设资源的容器兜底默认值,配合 ResourceQuota 防止无限制 Pod",
+    "version": "2026-07-07"
   }
 ]
