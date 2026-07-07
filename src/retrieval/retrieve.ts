@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { embed, EMBEDDING_MODEL } from './embeddings';
 import { CORPUS, type Chunk } from '../knowledge/corpus';
 import { RESOURCE_BOOST } from './router';
+import { policyBoost } from './boost';
 import { rerank, COARSE_N } from './rerank';
 import { readIndex, computeCorpusHash, computeIndexHash } from './index-store';
 import { toTraceHit, type RetrievalTrace } from './trace';
@@ -63,7 +64,8 @@ export function denseSearch(
         (boostResource && c.resource === boostResource ? RESOURCE_BOOST : 0) +
         (normalizedPath && c.path.toLowerCase().endsWith(normalizedPath)
           ? FIELD_PATH_BOOST
-          : 0),
+          : 0) +
+        policyBoost(c as Chunk, boostResource, normalizedPath),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
