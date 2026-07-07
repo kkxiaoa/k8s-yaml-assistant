@@ -1,6 +1,7 @@
 // 生成层评估:Faithfulness(忠于检索 context / 防幻觉)。Stage 5(§7.2)。
-// 用法: npm run eval:faith        全量(逐条 rerank,~25-30min)
-//       npm run eval:faith -- 2   冒烟:可答/拒答各前 2 条
+// 用法: npm run eval:faith             全量(逐条 rerank,~25-30min)
+//       npm run eval:faith -- 2        冒烟:可答/拒答各前 2 条
+//       npm run eval:faith -- --policy 只跑 Stage 6 policy 用例
 
 import { config } from 'dotenv';
 config({ override: true });
@@ -26,12 +27,31 @@ import {
 /** 上下文取 rerank 后 top-3,与 serving Recall@3 baseline 对齐,归因才干净。 */
 const CONTEXT_K = 3;
 
-/** 冒烟子集:可答/拒答各取前 n 条,覆盖两条分支。不传 = 全量 EVAL_SET。 */
-function selectCases(smokeN: number | null): EvalCase[] {
-  if (smokeN === null) return EVAL_SET;
+interface CaseSelection {
+  cases: EvalCase[];
+  suffix: '' | '-smoke' | '-policy';
+  label: string;
+}
+
+/** 选择评估子集。不传 = 全量;数字 = 冒烟;--policy = 只跑 Stage 6 policy 用例。 */
+function selectCases(arg: string | undefined): CaseSelection {
+  if (arg === '--policy') {
+    const cases = EVAL_SET.filter((c) => c.id.startsWith('policy-'));
+    return { cases, suffix: '-policy', label: ',policy 子集' };
+  }
+  if (!arg) return { cases: EVAL_SET, suffix: '', label: '' };
+
+  const smokeN = Number(arg);
+  if (!Number.isFinite(smokeN) || smokeN <= 0) {
+    throw new Error('用法: npm run eval:faith [-- <N>|--policy]');
+  }
   const answerable = EVAL_SET.filter((c) => c.answerable).slice(0, smokeN);
   const refusal = EVAL_SET.filter((c) => !c.answerable).slice(0, smokeN);
-  return [...answerable, ...refusal];
+  return {
+    cases: [...answerable, ...refusal],
+    suffix: '-smoke',
+    label: `,冒烟:可答/拒答各 ${smokeN}`,
+  };
 }
 
 async function processCase(
@@ -112,11 +132,10 @@ async function main(): Promise<void> {
   }
   const client = getClient();
 
-  const smokeArg = process.argv[2];
-  const smokeN = smokeArg ? Number(smokeArg) : null;
-  const cases = selectCases(smokeN);
+  const selection = selectCases(process.argv[2]);
+  const { cases } = selection;
   console.error(
-    `Faithfulness 评估(${cases.length} 条${smokeN ? `,冒烟:可答/拒答各 ${smokeN}` : ''}:检索→生成→裁判,逐条调用,稍候)\n`,
+    `Faithfulness 评估(${cases.length} 条${selection.label}:检索→生成→裁判,逐条调用,稍候)\n`,
   );
 
   let faithfulCount = 0; // 忠于检索 context(faithfulness 分子)
@@ -210,7 +229,7 @@ async function main(): Promise<void> {
 
   // 落盘:逐条明细(faith/<id>.jsonl)+ 汇总(runs/<id>.json,kind=faith,可对比 baseline)。冒烟带 -smoke。
   const id =
-    new Date().toISOString().replace(/[:.]/g, '-') + (smokeN ? '-smoke' : '');
+    new Date().toISOString().replace(/[:.]/g, '-') + selection.suffix;
   const tracePath = writeFaithTraces(id, traces);
   const corpusHash = computeCorpusHash(CORPUS);
   const run: EvalRun = {
@@ -219,7 +238,7 @@ async function main(): Promise<void> {
     createdAt: new Date().toISOString(),
     corpusHash,
     indexHash: computeIndexHash(corpusHash, EMBEDDING_MODEL),
-    evalSetHash: computeEvalSetHash(EVAL_SET),
+    evalSetHash: computeEvalSetHash(cases),
     embeddingModel: EMBEDDING_MODEL,
     rerankModel: RERANK_MODEL,
     answerModel: MODEL,
@@ -239,7 +258,9 @@ async function main(): Promise<void> {
   const runPath = writeRun(run);
   console.error(
     `\n逐条明细 → ${tracePath}\n汇总 run → ${runPath}` +
-      (smokeN ? '  (冒烟,带 -smoke 标记,勿晋升 baseline)' : ''),
+      (selection.suffix
+        ? `  (${selection.suffix.slice(1)} 子集,勿晋升 baseline)`
+        : ''),
   );
 }
 

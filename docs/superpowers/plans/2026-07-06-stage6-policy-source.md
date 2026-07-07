@@ -30,7 +30,7 @@
 - `src/retrieval/router.ts` — `POLICY_RELATED_BOOST` 常量 + `RULES` 扩 policy 涉及资源
 - `src/server/pipeline.ts` — `Hit.sourceType` union + 去 cast + `ASK_SYSTEM` 冲突规则
 - `src/eval/answer.ts` — `ANSWER_SYSTEM` 冲突规则
-- `src/eval/eval-set.ts` — policy case（纯 policy + 冲突）
+- `src/eval/eval-set.ts` — 新增 policy 相关 EvalCase（纯 policy + 冲突）
 - `src/eval/judge.ts` — `Verdict` 扩 policy detail + `JUDGE_SYSTEM` policy 判定段
 - `src/eval/faithfulness.ts` — policy detail 落 trace
 - `scripts/build-calibration.ts` — policy 区分 calibration case
@@ -645,45 +645,22 @@ eval-set 加 policy case（纯 policy + 冲突）；judge 加 policy detail 字�
 - Modify: `src/eval/faithfulness.ts`
 - Modify: `scripts/build-calibration.ts`
 
-- [ ] **Step 1: eval-set 加 policy case（eval-set.ts，EVAL_SET 数组末尾）**
+- [x] **Step 1: eval-set 加 policy 相关 EvalCase（eval-set.ts，EVAL_SET 数组末尾）**
 
 ```ts
-  // ── Stage 6:policy 源 ──────────────────────────────
-  {
-    id: 'policy-image-latest',
-    taskType: 'ask_free',
-    answerable: true,
-    source: 'human',
-    resource: 'Deployment',
-    question: '平台对 Deployment 容器镜像 tag 有什么要求?',
-    expectedChunkIds: ['policy.container.image.tag.no-latest'],
-  },
-  {
-    id: 'policy-conflict-latest',
-    taskType: 'ask_free',
-    answerable: true,
-    source: 'human',
-    resource: 'Deployment',
-    question: '生产环境我能用 nginx:latest 吗?',
-    expectedChunkIds: ['policy.container.image.tag.no-latest'],
-  },
-  {
-    id: 'policy-resource-limits',
-    taskType: 'ask_free',
-    answerable: true,
-    source: 'human',
-    resource: 'Deployment',
-    question: '平台对 Deployment 资源限制有什么规范?',
-    expectedChunkIds: ['policy.deployment.resources.limits.required'],
-  },
+  // ── Stage 6:平台 policy 用例(纯 policy 问询 + schema/policy 冲突)──
+  // 已落 9 条 policy-* EvalCase:
+  // policy-deploy-limits / policy-pod-privileged / policy-sc-reclaim /
+  // policy-secret-plaintext / policy-crb-admin / policy-ingress-tls /
+  // policy-conflict-latest / policy-conflict-nodeport / policy-conflict-privileged
 ```
 
-- [ ] **Step 2: 校验 eval-set（chunk id 存在性）**
+- [x] **Step 2: 校验 eval-set（chunk id 存在性）**
 
 Run: `npm run eval:check`
 Expected: 通过；policy case 的 `expectedChunkIds` 都能在 CORPUS 找到（Task 2 已让 policy chunk id = policy.id）。
 
-- [ ] **Step 3: Verdict 扩 policy detail（judge.ts:18-22）**
+- [x] **Step 3: Verdict 扩 policy detail（judge.ts:18-22）**
 
 ```ts
 export interface Verdict {
@@ -702,7 +679,7 @@ export interface Verdict {
 }
 ```
 
-- [ ] **Step 4: JUDGE_SYSTEM 加 policy 判定段 + parseJson 解析 policy（judge.ts）**
+- [x] **Step 4: JUDGE_SYSTEM 加 policy 判定段 + parseJson 解析 policy（judge.ts）**
 
 `JUDGE_SYSTEM` 输出 JSON 前追加一段：
 
@@ -735,40 +712,42 @@ JSON 模板改为：
     };
 ```
 
-- [ ] **Step 5: faithfulness.ts 让 policy detail 落 trace（faithfulness.ts）**
+- [x] **Step 5: faithfulness.ts 让 policy detail 落 trace（faithfulness.ts）**
 
 `FaithTrace` 已含 `verdict: Verdict | null`，policy detail 随 verdict 自动落盘（Task 3 的 Verdict 扩展）。无需改结构 —— 确认 `src/eval/faith-store.ts` 的 `FaithTrace.verdict` 类型是 `Verdict | null`（是则本步只需 `npx tsc` 确认通过）。
 
 Run: `npx tsc --noEmit -p tsconfig.json`
 Expected: `✓`
 
-- [ ] **Step 6: 冒烟 faith(policy case)看 detail 落盘**
+- [x] **Step 6: 冒烟 faith(policy case)看 detail 落盘**
 
-Run: `npm run eval:faith -- 2`（冒烟；跑完看输出）然后：
-Run: `npx tsx -e "import {readFileSync,readdirSync} from 'node:fs'; const d='data/eval/faith'; const f=readdirSync(d).filter(x=>x.includes('smoke')).sort().pop(); const ls=readFileSync(d+'/'+f,'utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l)); console.log(ls.filter(x=>x.id.startsWith('policy')).map(x=>({id:x.id,policy:x.verdict?.policy})))"`
+Run: `npm run eval:faith -- --policy`（只跑 9 条 policy 用例；跑完看输出）然后：
+Run: `npx tsx -e "import {readFileSync,readdirSync} from 'node:fs'; const d='data/eval/faith'; const f=readdirSync(d).filter(x=>x.includes('policy')).sort().pop(); const ls=readFileSync(d+'/'+f,'utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l)); console.log(ls.filter(x=>x.id.startsWith('policy')).map(x=>({id:x.id,policy:x.verdict?.policy})))"`
 Expected: policy case 的 verdict 带 policy detail（distinguished/conflictExplained/misstatedAsOfficial）。清理冒烟产物。
 
-- [ ] **Step 7: 建 policy 区分 calibration case（build-calibration.ts LABELS）**
+- [x] **Step 7: 建 policy 区分 calibration case（build-calibration.ts LABELS）**
 
 从 faith 明细取 policy case 的 (context, answer) 快照，**独立人工判定** policy detail（不照抄 judge）。LABELS 加 policy 条目，human 判定填 `distinguished`/`conflictExplained`/`misstatedAsOfficial` 期望值。
 
 > ⚠ §7.2 铁律:policy judge 新维度是**未校准**的。此步只固化 calibration set，下一步 `eval:judge` 测新维度的人机一致率;**未达标(≥80%)前不信 policy detail 数字**，只作定性观察。
 
-- [ ] **Step 8: 跑 judge 校准（含 policy 维度）**
+- [x] **Step 8: 跑 judge 校准（含 policy 维度）**
 
 Run: `npm run build:calibration && npm run eval:judge`
 Expected: faithful 维度一致率维持 ≥80%；policy 维度人机一致率产出（首次可能不达标——记录，后续调 JUDGE_SYSTEM policy 段再校，不阻塞本 plan）。
 
-- [ ] **Step 9: 跑检索 eval(policy 召回)**
+- [x] **Step 9: 跑检索 eval(policy 召回)**
 
 Run: `npm run eval`
 Expected: policy case（policy-image-latest / policy-resource-limits）Recall@3 命中 policy chunk；schema case Recall 不回退。
 
 - [ ] **Step 10: 全绿 + Commit**
 
+  当前已完成 `npx tsc --noEmit -p tsconfig.json`、`npm test`、`npm run build`、`npm run eval:check`、`npm run eval`、`npm run eval:faith -- --policy`、`npm run build:calibration`、`npm run eval:judge`；尚未提交 commit。
+
 ```bash
 npx tsc --noEmit -p tsconfig.json && npm test
-git add src/eval/eval-set.ts src/eval/judge.ts src/eval/faithfulness.ts scripts/build-calibration.ts data/eval/judge-calibration.jsonl
+git add src/eval/eval-set.ts src/eval/judge.ts src/eval/faithfulness.ts src/eval/judge-eval.ts scripts/build-calibration.ts data/eval/judge-calibration.jsonl
 git commit -m "feat(stage6): policy eval case + judge policy 区分维度 + 校准"
 ```
 
