@@ -17,6 +17,7 @@
     "eval:compare": "tsx scripts/eval-compare.ts",
     "eval:promote": "tsx scripts/eval-promote.ts",
     "voyage:ab": "tsx scripts/voyage-ab.ts",
+    "aliases:generate": "tsx scripts/generate-schema-aliases.ts",
     "aliases:check": "tsx scripts/check-schema-aliases.ts",
     "eval:check": "tsx scripts/eval-check.ts",
     "ingest:schemas": "tsx scripts/ingest-schemas.ts",
