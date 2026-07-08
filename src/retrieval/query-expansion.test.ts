@@ -29,7 +29,8 @@ function alias(
     path: 'spec.template.spec.containers.image',
     chunkId: 'Deployment::spec.template.spec.containers.image',
     fieldTerms: ['image', 'container image'],
-    zhAliases: ['镜像', '容器镜像'],
+    weakZhAliases: ['镜像', '容器镜像'],
+    strongZhAliases: [],
     source: 'llm_offline',
     reviewed: true,
     reviewedAt: '2026-07-08',
@@ -79,6 +80,7 @@ check('query 命中中文 alias 后追加 field terms + path', () => {
       resource: 'Deployment',
       path: 'spec.template.spec.containers.image',
       zhAlias: '容器镜像',
+      strength: 'weak',
     },
   ]);
 });
@@ -90,21 +92,21 @@ check('topN 限制生效', () => {
     [
       alias({
         id: 'image',
-        zhAliases: ['镜像'],
+        weakZhAliases: ['镜像'],
         fieldTerms: ['image', 'container image'],
       }),
       alias({
         id: 'resources',
         path: 'spec.template.spec.containers.resources.requests',
         chunkId: 'Deployment::spec.template.spec.containers.resources.requests',
-        zhAliases: ['资源'],
+        weakZhAliases: ['资源'],
         fieldTerms: ['resources', 'requests'],
       }),
       alias({
         id: 'volumes',
         path: 'spec.template.spec.volumes',
         chunkId: 'Deployment::spec.template.spec.volumes',
-        zhAliases: ['卷'],
+        weakZhAliases: ['卷'],
         fieldTerms: ['volumes'],
       }),
     ],
@@ -146,7 +148,8 @@ check('alias-aware:无 routedResource 时可由 alias 选中资源字段', () =>
         resource: 'PersistentVolumeClaim',
         path: 'spec.volumeMode',
         chunkId: 'PersistentVolumeClaim::spec.volumeMode',
-        zhAliases: ['裸块设备'],
+        weakZhAliases: ['卷模式'],
+        strongZhAliases: ['裸块设备'],
         fieldTerms: ['volumeMode', 'Block'],
       }),
     ],
@@ -159,8 +162,11 @@ check('alias-aware:无 routedResource 时可由 alias 选中资源字段', () =>
       resource: 'PersistentVolumeClaim',
       path: 'spec.volumeMode',
       zhAlias: '裸块设备',
+      strength: 'strong',
     },
   ]);
+  assert.equal(result.aliasSelectedResource, 'PersistentVolumeClaim');
+  assert.equal(result.resourceSelectionReason, 'no_route_strong_alias');
   assert.deepEqual(result.expansionTerms, ['volumeMode', 'Block', 'spec.volumeMode']);
 });
 
@@ -174,7 +180,8 @@ check('alias-aware: routedResource 错误时仍可由 alias 选中正确资源',
         resource: 'StorageClass',
         path: 'volumeBindingMode',
         chunkId: 'StorageClass::volumeBindingMode',
-        zhAliases: ['Pod 调度后再绑定'],
+        weakZhAliases: ['延迟绑定'],
+        strongZhAliases: ['Pod 调度后再绑定'],
         fieldTerms: ['volumeBindingMode', 'WaitForFirstConsumer'],
       }),
     ],
@@ -187,12 +194,54 @@ check('alias-aware: routedResource 错误时仍可由 alias 选中正确资源',
       resource: 'StorageClass',
       path: 'volumeBindingMode',
       zhAlias: 'Pod 调度后再绑定',
+      strength: 'strong',
     },
   ]);
+  assert.equal(result.aliasSelectedResource, 'StorageClass');
+  assert.equal(result.resourceSelectionReason, 'cross_resource_strong_alias');
   assert.deepEqual(result.expansionTerms, [
     'volumeBindingMode',
     'WaitForFirstConsumer',
   ]);
+});
+
+check('same resource: weak alias 允许 expansion 但不改变 resource', () => {
+  const result = expandQueryWithAliases('Deployment 容器镜像怎么写', 'Deployment', [
+    alias({ id: 'image' }),
+  ]);
+
+  assert.equal(result.aliasSelectedResource, 'Deployment');
+  assert.equal(result.resourceSelectionReason, 'same_resource');
+  assert.deepEqual(result.expansionTerms, [
+    'image',
+    'container image',
+    'spec.template.spec.containers.image',
+  ]);
+});
+
+check('wrong resource: weak alias 完全不扩展', () => {
+  const result = expandQueryWithAliases(
+    'Pod 容器怎么暴露端口号?',
+    'Pod',
+    [
+      alias({
+        id: 'endpoint-ports',
+        resource: 'Endpoints',
+        path: 'subsets.ports',
+        chunkId: 'Endpoints::subsets.ports',
+        fieldTerms: ['ports', 'subsets.ports'],
+        weakZhAliases: ['端口号'],
+        strongZhAliases: ['后端地址和端口'],
+      }),
+    ],
+    { resourceStrategy: 'alias-aware' },
+  );
+
+  assert.equal(result.expandedQueryText, result.originalQueryText);
+  assert.equal(result.aliasSelectedResource, 'Pod');
+  assert.equal(result.resourceSelectionReason, 'no_alias_match');
+  assert.deepEqual(result.matchedAliases, []);
+  assert.deepEqual(result.expansionTerms, []);
 });
 
 check('无命中时 expandedQueryText === originalQueryText', () => {
