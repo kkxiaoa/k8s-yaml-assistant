@@ -1,0 +1,91 @@
+[
+  {
+    "id": "pod-volumes",
+    "resource": "Pod",
+    "path": "spec.volumes",
+    "chunkId": "Pod::spec.volumes",
+    "evalCaseIds": ["pod-volumes"],
+    "metric": true
+  },
+  {
+    "id": "deploy-container-image",
+    "resource": "Deployment",
+    "path": "spec.template.spec.containers.image",
+    "chunkId": "Deployment::spec.template.spec.containers.image",
+    "evalCaseIds": ["deploy-container-image", "policy-conflict-latest"],
+    "metric": true
+  },
+  {
+    "id": "sts-volumeclaimtemplates",
+    "resource": "StatefulSet",
+    "path": "spec.volumeClaimTemplates",
+    "chunkId": "StatefulSet::spec.volumeClaimTemplates",
+    "evalCaseIds": ["sts-volumeclaimtemplates"],
+    "metric": true
+  },
+  {
+    "id": "rolebinding-subjects",
+    "resource": "RoleBinding",
+    "path": "subjects",
+    "chunkId": "RoleBinding::subjects",
+    "evalCaseIds": ["rolebinding-subjects"],
+    "metric": true
+  },
+  {
+    "id": "endpoints-subsets-addresses",
+    "resource": "Endpoints",
+    "path": "subsets.addresses",
+    "chunkId": "Endpoints::subsets.addresses",
+    "evalCaseIds": ["endpoints-subsets"],
+    "metric": true
+  },
+  {
+    "id": "endpoints-subsets-ports",
+    "resource": "Endpoints",
+    "path": "subsets.ports",
+    "chunkId": "Endpoints::subsets.ports",
+    "evalCaseIds": ["endpoints-subsets"],
+    "metric": true
+  },
+  {
+    "id": "pvc-volumemode",
+    "resource": "PersistentVolumeClaim",
+    "path": "spec.volumeMode",
+    "chunkId": "PersistentVolumeClaim::spec.volumeMode",
+    "evalCaseIds": ["pvc-volumemode"],
+    "metric": true
+  },
+  {
+    "id": "pvc-resources-requests",
+    "resource": "PersistentVolumeClaim",
+    "path": "spec.resources.requests",
+    "chunkId": "PersistentVolumeClaim::spec.resources.requests",
+    "evalCaseIds": ["pvc-resources"],
+    "metric": true
+  },
+  {
+    "id": "sc-volumebindingmode",
+    "resource": "StorageClass",
+    "path": "volumeBindingMode",
+    "chunkId": "StorageClass::volumeBindingMode",
+    "evalCaseIds": ["sc-volumebindingmode"],
+    "metric": true
+  },
+  {
+    "id": "sc-allowexpansion",
+    "resource": "StorageClass",
+    "path": "allowVolumeExpansion",
+    "chunkId": "StorageClass::allowVolumeExpansion",
+    "evalCaseIds": ["sc-allowexpansion"],
+    "metric": true
+  },
+  {
+    "id": "pod-privileged-observation",
+    "resource": "Pod",
+    "path": "spec.containers.securityContext.privileged",
+    "chunkId": "Pod::spec.containers.securityContext.privileged",
+    "evalCaseIds": ["policy-conflict-privileged"],
+    "metric": false,
+    "note": "policy-conflict-privileged 的真正 miss 是 policy chunk,本条仅观察 schema 侧 expansion,不计入 A3 schema alias 成功率"
+  }
+]
