@@ -11,6 +11,7 @@ import {
   expandQueryWithAliases,
   loadReviewedAliases,
   type MatchedAlias,
+  type ResourceSelectionReason,
   type SchemaFieldAlias,
 } from '../src/retrieval/query-expansion';
 
@@ -48,6 +49,7 @@ interface QueryVariant {
   boostResource: string | undefined;
   matchedAliases: MatchedAlias[];
   expansionTerms: string[];
+  resourceSelectionReason: ResourceSelectionReason;
 }
 
 interface ABResult {
@@ -131,6 +133,7 @@ function forceTargetExpansion(
       resource: alias.resource,
       path: alias.path,
       zhAlias: '<forced-target>',
+      strength: 'strong',
     })),
     expansionTerms,
   };
@@ -168,7 +171,7 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
   });
   const oracleExpansion = expandQueryWithAliases(evalCase.question, oracleResource, aliases);
   const forced = forceTargetExpansion(evalCase.question, abCase.targetChunkIds, aliases);
-  const aliasSelectedResource = autoExpansion.matchedAliases[0]?.resource ?? autoResource;
+  const aliasSelectedResource = autoExpansion.aliasSelectedResource;
 
   const variants: QueryVariant[] = [
     {
@@ -177,6 +180,7 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
       boostResource: autoResource,
       matchedAliases: [],
       expansionTerms: [],
+      resourceSelectionReason: 'no_alias_match',
     },
     {
       label: 'auto/alias-expansion',
@@ -184,6 +188,7 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
       boostResource: aliasSelectedResource,
       matchedAliases: autoExpansion.matchedAliases,
       expansionTerms: autoExpansion.expansionTerms,
+      resourceSelectionReason: autoExpansion.resourceSelectionReason,
     },
     {
       label: 'oracle/alias-expansion',
@@ -191,6 +196,7 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
       boostResource: oracleResource,
       matchedAliases: oracleExpansion.matchedAliases,
       expansionTerms: oracleExpansion.expansionTerms,
+      resourceSelectionReason: oracleExpansion.resourceSelectionReason,
     },
     {
       label: 'forced-target-expansion',
@@ -198,6 +204,7 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
       boostResource: oracleResource,
       matchedAliases: forced.matchedAliases,
       expansionTerms: forced.expansionTerms,
+      resourceSelectionReason: 'no_alias_match',
     },
   ];
 
@@ -247,7 +254,7 @@ async function evaluateAllCase(
   const autoExpansion = expandQueryWithAliases(evalCase.question, autoResource, aliases, {
     resourceStrategy: 'alias-aware',
   });
-  const aliasSelectedResource = autoExpansion.matchedAliases[0]?.resource ?? autoResource;
+  const aliasSelectedResource = autoExpansion.aliasSelectedResource;
 
   const noExpansion = await searchCorpusTraced(evalCase.question, {
     boostResource: autoResource,
@@ -273,6 +280,7 @@ async function evaluateAllCase(
       boostResource: aliasSelectedResource,
       matchedAliases: autoExpansion.matchedAliases,
       expansionTerms: autoExpansion.expansionTerms,
+      resourceSelectionReason: autoExpansion.resourceSelectionReason,
     },
   };
 }
@@ -287,10 +295,11 @@ function printDiagnostic(result: ABResult, label: QueryVariant['label']): void {
   console.log(
     `${label.padEnd(24)} R@3=${pct(sideResult.recall3)} MRR=${sideResult.reciprocalRank.toFixed(3)} boost=${diagnostic.boostResource ?? '<none>'}`,
   );
+  console.log(`  reason: ${diagnostic.resourceSelectionReason}`);
   console.log(
     `  matched: ${
       diagnostic.matchedAliases
-        .map((a) => `${a.resource}::${a.path} <= ${a.zhAlias}`)
+        .map((a) => `${a.resource}::${a.path} <= ${a.zhAlias}(${a.strength})`)
         .join(' ; ') || '<none>'
     }`,
   );
@@ -319,6 +328,7 @@ function diagnosticsOf(variant: QueryVariant): Omit<QueryVariant, 'label'> {
     boostResource: variant.boostResource,
     matchedAliases: variant.matchedAliases,
     expansionTerms: variant.expansionTerms,
+    resourceSelectionReason: variant.resourceSelectionReason,
   };
 }
 
@@ -365,10 +375,11 @@ function printAllDetails(label: string, results: AllABResult[]): void {
     console.log(`\n━━ ${result.evalCaseId}`);
     console.log(`expected: ${result.expectedChunkIds.join(' | ')}`);
     console.log(`autoResource: ${result.autoResource ?? '<none>'}`);
+    console.log(`reason: ${result.diagnostics.resourceSelectionReason}`);
     console.log(
       `matched: ${
         result.diagnostics.matchedAliases
-          .map((a) => `${a.resource}::${a.path} <= ${a.zhAlias}`)
+          .map((a) => `${a.resource}::${a.path} <= ${a.zhAlias}(${a.strength})`)
           .join(' ; ') || '<none>'
       }`,
     );
