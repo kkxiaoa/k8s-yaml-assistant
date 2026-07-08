@@ -5,7 +5,9 @@
     "path": "spec.volumes",
     "chunkId": "Pod::spec.volumes",
     "evalCaseIds": ["pod-volumes"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "deploy-container-image",
@@ -13,7 +15,9 @@
     "path": "spec.template.spec.containers.image",
     "chunkId": "Deployment::spec.template.spec.containers.image",
     "evalCaseIds": ["deploy-container-image", "policy-conflict-latest"],
-    "metric": true
+    "metric": true,
+    "source": "curated_common_field",
+    "priority": "high"
   },
   {
     "id": "sts-volumeclaimtemplates",
@@ -21,7 +25,9 @@
     "path": "spec.volumeClaimTemplates",
     "chunkId": "StatefulSet::spec.volumeClaimTemplates",
     "evalCaseIds": ["sts-volumeclaimtemplates"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "rolebinding-subjects",
@@ -29,7 +35,9 @@
     "path": "subjects",
     "chunkId": "RoleBinding::subjects",
     "evalCaseIds": ["rolebinding-subjects"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "endpoints-subsets-addresses",
@@ -37,7 +45,9 @@
     "path": "subsets.addresses",
     "chunkId": "Endpoints::subsets.addresses",
     "evalCaseIds": ["endpoints-subsets"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "endpoints-subsets-ports",
@@ -45,7 +55,9 @@
     "path": "subsets.ports",
     "chunkId": "Endpoints::subsets.ports",
     "evalCaseIds": ["endpoints-subsets"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "pvc-volumemode",
@@ -53,7 +65,9 @@
     "path": "spec.volumeMode",
     "chunkId": "PersistentVolumeClaim::spec.volumeMode",
     "evalCaseIds": ["pvc-volumemode"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "pvc-resources-requests",
@@ -61,7 +75,9 @@
     "path": "spec.resources.requests",
     "chunkId": "PersistentVolumeClaim::spec.resources.requests",
     "evalCaseIds": ["pvc-resources"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "sc-volumebindingmode",
@@ -69,7 +85,9 @@
     "path": "volumeBindingMode",
     "chunkId": "StorageClass::volumeBindingMode",
     "evalCaseIds": ["sc-volumebindingmode"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "sc-allowexpansion",
@@ -77,7 +95,9 @@
     "path": "allowVolumeExpansion",
     "chunkId": "StorageClass::allowVolumeExpansion",
     "evalCaseIds": ["sc-allowexpansion"],
-    "metric": true
+    "metric": true,
+    "source": "retrieval_eval_miss",
+    "priority": "high"
   },
   {
     "id": "pod-privileged-observation",
@@ -86,6 +106,8 @@
     "chunkId": "Pod::spec.containers.securityContext.privileged",
     "evalCaseIds": ["policy-conflict-privileged"],
     "metric": false,
+    "source": "retrieval_eval_miss",
+    "priority": "low",
     "note": "policy-conflict-privileged 的真正 miss 是 policy chunk,本条仅观察 schema 侧 expansion,不计入 A3 schema alias 成功率"
   }
 ]
