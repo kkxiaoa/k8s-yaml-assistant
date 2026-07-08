@@ -18,6 +18,21 @@ const ALIASES_PATH = join(
   'schema-field-aliases.jsonl',
 );
 
+type AliasTargetSource =
+  | 'retrieval_bad_case'
+  | 'retrieval_eval_miss'
+  | 'curated_common_field'
+  | 'product_workflow_field';
+type AliasPriority = 'high' | 'medium' | 'low';
+
+const TARGET_SOURCES = new Set<AliasTargetSource>([
+  'retrieval_bad_case',
+  'retrieval_eval_miss',
+  'curated_common_field',
+  'product_workflow_field',
+]);
+const TARGET_PRIORITIES = new Set<AliasPriority>(['high', 'medium', 'low']);
+
 interface AliasTarget {
   id: string;
   resource: string;
@@ -25,6 +40,8 @@ interface AliasTarget {
   chunkId: string;
   evalCaseIds: string[];
   metric: boolean;
+  source: AliasTargetSource;
+  priority: AliasPriority;
   note?: string;
 }
 
@@ -34,7 +51,8 @@ interface SchemaFieldAlias {
   path: string;
   chunkId: string;
   fieldTerms: string[];
-  zhAliases: string[];
+  weakZhAliases: string[];
+  strongZhAliases: string[];
   source: 'llm_offline';
   reviewed: boolean;
   reviewedAt: string | null;
@@ -58,6 +76,10 @@ function readTargets(): AliasTarget[] {
     if (!Array.isArray(row.evalCaseIds) || row.evalCaseIds.length === 0)
       fail(`target[${i}].evalCaseIds 必须是非空数组`);
     if (typeof row.metric !== 'boolean') fail(`target[${i}].metric 必须是 boolean`);
+    if (!TARGET_SOURCES.has(row.source as AliasTargetSource))
+      fail(`target[${i}].source 非法: ${String(row.source)}`);
+    if (!TARGET_PRIORITIES.has(row.priority as AliasPriority))
+      fail(`target[${i}].priority 非法: ${String(row.priority)}`);
     return row as AliasTarget;
   });
 }
@@ -68,17 +90,27 @@ function readAliases(): SchemaFieldAlias[] {
     .split('\n')
     .filter(Boolean)
     .map((line, i) => {
-      const row = JSON.parse(line) as Partial<SchemaFieldAlias>;
+      const row = JSON.parse(line) as Partial<SchemaFieldAlias> & { zhAliases?: unknown };
       if (!row.id) fail(`alias[${i}].id 缺失`);
       if (!row.resource) fail(`alias[${i}].resource 缺失`);
       if (!row.path) fail(`alias[${i}].path 缺失`);
       if (!row.chunkId) fail(`alias[${i}].chunkId 缺失`);
       if (!Array.isArray(row.fieldTerms)) fail(`alias[${i}].fieldTerms 必须是数组`);
-      if (!Array.isArray(row.zhAliases)) fail(`alias[${i}].zhAliases 必须是数组`);
+      if ('zhAliases' in row) fail(`alias[${i}].zhAliases 已废弃,请使用 weakZhAliases/strongZhAliases`);
+      if (!Array.isArray(row.weakZhAliases))
+        fail(`alias[${i}].weakZhAliases 必须是数组`);
+      if (!Array.isArray(row.strongZhAliases))
+        fail(`alias[${i}].strongZhAliases 必须是数组`);
       if (row.source !== 'llm_offline') fail(`alias[${i}].source 必须是 llm_offline`);
       if (typeof row.reviewed !== 'boolean') fail(`alias[${i}].reviewed 必须是 boolean`);
       if (!('reviewedAt' in row)) fail(`alias[${i}].reviewedAt 缺失`);
       if (typeof row.reviewNote !== 'string') fail(`alias[${i}].reviewNote 必须是 string`);
+      if (
+        row.reviewed &&
+        row.weakZhAliases.length === 0 &&
+        row.strongZhAliases.length === 0
+      )
+        fail(`alias[${i}].reviewed=true 时 weak/strong alias 不能同时为空`);
       return row as SchemaFieldAlias;
     });
 }

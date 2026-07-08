@@ -31,7 +31,8 @@ interface AliasTarget {
 
 interface ModelAliasDraft {
   fieldTerms: string[];
-  zhAliases: string[];
+  weakZhAliases: string[];
+  strongZhAliases: string[];
 }
 
 interface SchemaFieldAlias {
@@ -40,7 +41,8 @@ interface SchemaFieldAlias {
   path: string;
   chunkId: string;
   fieldTerms: string[];
-  zhAliases: string[];
+  weakZhAliases: string[];
+  strongZhAliases: string[];
   source: 'llm_offline';
   reviewed: false;
   reviewedAt: null;
@@ -50,10 +52,11 @@ interface SchemaFieldAlias {
 const SYSTEM = `你为 Kubernetes schema 字段生成检索 alias 草稿。
 只根据给定 resource/path/chunk text 生成:
 - fieldTerms: 英文字段术语,只能来自 path、description、enum/type 中出现或直接派生的术语。
-- zhAliases: 中文用户可能问法,必须能追溯到字段语义。
+- weakZhAliases: 中文用户可能问法,适合在已明确 resource 相同时扩展,不得跨 resource 改写意图。
+- strongZhAliases: 中文用户可能问法,必须足够具体,可在无 route 或 route 可能错误时定位到该 resource/path。
 禁止加入字段没有表达的行为、建议、平台策略或 Kubernetes 常识。
 输出严格 JSON,格式:
-{"fieldTerms":["..."],"zhAliases":["..."]}`;
+{"fieldTerms":["..."],"weakZhAliases":["..."],"strongZhAliases":["..."]}`;
 
 function readTargets(): AliasTarget[] {
   if (!existsSync(TARGETS_PATH)) throw new Error(`target 文件不存在: ${TARGETS_PATH}`);
@@ -67,13 +70,18 @@ function parseJson(text: string): ModelAliasDraft {
   if (!match) throw new Error(`模型未返回 JSON: ${text}`);
   const parsed = JSON.parse(match[0]) as Partial<ModelAliasDraft>;
   if (!Array.isArray(parsed.fieldTerms)) throw new Error('fieldTerms 必须是数组');
-  if (!Array.isArray(parsed.zhAliases)) throw new Error('zhAliases 必须是数组');
+  if (!Array.isArray(parsed.weakZhAliases)) throw new Error('weakZhAliases 必须是数组');
+  if (!Array.isArray(parsed.strongZhAliases)) throw new Error('strongZhAliases 必须是数组');
   return {
     fieldTerms: parsed.fieldTerms
       .filter((x): x is string => typeof x === 'string')
       .map((x) => x.trim())
       .filter(Boolean),
-    zhAliases: parsed.zhAliases
+    weakZhAliases: parsed.weakZhAliases
+      .filter((x): x is string => typeof x === 'string')
+      .map((x) => x.trim())
+      .filter(Boolean),
+    strongZhAliases: parsed.strongZhAliases
       .filter((x): x is string => typeof x === 'string')
       .map((x) => x.trim())
       .filter(Boolean),
@@ -116,7 +124,8 @@ ${chunk.text}`;
     path: target.path,
     chunkId: target.chunkId,
     fieldTerms: uniq([...draft.fieldTerms, target.path]),
-    zhAliases: uniq(draft.zhAliases),
+    weakZhAliases: uniq(draft.weakZhAliases),
+    strongZhAliases: uniq(draft.strongZhAliases),
     source: 'llm_offline',
     reviewed: false,
     reviewedAt: null,
@@ -133,7 +142,7 @@ async function main(): Promise<void> {
     const alias = await generateAlias(target);
     aliases.push(alias);
     console.error(
-      `✓ ${alias.id}: terms=${alias.fieldTerms.length}, zh=${alias.zhAliases.length}`,
+      `✓ ${alias.id}: terms=${alias.fieldTerms.length}, weak=${alias.weakZhAliases.length}, strong=${alias.strongZhAliases.length}`,
     );
   }
 
