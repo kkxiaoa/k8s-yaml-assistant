@@ -13,6 +13,7 @@ build/
 data/schemas/generated/
 # 持久化索引:派生自 CORPUS + 嵌入模型,体积大(~33MB f32)。由 index:build / CI 重建,不入 git。
 data/index/
+data/index-ab/
 # eval 每次运行结果:临时产物。baseline.json 显式晋升后单独入 git,runs/ 不入。
 data/eval/runs/
 # retrieval trace(观测日志,RETRIEVAL_TRACE=1 时落盘):临时,不入 git。

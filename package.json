@@ -16,6 +16,7 @@
     "eval:fix": "tsx src/eval/fix-eval.ts",
     "eval:compare": "tsx scripts/eval-compare.ts",
     "eval:promote": "tsx scripts/eval-promote.ts",
+    "voyage:ab": "tsx scripts/voyage-ab.ts",
     "eval:check": "tsx scripts/eval-check.ts",
     "ingest:schemas": "tsx scripts/ingest-schemas.ts",
     "schemas:check": "tsx scripts/check-schemas.ts",
