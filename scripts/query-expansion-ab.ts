@@ -149,8 +149,16 @@ async function evaluateVariant(
   );
 }
 
-async function evaluateCase(abCase: ABCase): Promise<ABResult> {
-  const aliases = loadReviewedAliases();
+interface AllABResult {
+  evalCaseId: string;
+  expectedChunkIds: string[];
+  autoResource: string | undefined;
+  noExpansion: RetrievalSide;
+  aliasExpansion: RetrievalSide;
+  diagnostics: Omit<QueryVariant, 'label'>;
+}
+
+async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promise<ABResult> {
   const { evalCase } = abCase;
   const autoResource = inferResource(evalCase.question) ?? undefined;
   const oracleResource = evalCase.resource;
@@ -193,9 +201,22 @@ async function evaluateCase(abCase: ABCase): Promise<ABResult> {
     },
   ];
 
-  const retrievalSides = await Promise.all(
+  const [autoNoExpansion, autoAliasExpansion, oracleAliasExpansion, forcedTargetExpansion] = await Promise.all(
     variants.map((variant) => evaluateVariant(variant, evalCase.expectedChunkIds)),
   );
+  const [autoNoVariant, autoAliasVariant, oracleAliasVariant, forcedVariant] = variants;
+  if (
+    !autoNoExpansion ||
+    !autoAliasExpansion ||
+    !oracleAliasExpansion ||
+    !forcedTargetExpansion ||
+    !autoNoVariant ||
+    !autoAliasVariant ||
+    !oracleAliasVariant ||
+    !forcedVariant
+  ) {
+    throw new Error(`A/B variant 数量不完整: ${evalCase.id}`);
+  }
 
   return {
     evalCaseId: evalCase.id,
@@ -203,20 +224,56 @@ async function evaluateCase(abCase: ABCase): Promise<ABResult> {
     expectedChunkIds: evalCase.expectedChunkIds,
     autoResource,
     oracleResource,
-    variants: Object.fromEntries(
-      variants.map((variant, index) => [variant.label, retrievalSides[index]!]),
-    ) as ABResult['variants'],
-    diagnostics: Object.fromEntries(
-      variants.map((variant) => [
-        variant.label,
-        {
-          queryText: variant.queryText,
-          boostResource: variant.boostResource,
-          matchedAliases: variant.matchedAliases,
-          expansionTerms: variant.expansionTerms,
-        },
-      ]),
-    ) as ABResult['diagnostics'],
+    variants: {
+      'auto/no-expansion': autoNoExpansion,
+      'auto/alias-expansion': autoAliasExpansion,
+      'oracle/alias-expansion': oracleAliasExpansion,
+      'forced-target-expansion': forcedTargetExpansion,
+    },
+    diagnostics: {
+      'auto/no-expansion': diagnosticsOf(autoNoVariant),
+      'auto/alias-expansion': diagnosticsOf(autoAliasVariant),
+      'oracle/alias-expansion': diagnosticsOf(oracleAliasVariant),
+      'forced-target-expansion': diagnosticsOf(forcedVariant),
+    },
+  };
+}
+
+async function evaluateAllCase(
+  evalCase: EvalCase,
+  aliases: SchemaFieldAlias[],
+): Promise<AllABResult> {
+  const autoResource = inferResource(evalCase.question) ?? undefined;
+  const autoExpansion = expandQueryWithAliases(evalCase.question, autoResource, aliases, {
+    resourceStrategy: 'alias-aware',
+  });
+  const aliasSelectedResource = autoExpansion.matchedAliases[0]?.resource ?? autoResource;
+
+  const noExpansion = await searchCorpusTraced(evalCase.question, {
+    boostResource: autoResource,
+  });
+  const aliasExpansion = await searchCorpusTraced(autoExpansion.expandedQueryText, {
+    boostResource: aliasSelectedResource,
+  });
+
+  return {
+    evalCaseId: evalCase.id,
+    expectedChunkIds: evalCase.expectedChunkIds,
+    autoResource,
+    noExpansion: side(
+      noExpansion.hits.map((hit) => hit.chunk.id),
+      evalCase.expectedChunkIds,
+    ),
+    aliasExpansion: side(
+      aliasExpansion.hits.map((hit) => hit.chunk.id),
+      evalCase.expectedChunkIds,
+    ),
+    diagnostics: {
+      queryText: autoExpansion.expandedQueryText,
+      boostResource: aliasSelectedResource,
+      matchedAliases: autoExpansion.matchedAliases,
+      expansionTerms: autoExpansion.expansionTerms,
+    },
   };
 }
 
@@ -256,7 +313,16 @@ function printCase(result: ABResult): void {
   printDiagnostic(result, 'forced-target-expansion');
 }
 
-function avg(items: ABResult[], pick: (r: ABResult) => number): number {
+function diagnosticsOf(variant: QueryVariant): Omit<QueryVariant, 'label'> {
+  return {
+    queryText: variant.queryText,
+    boostResource: variant.boostResource,
+    matchedAliases: variant.matchedAliases,
+    expansionTerms: variant.expansionTerms,
+  };
+}
+
+function avg<T>(items: T[], pick: (item: T) => number): number {
   return items.length === 0 ? 0 : items.reduce((sum, item) => sum + pick(item), 0) / items.length;
 }
 
@@ -293,17 +359,100 @@ function printSummary(results: ABResult[]): void {
   }
 }
 
-async function main(): Promise<void> {
+function printAllDetails(label: string, results: AllABResult[]): void {
+  console.log(`\n${label}: ${results.map((r) => r.evalCaseId).join(', ') || '无'}`);
+  for (const result of results) {
+    console.log(`\n━━ ${result.evalCaseId}`);
+    console.log(`expected: ${result.expectedChunkIds.join(' | ')}`);
+    console.log(`autoResource: ${result.autoResource ?? '<none>'}`);
+    console.log(
+      `matched: ${
+        result.diagnostics.matchedAliases
+          .map((a) => `${a.resource}::${a.path} <= ${a.zhAlias}`)
+          .join(' ; ') || '<none>'
+      }`,
+    );
+    console.log(`terms: ${result.diagnostics.expansionTerms.join(' ') || '<none>'}`);
+    console.log(
+      `no-expansion:    R@3=${pct(result.noExpansion.recall3)} MRR=${result.noExpansion.reciprocalRank.toFixed(3)} top3=${result.noExpansion.top3.join(' | ')}`,
+    );
+    console.log(
+      `alias-expansion: R@3=${pct(result.aliasExpansion.recall3)} MRR=${result.aliasExpansion.reciprocalRank.toFixed(3)} top3=${result.aliasExpansion.top3.join(' | ')}`,
+    );
+  }
+}
+
+function printAllSummary(results: AllABResult[]): void {
+  const gained = results.filter((r) => r.aliasExpansion.recall3 > r.noExpansion.recall3);
+  const lost = results.filter((r) => r.aliasExpansion.recall3 < r.noExpansion.recall3);
+  const matched = results.filter((r) => r.diagnostics.matchedAliases.length > 0);
+  const mrrChangedOnly = matched.filter(
+    (r) =>
+      r.aliasExpansion.recall3 === r.noExpansion.recall3 &&
+      r.aliasExpansion.reciprocalRank !== r.noExpansion.reciprocalRank,
+  );
+
+  console.log('\n━━━━━━ A3 full eval A/B 汇总 ━━━━━━');
+  console.log(`answerable cases: ${results.length}; alias matched cases: ${matched.length}`);
+  console.log(
+    `no-expansion:    R@3=${pct(avg(results, (r) => r.noExpansion.recall3))} MRR=${avg(results, (r) => r.noExpansion.reciprocalRank).toFixed(3)}`,
+  );
+  console.log(
+    `alias-expansion: R@3=${pct(avg(results, (r) => r.aliasExpansion.recall3))} MRR=${avg(results, (r) => r.aliasExpansion.reciprocalRank).toFixed(3)}`,
+  );
+  console.log(`gained(R@3): ${gained.map((r) => r.evalCaseId).join(', ') || '无'}`);
+  console.log(`lost(R@3): ${lost.map((r) => r.evalCaseId).join(', ') || '无'}`);
+  console.log(`mrr changed only: ${mrrChangedOnly.map((r) => r.evalCaseId).join(', ') || '无'}`);
+  printAllDetails('gained details', gained);
+  printAllDetails('lost details', lost);
+}
+
+async function runTargeted(): Promise<void> {
+  const aliases = loadReviewedAliases();
   const cases = loadABCases();
   console.error(`A3 targeted attribution A/B cases: ${cases.length} 条`);
 
   const results: ABResult[] = [];
   for (const abCase of cases) {
-    const result = await evaluateCase(abCase);
+    const result = await evaluateCase(abCase, aliases);
     results.push(result);
     printCase(result);
   }
   printSummary(results);
+}
+
+async function runAll(): Promise<void> {
+  const aliases = loadReviewedAliases();
+  const cases = EVAL_SET.filter((ec) => ec.answerable);
+  console.error(`A3 full eval A/B answerable cases: ${cases.length} 条`);
+
+  const results: AllABResult[] = [];
+  for (const evalCase of cases) {
+    const result = await evaluateAllCase(evalCase, aliases);
+    results.push(result);
+    const marker =
+      result.aliasExpansion.recall3 > result.noExpansion.recall3
+        ? 'GAIN'
+        : result.aliasExpansion.recall3 < result.noExpansion.recall3
+          ? 'LOSS'
+          : result.diagnostics.matchedAliases.length > 0
+            ? 'MATCHED'
+            : 'SAME';
+    console.error(
+      `[${marker}] ${result.evalCaseId} ` +
+        `R@3 ${pct(result.noExpansion.recall3)}→${pct(result.aliasExpansion.recall3)} ` +
+        `MRR ${result.noExpansion.reciprocalRank.toFixed(3)}→${result.aliasExpansion.reciprocalRank.toFixed(3)}`,
+    );
+  }
+  printAllSummary(results);
+}
+
+async function main(): Promise<void> {
+  if (process.argv.includes('--all')) {
+    await runAll();
+  } else {
+    await runTargeted();
+  }
 }
 
 main().catch((e: unknown) => {
