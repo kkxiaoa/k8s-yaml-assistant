@@ -136,6 +136,65 @@ check('无 routedResource 时不扩展', () => {
   assert.deepEqual(result.expansionTerms, []);
 });
 
+check('alias-aware:无 routedResource 时可由 alias 选中资源字段', () => {
+  const result = expandQueryWithAliases(
+    '怎么把卷设成裸块设备?',
+    undefined,
+    [
+      alias({
+        id: 'volume-mode',
+        resource: 'PersistentVolumeClaim',
+        path: 'spec.volumeMode',
+        chunkId: 'PersistentVolumeClaim::spec.volumeMode',
+        zhAliases: ['裸块设备'],
+        fieldTerms: ['volumeMode', 'Block'],
+      }),
+    ],
+    { resourceStrategy: 'alias-aware' },
+  );
+
+  assert.deepEqual(result.matchedAliases, [
+    {
+      chunkId: 'PersistentVolumeClaim::spec.volumeMode',
+      resource: 'PersistentVolumeClaim',
+      path: 'spec.volumeMode',
+      zhAlias: '裸块设备',
+    },
+  ]);
+  assert.deepEqual(result.expansionTerms, ['volumeMode', 'Block', 'spec.volumeMode']);
+});
+
+check('alias-aware: routedResource 错误时仍可由 alias 选中正确资源', () => {
+  const result = expandQueryWithAliases(
+    '怎么让卷延迟到 Pod 调度后再绑定?',
+    'Pod',
+    [
+      alias({
+        id: 'binding-mode',
+        resource: 'StorageClass',
+        path: 'volumeBindingMode',
+        chunkId: 'StorageClass::volumeBindingMode',
+        zhAliases: ['Pod 调度后再绑定'],
+        fieldTerms: ['volumeBindingMode', 'WaitForFirstConsumer'],
+      }),
+    ],
+    { resourceStrategy: 'alias-aware' },
+  );
+
+  assert.deepEqual(result.matchedAliases, [
+    {
+      chunkId: 'StorageClass::volumeBindingMode',
+      resource: 'StorageClass',
+      path: 'volumeBindingMode',
+      zhAlias: 'Pod 调度后再绑定',
+    },
+  ]);
+  assert.deepEqual(result.expansionTerms, [
+    'volumeBindingMode',
+    'WaitForFirstConsumer',
+  ]);
+});
+
 check('无命中时 expandedQueryText === originalQueryText', () => {
   const result = expandQueryWithAliases('副本数怎么写', 'Deployment', [
     alias({ id: 'image' }),

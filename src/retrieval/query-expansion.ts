@@ -35,6 +35,8 @@ export interface QueryExpansionResult {
   expansionTerms: string[];
 }
 
+type ResourceStrategy = 'routed-only' | 'alias-aware';
+
 export function loadReviewedAliases(path = DEFAULT_ALIASES_PATH): SchemaFieldAlias[] {
   if (!existsSync(path)) return [];
 
@@ -49,13 +51,18 @@ export function expandQueryWithAliases(
   queryText: string,
   routedResource: string | undefined,
   aliases: SchemaFieldAlias[],
-  options: { maxFields?: number; maxTermsPerField?: number } = {},
+  options: {
+    maxFields?: number;
+    maxTermsPerField?: number;
+    resourceStrategy?: ResourceStrategy;
+  } = {},
 ): QueryExpansionResult {
   const maxFields = options.maxFields ?? 3;
   const maxTermsPerField = options.maxTermsPerField ?? 5;
+  const resourceStrategy = options.resourceStrategy ?? 'routed-only';
   const originalQueryText = queryText;
 
-  if (!routedResource) {
+  if (!routedResource && resourceStrategy === 'routed-only') {
     return {
       originalQueryText,
       expandedQueryText: originalQueryText,
@@ -65,7 +72,11 @@ export function expandQueryWithAliases(
   }
 
   const matched = aliases
-    .filter((alias) => alias.reviewed && alias.resource === routedResource)
+    .filter(
+      (alias) =>
+        alias.reviewed &&
+        (resourceStrategy === 'alias-aware' || alias.resource === routedResource),
+    )
     .map((alias) => {
       const zhAlias = alias.zhAliases
         .filter((candidate) => queryText.includes(candidate))
