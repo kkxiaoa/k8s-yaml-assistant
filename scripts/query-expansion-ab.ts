@@ -1,4 +1,5 @@
-// A3:targeted query expansion 归因 A/B。只读 reviewed alias,不写 bad-cases/baseline,不接 serving。
+// A3:targeted query expansion 归因 A/B。显式对比共享 search 的 expansion off/on,
+// 只读 reviewed alias,不写 bad-cases/baseline。
 
 import { config } from 'dotenv';
 config({ override: true });
@@ -8,7 +9,6 @@ import { EVAL_SET, type EvalCase } from '../src/eval/eval-set';
 import { inferResource } from '../src/retrieval/router';
 import { searchCorpusTraced } from '../src/retrieval/retrieve';
 import {
-  expandQueryWithAliases,
   loadReviewedAliases,
   type MatchedAlias,
   type ResourceSelectionReason,
@@ -47,6 +47,7 @@ interface QueryVariant {
   label: 'auto/no-expansion' | 'auto/alias-expansion' | 'oracle/alias-expansion' | 'forced-target-expansion';
   queryText: string;
   boostResource: string | undefined;
+  queryExpansion: boolean;
   matchedAliases: MatchedAlias[];
   expansionTerms: string[];
   resourceSelectionReason: ResourceSelectionReason;
@@ -59,7 +60,10 @@ interface ABResult {
   autoResource: string | undefined;
   oracleResource: string | undefined;
   variants: Record<QueryVariant['label'], RetrievalSide>;
-  diagnostics: Record<QueryVariant['label'], Omit<QueryVariant, 'label'>>;
+  diagnostics: Record<
+    QueryVariant['label'],
+    Omit<QueryVariant, 'label' | 'queryExpansion'>
+  >;
 }
 
 function readTargets(): AliasTarget[] {
@@ -142,14 +146,46 @@ function forceTargetExpansion(
 async function evaluateVariant(
   variant: QueryVariant,
   expectedChunkIds: string[],
-): Promise<RetrievalSide> {
+): Promise<{
+  side: RetrievalSide;
+  diagnostics: Omit<QueryVariant, 'label' | 'queryExpansion'>;
+}> {
   const result = await searchCorpusTraced(variant.queryText, {
     boostResource: variant.boostResource,
+    queryExpansion: variant.queryExpansion,
   });
-  return side(
-    result.hits.map((hit) => hit.chunk.id),
-    expectedChunkIds,
-  );
+  const expansion = result.trace.queryExpansion;
+  if (!expansion || expansion.enabled !== variant.queryExpansion) {
+    throw new Error(
+      `${variant.label}: shared search 未返回 query expansion trace`,
+    );
+  }
+  const sharedDiagnostics = variant.queryExpansion;
+  return {
+    side: side(
+      result.hits.map((hit) => hit.chunk.id),
+      expectedChunkIds,
+    ),
+    diagnostics: {
+      queryText: result.trace.queryText,
+      boostResource:
+        sharedDiagnostics
+          ? expansion.selectedResource
+          : variant.boostResource,
+      matchedAliases:
+        sharedDiagnostics
+          ? expansion.matchedAliases
+          : variant.matchedAliases,
+      expansionTerms:
+        sharedDiagnostics
+          ? expansion.expansionTerms
+          : variant.expansionTerms,
+      resourceSelectionReason:
+        sharedDiagnostics
+          ? (expansion.resourceSelectionReason ?? 'no_alias_match')
+          : variant.resourceSelectionReason,
+    },
+  };
 }
 
 interface AllABResult {
@@ -158,7 +194,7 @@ interface AllABResult {
   autoResource: string | undefined;
   noExpansion: RetrievalSide;
   aliasExpansion: RetrievalSide;
-  diagnostics: Omit<QueryVariant, 'label'>;
+  diagnostics: Omit<QueryVariant, 'label' | 'queryExpansion'>;
 }
 
 async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promise<ABResult> {
@@ -166,42 +202,41 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
   const autoResource = inferResource(evalCase.question) ?? undefined;
   const oracleResource = evalCase.resource;
 
-  const autoExpansion = expandQueryWithAliases(evalCase.question, autoResource, aliases, {
-    resourceStrategy: 'alias-aware',
-  });
-  const oracleExpansion = expandQueryWithAliases(evalCase.question, oracleResource, aliases);
   const forced = forceTargetExpansion(evalCase.question, abCase.targetChunkIds, aliases);
-  const aliasSelectedResource = autoExpansion.aliasSelectedResource;
 
   const variants: QueryVariant[] = [
     {
       label: 'auto/no-expansion',
       queryText: evalCase.question,
       boostResource: autoResource,
+      queryExpansion: false,
       matchedAliases: [],
       expansionTerms: [],
       resourceSelectionReason: 'no_alias_match',
     },
     {
       label: 'auto/alias-expansion',
-      queryText: autoExpansion.expandedQueryText,
-      boostResource: aliasSelectedResource,
-      matchedAliases: autoExpansion.matchedAliases,
-      expansionTerms: autoExpansion.expansionTerms,
-      resourceSelectionReason: autoExpansion.resourceSelectionReason,
+      queryText: evalCase.question,
+      boostResource: autoResource,
+      queryExpansion: true,
+      matchedAliases: [],
+      expansionTerms: [],
+      resourceSelectionReason: 'no_alias_match',
     },
     {
       label: 'oracle/alias-expansion',
-      queryText: oracleExpansion.expandedQueryText,
+      queryText: evalCase.question,
       boostResource: oracleResource,
-      matchedAliases: oracleExpansion.matchedAliases,
-      expansionTerms: oracleExpansion.expansionTerms,
-      resourceSelectionReason: oracleExpansion.resourceSelectionReason,
+      queryExpansion: true,
+      matchedAliases: [],
+      expansionTerms: [],
+      resourceSelectionReason: 'no_alias_match',
     },
     {
       label: 'forced-target-expansion',
       queryText: forced.queryText,
       boostResource: oracleResource,
+      queryExpansion: false,
       matchedAliases: forced.matchedAliases,
       expansionTerms: forced.expansionTerms,
       resourceSelectionReason: 'no_alias_match',
@@ -211,16 +246,11 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
   const [autoNoExpansion, autoAliasExpansion, oracleAliasExpansion, forcedTargetExpansion] = await Promise.all(
     variants.map((variant) => evaluateVariant(variant, evalCase.expectedChunkIds)),
   );
-  const [autoNoVariant, autoAliasVariant, oracleAliasVariant, forcedVariant] = variants;
   if (
     !autoNoExpansion ||
     !autoAliasExpansion ||
     !oracleAliasExpansion ||
-    !forcedTargetExpansion ||
-    !autoNoVariant ||
-    !autoAliasVariant ||
-    !oracleAliasVariant ||
-    !forcedVariant
+    !forcedTargetExpansion
   ) {
     throw new Error(`A/B variant 数量不完整: ${evalCase.id}`);
   }
@@ -232,36 +262,39 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
     autoResource,
     oracleResource,
     variants: {
-      'auto/no-expansion': autoNoExpansion,
-      'auto/alias-expansion': autoAliasExpansion,
-      'oracle/alias-expansion': oracleAliasExpansion,
-      'forced-target-expansion': forcedTargetExpansion,
+      'auto/no-expansion': autoNoExpansion.side,
+      'auto/alias-expansion': autoAliasExpansion.side,
+      'oracle/alias-expansion': oracleAliasExpansion.side,
+      'forced-target-expansion': forcedTargetExpansion.side,
     },
     diagnostics: {
-      'auto/no-expansion': diagnosticsOf(autoNoVariant),
-      'auto/alias-expansion': diagnosticsOf(autoAliasVariant),
-      'oracle/alias-expansion': diagnosticsOf(oracleAliasVariant),
-      'forced-target-expansion': diagnosticsOf(forcedVariant),
+      'auto/no-expansion': autoNoExpansion.diagnostics,
+      'auto/alias-expansion': autoAliasExpansion.diagnostics,
+      'oracle/alias-expansion': oracleAliasExpansion.diagnostics,
+      'forced-target-expansion': forcedTargetExpansion.diagnostics,
     },
   };
 }
 
 async function evaluateAllCase(
   evalCase: EvalCase,
-  aliases: SchemaFieldAlias[],
 ): Promise<AllABResult> {
   const autoResource = inferResource(evalCase.question) ?? undefined;
-  const autoExpansion = expandQueryWithAliases(evalCase.question, autoResource, aliases, {
-    resourceStrategy: 'alias-aware',
-  });
-  const aliasSelectedResource = autoExpansion.aliasSelectedResource;
 
   const noExpansion = await searchCorpusTraced(evalCase.question, {
     boostResource: autoResource,
+    queryExpansion: false,
   });
-  const aliasExpansion = await searchCorpusTraced(autoExpansion.expandedQueryText, {
-    boostResource: aliasSelectedResource,
+  const aliasExpansion = await searchCorpusTraced(evalCase.question, {
+    boostResource: autoResource,
+    queryExpansion: true,
   });
+  const expansion = aliasExpansion.trace.queryExpansion;
+  if (!expansion || !expansion.enabled) {
+    throw new Error(
+      `${evalCase.id}: shared search 未返回 enabled expansion trace`,
+    );
+  }
 
   return {
     evalCaseId: evalCase.id,
@@ -276,11 +309,12 @@ async function evaluateAllCase(
       evalCase.expectedChunkIds,
     ),
     diagnostics: {
-      queryText: autoExpansion.expandedQueryText,
-      boostResource: aliasSelectedResource,
-      matchedAliases: autoExpansion.matchedAliases,
-      expansionTerms: autoExpansion.expansionTerms,
-      resourceSelectionReason: autoExpansion.resourceSelectionReason,
+      queryText: aliasExpansion.trace.queryText,
+      boostResource: expansion.selectedResource ?? autoResource,
+      matchedAliases: expansion.matchedAliases,
+      expansionTerms: expansion.expansionTerms,
+      resourceSelectionReason:
+        expansion.resourceSelectionReason ?? 'no_alias_match',
     },
   };
 }
@@ -320,16 +354,6 @@ function printCase(result: ABResult): void {
   printDiagnostic(result, 'auto/alias-expansion');
   printDiagnostic(result, 'oracle/alias-expansion');
   printDiagnostic(result, 'forced-target-expansion');
-}
-
-function diagnosticsOf(variant: QueryVariant): Omit<QueryVariant, 'label'> {
-  return {
-    queryText: variant.queryText,
-    boostResource: variant.boostResource,
-    matchedAliases: variant.matchedAliases,
-    expansionTerms: variant.expansionTerms,
-    resourceSelectionReason: variant.resourceSelectionReason,
-  };
 }
 
 function avg<T>(items: T[], pick: (item: T) => number): number {
@@ -433,13 +457,12 @@ async function runTargeted(): Promise<void> {
 }
 
 async function runAll(): Promise<void> {
-  const aliases = loadReviewedAliases();
   const cases = EVAL_SET.filter((ec) => ec.answerable);
   console.error(`A3 full eval A/B answerable cases: ${cases.length} 条`);
 
   const results: AllABResult[] = [];
   for (const evalCase of cases) {
-    const result = await evaluateAllCase(evalCase, aliases);
+    const result = await evaluateAllCase(evalCase);
     results.push(result);
     const marker =
       result.aliasExpansion.recall3 > result.noExpansion.recall3

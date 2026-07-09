@@ -4,6 +4,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CORPUS } from '../src/knowledge/corpus';
 import { EVAL_SET } from '../src/eval/eval-set';
+import {
+  DEFAULT_ALIASES_PATH,
+  parseSchemaFieldAliasesJsonl,
+  type SchemaFieldAlias,
+} from '../src/retrieval/query-expansion';
 
 const TARGETS_PATH = join(
   process.cwd(),
@@ -11,13 +16,6 @@ const TARGETS_PATH = join(
   'aliases',
   'schema-field-alias-targets.json',
 );
-const ALIASES_PATH = join(
-  process.cwd(),
-  'data',
-  'aliases',
-  'schema-field-aliases.jsonl',
-);
-
 type AliasTargetSource =
   | 'retrieval_bad_case'
   | 'retrieval_eval_miss'
@@ -43,20 +41,6 @@ interface AliasTarget {
   source: AliasTargetSource;
   priority: AliasPriority;
   note?: string;
-}
-
-interface SchemaFieldAlias {
-  id: string;
-  resource: string;
-  path: string;
-  chunkId: string;
-  fieldTerms: string[];
-  weakZhAliases: string[];
-  strongZhAliases: string[];
-  source: 'llm_offline';
-  reviewed: boolean;
-  reviewedAt: string | null;
-  reviewNote: string;
 }
 
 function fail(message: string): never {
@@ -85,34 +69,10 @@ function readTargets(): AliasTarget[] {
 }
 
 function readAliases(): SchemaFieldAlias[] {
-  if (!existsSync(ALIASES_PATH)) return [];
-  return readFileSync(ALIASES_PATH, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line, i) => {
-      const row = JSON.parse(line) as Partial<SchemaFieldAlias> & { zhAliases?: unknown };
-      if (!row.id) fail(`alias[${i}].id 缺失`);
-      if (!row.resource) fail(`alias[${i}].resource 缺失`);
-      if (!row.path) fail(`alias[${i}].path 缺失`);
-      if (!row.chunkId) fail(`alias[${i}].chunkId 缺失`);
-      if (!Array.isArray(row.fieldTerms)) fail(`alias[${i}].fieldTerms 必须是数组`);
-      if ('zhAliases' in row) fail(`alias[${i}].zhAliases 已废弃,请使用 weakZhAliases/strongZhAliases`);
-      if (!Array.isArray(row.weakZhAliases))
-        fail(`alias[${i}].weakZhAliases 必须是数组`);
-      if (!Array.isArray(row.strongZhAliases))
-        fail(`alias[${i}].strongZhAliases 必须是数组`);
-      if (row.source !== 'llm_offline') fail(`alias[${i}].source 必须是 llm_offline`);
-      if (typeof row.reviewed !== 'boolean') fail(`alias[${i}].reviewed 必须是 boolean`);
-      if (!('reviewedAt' in row)) fail(`alias[${i}].reviewedAt 缺失`);
-      if (typeof row.reviewNote !== 'string') fail(`alias[${i}].reviewNote 必须是 string`);
-      if (
-        row.reviewed &&
-        row.weakZhAliases.length === 0 &&
-        row.strongZhAliases.length === 0
-      )
-        fail(`alias[${i}].reviewed=true 时 weak/strong alias 不能同时为空`);
-      return row as SchemaFieldAlias;
-    });
+  if (!existsSync(DEFAULT_ALIASES_PATH)) return [];
+  return parseSchemaFieldAliasesJsonl(
+    readFileSync(DEFAULT_ALIASES_PATH, 'utf8'),
+  );
 }
 
 function main(): void {
@@ -163,7 +123,7 @@ function main(): void {
   }
 
   console.log(`targets: ${targets.length} ok`);
-  if (!existsSync(ALIASES_PATH)) {
+  if (!existsSync(DEFAULT_ALIASES_PATH)) {
     console.log('aliases: 文件未生成');
   } else {
     console.log(`aliases: ${reviewed} reviewed / ${unreviewed} unreviewed`);

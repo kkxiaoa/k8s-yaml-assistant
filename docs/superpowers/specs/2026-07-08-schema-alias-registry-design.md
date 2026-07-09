@@ -242,21 +242,27 @@ npm run aliases:ab -- --all
 
 ## 12. Serving 接入边界
 
-本节是后续轮,不是本轮实施内容。
+Serving 接入的最终设计以
+`docs/superpowers/specs/2026-07-09-query-expansion-serving-design.md` 为准。
 
 进入 serving 前必须满足:
 
 - registry 已迁移为 `weakZhAliases/strongZhAliases`。
 - `searchCorpusTraced` 或其上层 trace 能记录 expansion 诊断字段。
-- 有 feature flag,例如 `ENABLE_QUERY_EXPANSION=true`。
+- 有 feature flag:`ENABLE_QUERY_EXPANSION=false` 可回退旧链路。
 - eval 与 serving 使用同一 expansion 函数,不维护平行逻辑。
+- targeted/full eval 已证明 expansion-on 无 Recall lost case。
 
 接入顺序:
 
 1. 先在 eval/AB 里启用正式规则。
-2. 再在 serving 里加 feature flag 默认关闭。
-3. 打开后观察 trace 和 faithfulness,确认没有 source 引用变差。
-4. 稳定后再考虑默认开启。
+2. Expansion 下沉到共享 `searchCorpusTraced`,serving/eval/faith 共用。
+3. Serving 默认开启,显式设置 `ENABLE_QUERY_EXPANSION=false` 时关闭。
+4. 观察 trace、full eval 和 faithfulness,确认无检索及引用回退。
+5. 验证通过并人工审核后,将 baseline 晋升为 expansion-on 指标。
+
+默认 serving 与 baseline 必须使用同一 expansion 配置。若新 baseline
+不被接受,默认 serving 必须退回 expansion-off,不能长期保留口径分裂。
 
 ## 13. 当前结论
 
