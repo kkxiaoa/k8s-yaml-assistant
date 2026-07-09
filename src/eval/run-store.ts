@@ -7,9 +7,16 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { QueryExpansionTrace } from '../retrieval/query-expansion-runtime';
 
 /** eval 类型:检索指标与生成指标各自独立 baseline / compare,不混。 */
 export type EvalKind = 'retrieval' | 'faith';
+
+export interface QueryExpansionRunConfig {
+  enabled: boolean;
+  registryHash?: string;
+  reviewedAliasCount: number;
+}
 
 export interface EvalRun {
   /** 时间戳 id,同时是 runs/<id>.json 文件名 */
@@ -25,9 +32,21 @@ export interface EvalRun {
   rerankModel?: string;
   /** 检索类 eval 无作答模型,留空;Stage 4 生成类才填 */
   answerModel?: string;
+  /** 生成该 run 时共享检索入口使用的 query expansion 配置。 */
+  queryExpansion?: QueryExpansionRunConfig;
   k: number;
   /** 跨 Stage 并集:Stage 2 只有检索类(如 serving.recall@3)。compare 只 diff 共有 key。 */
   metrics: Record<string, number>;
+}
+
+export function queryExpansionRunConfig(
+  trace: QueryExpansionTrace,
+): QueryExpansionRunConfig {
+  return {
+    enabled: trace.enabled,
+    registryHash: trace.registryHash,
+    reviewedAliasCount: trace.reviewedAliasCount ?? 0,
+  };
 }
 
 /** eval-set 指纹:按 id 排序拼接 id+question+expectedChunkIds,取 sha256。标注任一变化即变化。 */

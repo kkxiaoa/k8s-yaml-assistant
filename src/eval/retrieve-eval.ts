@@ -16,7 +16,13 @@ import { getCorpusIndex, searchCorpusTraced } from '../retrieval/retrieve';
 import { appendTrace, toTraceHit } from '../retrieval/trace';
 import { RERANK_MODEL } from '../retrieval/rerank';
 import { computeCorpusHash, computeIndexHash } from '../retrieval/index-store';
-import { writeRun, computeEvalSetHash, type EvalRun } from './run-store';
+import {
+  writeRun,
+  computeEvalSetHash,
+  queryExpansionRunConfig,
+  type EvalRun,
+  type QueryExpansionRunConfig,
+} from './run-store';
 import { retrievalMiss, upsertBadCases, type BadCase } from './bad-cases';
 
 type Mode = 'none' | 'oracle' | 'auto';
@@ -102,6 +108,7 @@ function evaluate(
 interface ServingResult extends Result {
   /** recall<1 的用例明细,供沉淀 bad-cases。 */
   misses: BadCase[];
+  queryExpansion: QueryExpansionRunConfig;
 }
 
 async function evaluateServing(k: number): Promise<ServingResult> {
@@ -109,6 +116,7 @@ async function evaluateServing(k: number): Promise<ServingResult> {
   let mrrSum = 0;
   let n = 0; // 可答用例数(分母)
   const misses: BadCase[] = [];
+  let queryExpansion: QueryExpansionRunConfig | undefined;
 
   for (const ec of EVAL_SET) {
     if (!ec.answerable) continue; // 拒答用例不进检索指标
@@ -117,6 +125,9 @@ async function evaluateServing(k: number): Promise<ServingResult> {
     const { hits: ranked, trace: st } = await searchCorpusTraced(ec.question, {
       boostResource: routed,
     });
+    if (!queryExpansion && st.queryExpansion) {
+      queryExpansion = queryExpansionRunConfig(st.queryExpansion);
+    }
     const ids = ranked.map((r) => r.chunk.id);
 
     const topK = ids.slice(0, k);
@@ -153,10 +164,15 @@ async function evaluateServing(k: number): Promise<ServingResult> {
     }
   }
 
+  if (!queryExpansion) {
+    throw new Error('serving eval 未产生 query expansion trace');
+  }
+
   return {
     recall: recallSum / n,
     mrr: mrrSum / n,
     misses,
+    queryExpansion,
   };
 }
 
@@ -217,6 +233,7 @@ async function main(): Promise<void> {
     evalSetHash: computeEvalSetHash(EVAL_SET),
     embeddingModel: EMBEDDING_MODEL,
     rerankModel: RERANK_MODEL,
+    queryExpansion: reranked.queryExpansion,
     k,
     metrics,
   };

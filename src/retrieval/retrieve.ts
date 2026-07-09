@@ -1,5 +1,4 @@
-// 内存向量索引 + 余弦相似度检索。迭代0 用内存即可(语料就几段);
-// 语料变大时(迭代3)再换成真正的向量库(pgvector / Chroma 等)。
+// 持久化向量索引读入内存后执行余弦检索;索引不匹配时才全量重建。
 
 import { performance } from 'node:perf_hooks';
 import { embed, EMBEDDING_MODEL } from './embeddings';
@@ -9,6 +8,11 @@ import { policyBoost } from './boost';
 import { rerank, COARSE_N } from './rerank';
 import { readIndex, computeCorpusHash, computeIndexHash } from './index-store';
 import { toTraceHit, type RetrievalTrace } from './trace';
+import {
+  getCachedAliasRegistry,
+  prepareQueryExpansion,
+  resolveQueryExpansionEnabled,
+} from './query-expansion-runtime';
 
 const FIELD_PATH_BOOST = 0.08;
 
@@ -32,7 +36,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
-/** 把语料编码成带向量的索引。调用方应按资源缩小 chunks,避免全量集群 schema 冷启动。 */
+/** 把给定语料编码成带向量的索引。 */
 export async function buildIndex(
   chunks: Chunk[] = CORPUS,
 ): Promise<IndexedChunk[]> {
@@ -132,12 +136,19 @@ export interface SearchOptions {
   boostPath?: string;
   /** 粗召回候选数,默认 COARSE_N。 */
   coarseN?: number;
+  /** 显式覆盖 query expansion feature flag,供 A/B 和回退验证。 */
+  queryExpansion?: boolean;
 }
 
 /** searchCorpusTraced 返回:命中 + 检索过程 trace(不含 question/mode/hint,由上层补) */
 export type SearchTrace = Pick<
   RetrievalTrace,
-  'queryText' | 'coarseHits' | 'rerankHits' | 'latencyMs' | 'cache'
+  | 'queryText'
+  | 'queryExpansion'
+  | 'coarseHits'
+  | 'rerankHits'
+  | 'latencyMs'
+  | 'cache'
 >;
 
 /**
@@ -151,16 +162,32 @@ export async function searchCorpusTraced(
   hits: Array<{ chunk: Chunk; score: number }>;
   trace: SearchTrace;
 }> {
-  const { boostResource, boostPath, coarseN = COARSE_N } = options;
+  const {
+    boostResource,
+    boostPath,
+    coarseN = COARSE_N,
+    queryExpansion,
+  } = options;
   const t0 = performance.now();
+  const expansionEnabled =
+    resolveQueryExpansionEnabled(queryExpansion);
+  const prepared = prepareQueryExpansion(
+    queryText,
+    boostResource,
+    expansionEnabled,
+    expansionEnabled ? getCachedAliasRegistry() : undefined,
+  );
+  const effectiveQueryText = prepared.queryText;
+  const effectiveBoostResource = prepared.boostResource;
   const index = await getCorpusIndex();
   const indexHit = getCorpusIndexSource() === 'persisted';
 
   const tEmbed = performance.now();
-  const [queryEmbedding] = await embed([queryText], 'query');
+  const [queryEmbedding] = await embed([effectiveQueryText], 'query');
   const embedMs = performance.now() - tEmbed;
   const emptyTrace = (): SearchTrace => ({
-    queryText,
+    queryText: effectiveQueryText,
+    queryExpansion: prepared.trace,
     coarseHits: [],
     rerankHits: [],
     latencyMs: { embed: embedMs, total: performance.now() - t0 },
@@ -173,7 +200,7 @@ export async function searchCorpusTraced(
     queryEmbedding,
     index,
     coarseN,
-    boostResource,
+    effectiveBoostResource,
     boostPath,
   );
   const denseMs = performance.now() - tDense;
@@ -181,7 +208,7 @@ export async function searchCorpusTraced(
 
   const tRerank = performance.now();
   const rr = await rerank(
-    queryText,
+    effectiveQueryText,
     coarse.map((h) => h.chunk.text),
     coarse.length,
   );
@@ -194,7 +221,8 @@ export async function searchCorpusTraced(
   return {
     hits,
     trace: {
-      queryText,
+      queryText: effectiveQueryText,
+      queryExpansion: prepared.trace,
       coarseHits: coarse.map((h) => toTraceHit(h.chunk, h.score)),
       rerankHits: hits.map((h) => toTraceHit(h.chunk, h.score)),
       latencyMs: {

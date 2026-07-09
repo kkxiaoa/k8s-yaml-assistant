@@ -19,6 +19,11 @@ import {
   toTraceHit,
   type RetrievalTrace,
 } from '../retrieval/trace';
+import { findExactFieldChunks } from '../retrieval/exact-field';
+import {
+  resolveQueryExpansionEnabled,
+  skippedExactQueryExpansionTrace,
+} from '../retrieval/query-expansion-runtime';
 
 export const ANSWER_MODEL = 'claude-sonnet-4-6'; // DeepSeek 映射 deepseek-v4-flash
 
@@ -127,21 +132,8 @@ function exactFieldHits(
   fieldPath: string | undefined,
   k: number,
 ): Hit[] {
-  if (!resource || !fieldPath) return [];
-
-  const exact = CORPUS.filter(
-    (c) => c.resource === resource && c.path === fieldPath,
-  );
-  if (exact.length > 0) return exact.slice(0, k).map((c) => toHit(c, 1));
-
-  const leaf = fieldPath.split('.').pop();
-  if (!leaf) return [];
-
-  return CORPUS.filter(
-    (c) => c.resource === resource && c.path.endsWith(`.${leaf}`),
-  )
-    .slice(0, k)
-    .map((c) => toHit(c, 0.8));
+  return findExactFieldChunks(CORPUS, resource, fieldPath, k)
+    .map((chunk) => toHit(chunk, 1));
 }
 
 export function formatEditorContext(editorContext?: EditorContext): string {
@@ -190,12 +182,17 @@ export async function retrieveContext(
     return trace;
   };
 
-  // 精确字段短路:命中 cursorPath/字段名,不走向量检索。
+  // 完整字段路径命中时短路;模糊叶子字段交给统一检索处理。
   const exactHits = exactFieldHits(routed ?? undefined, query.fieldPathHint, k);
   if (exactHits.length > 0) {
     const trace = emit({
       ...baseTrace,
       queryText: text,
+      queryExpansion: skippedExactQueryExpansionTrace(
+        text,
+        routed ?? undefined,
+        resolveQueryExpansionEnabled(undefined),
+      ),
       path: 'exact',
       coarseHits: [],
       rerankHits: [],

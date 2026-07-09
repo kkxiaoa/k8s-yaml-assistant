@@ -4,6 +4,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { QueryExpansionTrace } from './query-expansion-runtime';
 
 export interface TraceHit {
   id: string;
@@ -18,6 +19,7 @@ export interface RetrievalTrace {
   resourceHint?: string;
   fieldPathHint?: string;
   queryText: string;
+  queryExpansion?: QueryExpansionTrace;
   /** 走哪条路:exact=精确字段短路;search=向量粗召回+rerank */
   path: 'exact' | 'search';
   coarseHits: TraceHit[];

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DEFAULT_ALIASES_PATH = join(
+export const DEFAULT_ALIASES_PATH = join(
   process.cwd(),
   'data',
   'aliases',
@@ -58,13 +58,111 @@ interface AliasHit {
   canSelectResource: boolean;
 }
 
+function requiredString(
+  row: Record<string, unknown>,
+  field: string,
+  index: number,
+): string {
+  const value = row[field];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`alias[${index}].${field} 缺失`);
+  }
+  return value;
+}
+
+function stringArray(
+  value: unknown,
+  field: string,
+  index: number,
+): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.some((item) => typeof item !== 'string')
+  ) {
+    throw new Error(`alias[${index}].${field} 必须是 string[]`);
+  }
+  return value;
+}
+
+export function parseSchemaFieldAliasesJsonl(
+  raw: string,
+): SchemaFieldAlias[] {
+  return raw
+    .split('\n')
+    .filter(Boolean)
+    .map((line, index) => {
+      const value = JSON.parse(line) as unknown;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error(`alias[${index}] 必须是对象`);
+      }
+      const row = value as Record<string, unknown>;
+      if ('zhAliases' in row) {
+        throw new Error(
+          `alias[${index}].zhAliases 已废弃,请使用 weakZhAliases/strongZhAliases`,
+        );
+      }
+
+      const id = requiredString(row, 'id', index);
+      const resource = requiredString(row, 'resource', index);
+      const path = requiredString(row, 'path', index);
+      const chunkId = requiredString(row, 'chunkId', index);
+      const fieldTerms = stringArray(row.fieldTerms, 'fieldTerms', index);
+      const weakZhAliases = stringArray(
+        row.weakZhAliases,
+        'weakZhAliases',
+        index,
+      );
+      const strongZhAliases = stringArray(
+        row.strongZhAliases,
+        'strongZhAliases',
+        index,
+      );
+
+      if (row.source !== 'llm_offline') {
+        throw new Error(`alias[${index}].source 必须是 llm_offline`);
+      }
+      if (typeof row.reviewed !== 'boolean') {
+        throw new Error(`alias[${index}].reviewed 必须是 boolean`);
+      }
+      if (
+        row.reviewedAt !== null &&
+        typeof row.reviewedAt !== 'string'
+      ) {
+        throw new Error(`alias[${index}].reviewedAt 必须是 string|null`);
+      }
+      if (typeof row.reviewNote !== 'string') {
+        throw new Error(`alias[${index}].reviewNote 必须是 string`);
+      }
+      if (
+        row.reviewed &&
+        weakZhAliases.length === 0 &&
+        strongZhAliases.length === 0
+      ) {
+        throw new Error(
+          `alias[${index}].reviewed=true 时 weak/strong alias 不能同时为空`,
+        );
+      }
+
+      return {
+        id,
+        resource,
+        path,
+        chunkId,
+        fieldTerms,
+        weakZhAliases,
+        strongZhAliases,
+        source: row.source,
+        reviewed: row.reviewed,
+        reviewedAt: row.reviewedAt,
+        reviewNote: row.reviewNote,
+      };
+    });
+}
+
 export function loadReviewedAliases(path = DEFAULT_ALIASES_PATH): SchemaFieldAlias[] {
   if (!existsSync(path)) return [];
 
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as SchemaFieldAlias)
+  return parseSchemaFieldAliasesJsonl(readFileSync(path, 'utf8'))
     .filter((alias) => alias.reviewed);
 }
 
