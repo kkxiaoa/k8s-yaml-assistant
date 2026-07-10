@@ -4,7 +4,7 @@
 // 校验用 `npm run eval:check`。拒答用例 answerable=false / expectedChunkIds=[],不进 Recall/MRR。
 
 export interface EvalCase {
-  /** 稳定唯一 id(bad-case 回灌用 convertedEvalId 引用) */
+  /** 稳定唯一 id, bad-case 用 origin.evalCaseId 引用。 */
   id: string;
   /** 任务类型:评估标准不同 */
   taskType: 'explain_field' | 'explain_error' | 'ask_free' | 'refusal' | 'crd';

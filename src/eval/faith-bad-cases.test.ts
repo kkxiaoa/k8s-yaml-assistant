@@ -199,36 +199,11 @@ function badCase(params: {
     },
     severity: 'medium',
     status: params.status ?? 'triaged',
-    convertedEvalId: params.evalCaseId,
     origin: origin(
       params.evalCaseId,
       params.source,
       params.observedRunIds ?? [],
     ),
-  };
-}
-
-function legacyBadCase(params: {
-  id: string;
-  question: string;
-  layer: BadCase['failure']['layer'];
-  type: BadCase['failure']['type'];
-  status?: BadCase['status'];
-}): BadCase {
-  return {
-    id: params.id,
-    createdAt: '2026-07-08T00:00:00.000Z',
-    taskType: 'ask_free',
-    input: { question: params.question },
-    expected: { sourceIds: ['Chunk::a'] },
-    actual: { sourceIds: ['Chunk::other'] },
-    failure: {
-      layer: params.layer,
-      type: params.type,
-      note: 'legacy note',
-    },
-    severity: 'medium',
-    status: params.status ?? 'triaged',
   };
 }
 
@@ -546,8 +521,8 @@ withInputFiles(({ runsDir, faithDir }) => {
   assert.equal(c.issue?.failure.layer, 'generation');
   assert.equal(c.issue?.failure.type, 'hallucination');
   assert.equal(c.issue?.severity, 'high');
-  assert.equal(c.issue?.origin?.source, 'faith_eval');
-  assert.deepEqual(c.issue?.origin?.observedRunIds, ['faith-run-1']);
+  assert.equal(c.issue?.origin.source, 'faith_eval');
+  assert.deepEqual(c.issue?.origin.observedRunIds, ['faith-run-1']);
   assert.equal(c.issue?.actual.evaluation?.runId, 'faith-run-1');
   assert.equal(c.issue?.actual.evaluation?.scope, 'policy');
   assert.equal(c.issue?.actual.evaluation?.outcome, 'hallucination');
@@ -674,11 +649,11 @@ withInputFiles(({ runsDir, faithDir }) => {
 
   assert.equal(c.action, 'recur');
   assert.equal(c.issue?.status, 'fixed');
-  assert.deepEqual(c.issue?.origin?.observedRunIds, [
+  assert.deepEqual(c.issue?.origin.observedRunIds, [
     'older-run',
     'faith-run-1',
   ]);
-  assert.equal(c.issue?.origin?.occurrenceCount, 2);
+  assert.equal(c.issue?.origin.occurrenceCount, 2);
 }
 
 {
@@ -720,7 +695,6 @@ withInputFiles(({ runsDir, faithDir }) => {
       { action: 'warning', evalCaseId: 'warn-case', message: 'warn' },
       { action: 'error', evalCaseId: 'error-case', message: 'error' },
     ],
-    evalSet: MINI_EVAL_SET,
   });
 
   assert.equal(merged.cases.length, 1);
@@ -752,16 +726,15 @@ withInputFiles(({ runsDir, faithDir }) => {
   const merged = mergeBadCaseIssues({
     existing: [existing],
     candidates: [candidate],
-    evalSet: MINI_EVAL_SET,
   });
 
   assert.equal(merged.cases.length, 1);
   assert.equal(merged.cases[0]!.status, 'fixed');
-  assert.deepEqual(merged.cases[0]!.origin?.observedRunIds, [
+  assert.deepEqual(merged.cases[0]!.origin.observedRunIds, [
     'older-run',
     'faith-run-1',
   ]);
-  assert.equal(merged.cases[0]!.origin?.occurrenceCount, 2);
+  assert.equal(merged.cases[0]!.origin.occurrenceCount, 2);
   assert.equal(merged.summary.recur, 1);
 }
 
@@ -785,49 +758,12 @@ withInputFiles(({ runsDir, faithDir }) => {
   const merged = mergeBadCaseIssues({
     existing: [existing],
     candidates: [candidate],
-    evalSet: MINI_EVAL_SET,
   });
 
   assert.equal(merged.cases.length, 1);
-  assert.deepEqual(merged.cases[0]!.origin?.observedRunIds, ['faith-run-1']);
-  assert.equal(merged.cases[0]!.origin?.occurrenceCount, 1);
+  assert.deepEqual(merged.cases[0]!.origin.observedRunIds, ['faith-run-1']);
+  assert.equal(merged.cases[0]!.origin.occurrenceCount, 1);
   assert.equal(merged.summary.already_imported, 1);
-}
-
-{
-  const canonical = badCase({
-    evalCaseId: 'case-a',
-    layer: 'retrieval',
-    type: 'retrieval_miss',
-    source: 'retrieval_eval',
-    status: 'new',
-  });
-  const legacy = legacyBadCase({
-    id: 'legacy-id',
-    question: '问题 A',
-    layer: 'retrieval',
-    type: 'retrieval_miss',
-    status: 'triaged',
-  });
-  const merged = mergeBadCaseIssues({
-    existing: [legacy, canonical],
-    candidates: [],
-    evalSet: MINI_EVAL_SET,
-  });
-
-  assert.equal(merged.cases.length, 1);
-  assert.equal(
-    merged.cases[0]!.id,
-    canonicalBadCaseId({
-      evalCaseId: 'case-a',
-      layer: 'retrieval',
-      type: 'retrieval_miss',
-    }),
-  );
-  assert.equal(merged.cases[0]!.origin?.evalCaseId, 'case-a');
-  assert.equal(merged.cases[0]!.status, 'triaged');
-  assert.equal(merged.warnings.length, 1);
-  assert.match(merged.warnings[0]!, /merged duplicate bad case/);
 }
 
 console.log('faith-bad-cases tests passed');
