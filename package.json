@@ -16,6 +16,7 @@
     "eval:fix": "tsx src/eval/fix-eval.ts",
     "eval:compare": "tsx scripts/eval-compare.ts",
     "eval:promote": "tsx scripts/eval-promote.ts",
+    "badcases:faith": "tsx scripts/faith-bad-cases.ts",
     "voyage:ab": "tsx scripts/voyage-ab.ts",
     "aliases:generate": "tsx scripts/generate-schema-aliases.ts",
     "aliases:check": "tsx scripts/check-schema-aliases.ts",
@@ -26,7 +27,7 @@
     "corpus:stats": "tsx scripts/corpus-stats.ts",
     "corpus:closure": "tsx scripts/curated-closure.ts",
     "index:build": "tsx scripts/index-build.ts",
-    "test": "tsx src/validation/validate.test.ts && tsx src/server/agent.test.ts && tsx src/knowledge/policy-corpus.test.ts && tsx src/retrieval/boost.test.ts && tsx src/retrieval/sources.test.ts && tsx src/retrieval/router.test.ts && tsx src/retrieval/embeddings.test.ts && tsx src/retrieval/query-expansion.test.ts && tsx src/retrieval/query-expansion-runtime.test.ts && tsx src/retrieval/exact-field.test.ts && tsx src/eval/run-store.test.ts",
+    "test": "tsx src/validation/validate.test.ts && tsx src/server/agent.test.ts && tsx src/knowledge/policy-corpus.test.ts && tsx src/retrieval/boost.test.ts && tsx src/retrieval/sources.test.ts && tsx src/retrieval/router.test.ts && tsx src/retrieval/embeddings.test.ts && tsx src/retrieval/query-expansion.test.ts && tsx src/retrieval/query-expansion-runtime.test.ts && tsx src/retrieval/exact-field.test.ts && tsx src/eval/run-store.test.ts && tsx src/eval/bad-cases.test.ts && tsx src/eval/faith-bad-cases.test.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"

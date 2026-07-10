@@ -31,15 +31,16 @@ interface CaseSelection {
   cases: EvalCase[];
   suffix: '' | '-smoke' | '-policy';
   label: string;
+  scope: 'full' | 'policy' | 'smoke';
 }
 
 /** 选择评估子集。不传 = 全量;数字 = 冒烟;--policy = 只跑 Stage 6 policy 用例。 */
 function selectCases(arg: string | undefined): CaseSelection {
   if (arg === '--policy') {
     const cases = EVAL_SET.filter((c) => c.id.startsWith('policy-'));
-    return { cases, suffix: '-policy', label: ',policy 子集' };
+    return { cases, suffix: '-policy', label: ',policy 子集', scope: 'policy' };
   }
-  if (!arg) return { cases: EVAL_SET, suffix: '', label: '' };
+  if (!arg) return { cases: EVAL_SET, suffix: '', label: '', scope: 'full' };
 
   const smokeN = Number(arg);
   if (!Number.isFinite(smokeN) || smokeN <= 0) {
@@ -51,6 +52,7 @@ function selectCases(arg: string | undefined): CaseSelection {
     cases: [...answerable, ...refusal],
     suffix: '-smoke',
     label: `,冒烟:可答/拒答各 ${smokeN}`,
+    scope: 'smoke',
   };
 }
 
@@ -239,9 +241,15 @@ async function main(): Promise<void> {
     corpusHash,
     indexHash: computeIndexHash(corpusHash, EMBEDDING_MODEL),
     evalSetHash: computeEvalSetHash(cases),
+    evalSetVersionHash: computeEvalSetHash(EVAL_SET),
     embeddingModel: EMBEDDING_MODEL,
     rerankModel: RERANK_MODEL,
     answerModel: MODEL,
+    judgeModel: JUDGE_MODEL,
+    faithSelection: {
+      scope: selection.scope,
+      caseIds: cases.map((c) => c.id),
+    },
     k: CONTEXT_K,
     metrics: {
       'faith.faithful_rate': judgedCount ? faithfulCount / judgedCount : 0,

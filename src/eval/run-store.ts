@@ -18,6 +18,11 @@ export interface QueryExpansionRunConfig {
   reviewedAliasCount: number;
 }
 
+export interface FaithRunSelection {
+  scope: 'full' | 'policy' | 'smoke';
+  caseIds: string[];
+}
+
 export interface EvalRun {
   /** 时间戳 id,同时是 runs/<id>.json 文件名 */
   id: string;
@@ -28,10 +33,14 @@ export interface EvalRun {
   indexHash: string;
   /** eval-set 指纹(id+question+expectedChunkIds)。变了说明标注改过,Δ 含标注变更、非纯模型改进。 */
   evalSetHash?: string;
+  /** 全量 eval-set 版本指纹;faith 子集 run 用它区分 selection hash 与全量版本闸。 */
+  evalSetVersionHash?: string;
   embeddingModel: string;
   rerankModel?: string;
   /** 检索类 eval 无作答模型,留空;Stage 4 生成类才填 */
   answerModel?: string;
+  judgeModel?: string;
+  faithSelection?: FaithRunSelection;
   /** 生成该 run 时共享检索入口使用的 query expansion 配置。 */
   queryExpansion?: QueryExpansionRunConfig;
   k: number;
