@@ -352,6 +352,24 @@ Bad case 结构不要只存 `question + wrongAnswer`，否则无法归因，也�
 建议使用一个跨任务的 superset 结构：Stage 2 先填写检索/解释类字段，Stage 4 再补生成/修复类字段。不要为 RAG、generate、fix 各自设计完全不同的 bad case 格式，否则后续无法统一做分类、统计和回灌。
 
 ```ts
+interface BadCaseOrigin {
+  evalCaseId: string;
+  source: 'retrieval_eval' | 'faith_eval';
+  firstSeenAt: string;
+  lastSeenAt: string;
+  firstSeenRunId?: string;
+  lastSeenRunId?: string;
+  observedRunIds: string[];
+  occurrenceCount: number;
+  scope?: 'full' | 'policy' | 'smoke';
+  models?: {
+    embedding?: string;
+    rerank?: string;
+    answer?: string;
+    judge?: string;
+  };
+}
+
 interface BadCase {
   id: string;
   createdAt: string;
@@ -385,6 +403,13 @@ interface BadCase {
     sourceIds?: string[];
     traceId?: string;
     diagnostics?: Array<{ stage: string; message: string }>;
+    evaluation?: {
+      runId: string;
+      scope: 'full' | 'policy' | 'smoke';
+      outcome: string;
+      unsupportedClaims: string[];
+      judgeReason?: string;
+    };
   };
 
   failure: {
@@ -402,6 +427,7 @@ interface BadCase {
       | 'unknown';
     type:
       | 'retrieval_miss'
+      | 'rerank_miss'
       | 'rerank_error'
       | 'chunk_gap'
       | 'knowledge_missing'
@@ -422,6 +448,8 @@ interface BadCase {
   severity: 'low' | 'medium' | 'high';
   status: 'new' | 'triaged' | 'converted_to_eval' | 'fixed' | 'wont_fix';
   convertedEvalId?: string;
+  origin?: BadCaseOrigin;
+  relatedBadCaseIds?: string[];
 }
 ```
 
@@ -434,6 +462,11 @@ interface BadCase {
 - `failure.layer`：判断应该改哪一层。
 - `failure.type`：沉淀更细的错误类型，用于统计是否需要引入 Hybrid、改 prompt、补知识源或修生成闭环。
 - `status`：确保 bad case 有闭环，不只是失败日志。
+- `origin.evalCaseId`：记录该 bad case 对应的 eval case，是去重、关联和复测的主键来源。
+- `origin.firstSeenAt / lastSeenAt / occurrenceCount`：记录首次发现、最近复现和有效复现次数，同一 run 重复导入不重复计数。
+- `actual.evaluation`：保留 faith eval 的 outcome、unsupported claims 和 judge reason，便于区分检索失败、生成幻觉和 judge 问题。
+
+Bad case 的稳定身份使用 `evalCaseId + failure.layer + failure.type`，而不是旧的 `question + sourceIds`。旧数据迁移后可保留 `convertedEvalId` 作为兼容字段，但后续统计与关联以 `origin.evalCaseId` 为准。
 
 Stage 2 的最小可填版本：
 
@@ -447,7 +480,8 @@ Stage 2 的最小可填版本：
   actual: { answer, sourceIds, traceId },
   failure: { layer, type },
   severity,
-  status
+  status,
+  origin: { evalCaseId, source, firstSeenAt, lastSeenAt, observedRunIds, occurrenceCount }
 }
 ```
 

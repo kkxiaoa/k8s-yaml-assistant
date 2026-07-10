@@ -128,8 +128,8 @@ async function evaluateServing(k: number): Promise<ServingResult> {
     if (!queryExpansion && st.queryExpansion) {
       queryExpansion = queryExpansionRunConfig(st.queryExpansion);
     }
-    const ids = ranked.map((r) => r.chunk.id);
 
+    const ids = ranked.map((r) => r.chunk.id);
     const topK = ids.slice(0, k);
     const found = ec.expectedChunkIds.filter((id) => topK.includes(id));
     const recall = found.length / ec.expectedChunkIds.length;
@@ -153,11 +153,12 @@ async function evaluateServing(k: number): Promise<ServingResult> {
     if (recall < 1) {
       misses.push(
         retrievalMiss({
+          evalCaseId: ec.id,
           question: ec.question,
           resource: ec.resource!, // 已过 answerable 守卫,可答用例必有 resource
           expectedChunkIds: ec.expectedChunkIds,
           actualTopIds: topK,
-          rank,
+          rankedIds: ids,
           k,
         }),
       );
