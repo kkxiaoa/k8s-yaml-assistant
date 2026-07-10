@@ -1,33 +1,57 @@
 import assert from 'node:assert/strict';
 import {
-  badCaseId,
+  assertCanonicalBadCase,
   canonicalBadCaseId,
-  migrateBadCasesToCanonical,
+  mergeCanonicalObservations,
+  normalizeCanonicalBadCases,
   readBadCases,
   retrievalMiss,
   type BadCase,
+  type BadCaseOrigin,
 } from './bad-cases';
-import { EVAL_SET } from './eval-set';
 
-function legacyRetrievalFixture(): BadCase[] {
-  return readBadCases()
-    .filter(
-      (c) =>
-        (c.failure.layer === 'retrieval' || c.failure.layer === 'rerank') &&
-        (c.failure.type === 'retrieval_miss' ||
-          c.failure.type === 'rerank_miss'),
-    )
-    .map((c) => {
-      const sourceIds = c.expected?.sourceIds ?? [];
-      const legacy: BadCase = {
-        ...c,
-        id: badCaseId(c.taskType, c.input.question ?? '', sourceIds),
-        convertedEvalId: undefined,
-        origin: undefined,
-        relatedBadCaseIds: undefined,
-      };
-      return JSON.parse(JSON.stringify(legacy)) as BadCase;
-    });
+function origin(
+  evalCaseId: string,
+  source: BadCaseOrigin['source'] = 'retrieval_eval',
+  observedRunIds: string[] = [],
+): BadCaseOrigin {
+  return {
+    evalCaseId,
+    source,
+    firstSeenAt: '2026-07-09T00:00:00.000Z',
+    lastSeenAt: '2026-07-09T00:00:00.000Z',
+    observedRunIds,
+    occurrenceCount: Math.max(1, observedRunIds.length),
+  };
+}
+
+function badCase(params: {
+  evalCaseId: string;
+  layer: BadCase['failure']['layer'];
+  type: BadCase['failure']['type'];
+  status?: BadCase['status'];
+  observedRunIds?: string[];
+}): BadCase {
+  return {
+    id: canonicalBadCaseId({
+      evalCaseId: params.evalCaseId,
+      layer: params.layer,
+      type: params.type,
+    }),
+    createdAt: '2026-07-09T00:00:00.000Z',
+    taskType: 'ask_free',
+    input: { question: 'existing question' },
+    expected: { sourceIds: ['expected'] },
+    actual: { sourceIds: ['actual'] },
+    failure: {
+      layer: params.layer,
+      type: params.type,
+      note: 'existing note',
+    },
+    severity: 'medium',
+    status: params.status ?? 'new',
+    origin: origin(params.evalCaseId, 'retrieval_eval', params.observedRunIds),
+  };
 }
 
 {
@@ -71,9 +95,8 @@ function legacyRetrievalFixture(): BadCase[] {
       type: 'retrieval_miss',
     }),
   );
-  assert.equal(miss.origin?.evalCaseId, 'pod-volumes');
-  assert.equal(miss.origin?.source, 'retrieval_eval');
-  assert.equal(miss.convertedEvalId, 'pod-volumes');
+  assert.equal(miss.origin.evalCaseId, 'pod-volumes');
+  assert.equal(miss.origin.source, 'retrieval_eval');
 }
 
 {
@@ -139,66 +162,61 @@ function legacyRetrievalFixture(): BadCase[] {
 }
 
 {
-  const legacy = legacyRetrievalFixture();
-  assert.equal(legacy.length, 10);
-
-  const migrated = migrateBadCasesToCanonical({
-    cases: legacy,
-    evalSet: EVAL_SET,
-    now: '2026-07-09T00:00:00.000Z',
-  }).cases;
-
-  const ids = new Set<string>();
-  for (let i = 0; i < legacy.length; i++) {
-    const before = legacy[i]!;
-    const after = migrated[i]!;
-    const evalCase = EVAL_SET.find((c) => c.question === before.input.question);
-
-    assert.ok(evalCase);
-    assert.equal(
-      after.id,
-      canonicalBadCaseId({
-        evalCaseId: evalCase.id,
-        layer: before.failure.layer,
-        type: before.failure.type,
-      }),
-    );
-    assert.equal(after.origin?.evalCaseId, evalCase.id);
-    assert.equal(after.origin?.source, 'retrieval_eval');
-    assert.equal(after.convertedEvalId, evalCase.id);
-    assert.equal(after.createdAt, before.createdAt);
-    assert.deepEqual(after.input, before.input);
-    assert.deepEqual(after.expected, before.expected);
-    assert.deepEqual(after.actual, before.actual);
-    assert.equal(after.failure.note, before.failure.note);
-    assert.equal(after.severity, before.severity);
-    assert.equal(after.status, before.status);
-    assert.equal(after.origin?.firstSeenAt, before.createdAt);
-    assert.equal(after.origin?.lastSeenAt, before.createdAt);
-    assert.deepEqual(after.origin?.observedRunIds, []);
-    assert.equal(after.origin?.occurrenceCount, 1);
-
-    assert.equal(ids.has(after.id), false);
-    ids.add(after.id);
+  const canonical = readBadCases();
+  assert.equal(canonical.length > 0, true);
+  for (const badCase of canonical) {
+    assert.doesNotThrow(() => assertCanonicalBadCase(badCase));
   }
 }
 
 {
-  const legacy = legacyRetrievalFixture();
-  const broken = [
-    {
-      ...legacy[0]!,
-      id: 'legacy-broken',
-      input: { ...legacy[0]!.input, question: '这个问题不存在于 eval set' },
-    },
-  ];
+  const first = badCase({
+    evalCaseId: 'case-a',
+    layer: 'generation',
+    type: 'hallucination',
+    status: 'triaged',
+    observedRunIds: ['run-a'],
+  });
+  const second = {
+    ...badCase({
+      evalCaseId: 'case-a',
+      layer: 'generation',
+      type: 'hallucination',
+      status: 'new',
+      observedRunIds: ['run-b'],
+    }),
+    actual: { answer: 'latest answer' },
+  };
+  const merged = normalizeCanonicalBadCases([first, second]);
 
-  assert.throws(
-    () =>
-      migrateBadCasesToCanonical({
-        cases: broken,
-        evalSet: EVAL_SET,
-      }),
-    /legacy-broken.*这个问题不存在于 eval set.*matches=0/s,
-  );
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]!.status, 'triaged');
+  assert.deepEqual(merged[0]!.actual, { answer: 'latest answer' });
+  assert.deepEqual(merged[0]!.origin.observedRunIds, ['run-a', 'run-b']);
+  assert.equal(merged[0]!.origin.occurrenceCount, 2);
+}
+
+{
+  const first = badCase({
+    evalCaseId: 'case-b',
+    layer: 'retrieval',
+    type: 'retrieval_miss',
+    status: 'triaged',
+    observedRunIds: ['run-a'],
+  });
+  const second = {
+    ...badCase({
+      evalCaseId: 'case-b',
+      layer: 'retrieval',
+      type: 'retrieval_miss',
+      status: 'new',
+      observedRunIds: ['run-b'],
+    }),
+    actual: { sourceIds: ['latest'] },
+  };
+  const merged = mergeCanonicalObservations(first, second);
+
+  assert.equal(merged.status, 'triaged');
+  assert.deepEqual(merged.actual, { sourceIds: ['latest'] });
+  assert.deepEqual(merged.origin.observedRunIds, ['run-a', 'run-b']);
 }

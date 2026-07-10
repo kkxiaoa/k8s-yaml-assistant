@@ -447,8 +447,7 @@ interface BadCase {
 
   severity: 'low' | 'medium' | 'high';
   status: 'new' | 'triaged' | 'converted_to_eval' | 'fixed' | 'wont_fix';
-  convertedEvalId?: string;
-  origin?: BadCaseOrigin;
+  origin: BadCaseOrigin;
   relatedBadCaseIds?: string[];
 }
 ```
@@ -466,7 +465,7 @@ interface BadCase {
 - `origin.firstSeenAt / lastSeenAt / occurrenceCount`：记录首次发现、最近复现和有效复现次数，同一 run 重复导入不重复计数。
 - `actual.evaluation`：保留 faith eval 的 outcome、unsupported claims 和 judge reason，便于区分检索失败、生成幻觉和 judge 问题。
 
-Bad case 的稳定身份使用 `evalCaseId + failure.layer + failure.type`，而不是旧的 `question + sourceIds`。旧数据迁移后可保留 `convertedEvalId` 作为兼容字段，但后续统计与关联以 `origin.evalCaseId` 为准。
+Bad case 的稳定身份使用 `evalCaseId + failure.layer + failure.type`，而不是 `question + sourceIds`。统计、去重和关联统一以 `origin.evalCaseId` 为准。
 
 Stage 2 的最小可填版本：
 

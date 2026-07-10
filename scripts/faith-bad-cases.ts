@@ -1,7 +1,8 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { BAD_CASES_PATH, readBadCases } from '../src/eval/bad-cases';
-import { EVAL_SET } from '../src/eval/eval-set';
+import {
+  BAD_CASES_PATH,
+  readBadCases,
+  writeBadCases,
+} from '../src/eval/bad-cases';
 import {
   buildFaithBadCaseCandidates,
   mergeBadCaseIssues,
@@ -36,7 +37,9 @@ function issueLabel(candidate: FaithBadCaseCandidate): string {
 }
 
 function pad(value: string, width: number): string {
-  return value.length >= width ? value : value + ' '.repeat(width - value.length);
+  return value.length >= width
+    ? value
+    : value + ' '.repeat(width - value.length);
 }
 
 function printPreview(params: {
@@ -47,7 +50,8 @@ function printPreview(params: {
   candidates: FaithBadCaseCandidate[];
   wrote?: boolean;
 }): void {
-  const { runId, scope, caseCount, warnings, candidates, wrote = false } = params;
+  const { runId, scope, caseCount, warnings, candidates, wrote = false } =
+    params;
   console.log(`run: ${runId}  scope: ${scope}  cases: ${caseCount}\n`);
   console.log(
     `${pad('action', 18)}${pad('eval case', 34)}issue`,
@@ -98,14 +102,6 @@ function printPreview(params: {
   }
 }
 
-function writeBadCases(cases: ReturnType<typeof readBadCases>): void {
-  mkdirSync(dirname(BAD_CASES_PATH), { recursive: true });
-  writeFileSync(
-    BAD_CASES_PATH,
-    cases.map((badCase) => JSON.stringify(badCase)).join('\n') + '\n',
-  );
-}
-
 function main(): void {
   const args = process.argv.slice(2);
   const runId = args.find((arg) => arg !== '--write');
@@ -117,7 +113,6 @@ function main(): void {
   const canonicalExisting = mergeBadCaseIssues({
     existing,
     candidates: [],
-    evalSet: EVAL_SET,
   });
   const candidates = buildFaithBadCaseCandidates({
     traces: input.traces,
@@ -129,7 +124,6 @@ function main(): void {
     ? mergeBadCaseIssues({
         existing,
         candidates,
-        evalSet: EVAL_SET,
       })
     : null;
 

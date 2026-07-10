@@ -25,9 +25,9 @@
 - 默认只预览，显式 `--write` 才写入。
 - 按失败层和失败类型独立管理 issue。
 - 将 generation issue 与已有 retrieval issue 关联。
-- 迁移现有旧 retrieval-eval bad case 到 canonical issue ID。
+- `bad-cases.jsonl` 只保留 canonical issue ID。
 - 保留人工维护的状态、严重度、备注和 eval 关联。
-- 增加本地、无网络的分类、幂等、迁移和 CLI 测试。
+- 增加本地、无网络的分类、幂等、合并和 CLI 测试。
 
 ### 2.2 不包含
 
@@ -231,36 +231,33 @@ bad case 会持久化 answer、source IDs、unsupported claims、judge reason �
 - `observedRunIds` 追加新 run ID。
 - `occurrenceCount` 增加。
 - 更新 `lastSeenAt`、`lastSeenRunId`、模型配置和 `actual` 最新快照。
-- 不覆盖 `failure.note`、`severity`、`status`、`convertedEvalId`。
+- 不覆盖 `failure.note`、`severity` 和 `status`。
 
 同一个 run 重复 `--write` 时，因 `observedRunIds` 已包含 run ID，结果为
 `already_imported`，不得增加次数或改写文件。
 
-## 7. 现有 Retrieval-eval Bad Case 迁移
+## 7. Bad Case Canonical 数据要求
 
-现有旧 retrieval-eval bad case 使用旧 ID：
+`bad-cases.jsonl` 不再兼容旧 ID：
 
 ```text
 sha1(taskType + question + expected source IDs)
 ```
 
-本轮做一次确定性迁移：
+唯一合法身份是：
 
-1. 用现有 bad case 的 question 精确匹配 `EVAL_SET`。
-2. 必须且只能命中一个 eval case；0 个或多个匹配时迁移失败。
-3. 写入 `origin.evalCaseId` 和 `origin.source='retrieval_eval'`。
-4. 以现有 `failure.layer + failure.type` 重算 canonical ID；rerank 质量问题
-   使用 `rerank + rerank_miss`，不再写成 `rerank + retrieval_miss`。
-5. 设置 `convertedEvalId=evalCaseId`，因为这些问题本来就来自 eval set。
-6. 保留原始 `createdAt`、input、expected、actual、failure note、severity
-   和 status。
+```text
+origin.evalCaseId + failure.layer + failure.type
+```
 
-仓库当前没有发现对这些旧 ID 的外部引用。迁移仍必须有测试，防止未来
-引用或重复 issue 被静默覆盖。
+要求：
 
-如果迁移匹配失败，CLI 必须输出具体失败记录的旧 ID、question、期望 source
-IDs 和匹配数量。允许后续通过人工映射表提供 `oldId -> evalCaseId` 修复历史
-漂移，但本轮默认不自动猜测。
+1. 每条 bad case 必须有 `origin.evalCaseId`。
+2. `id` 必须等于 `canonicalBadCaseId(origin.evalCaseId, layer, type)`。
+3. `origin.source` 标明来源：`retrieval_eval` 或 `faith_eval`。
+4. rerank 质量问题使用 `rerank + rerank_miss`，不写成 `rerank + retrieval_miss`。
+5. 读文件时发现缺 `origin` 或 ID 不匹配应直接失败，不做静默迁移。
+6. 同一 canonical ID 重复出现时只做合并：保留人工状态，更新最新观测。
 
 `retrievalMiss()` 后续必须接收 `evalCaseId`，确保新记录直接使用 canonical
 ID。若 eval case 缺少 ID，不允许退回 question-based ID。
@@ -340,7 +337,7 @@ create=1 recur=0 already_imported=0 link_only=1 skip=7 warning=0
 `--write` 只处理 `create` 和 `recur`。preview 中若存在输入校验错误，则禁止
 写入；普通 warning 不阻断写入。
 
-写入流程必须先在内存完成所有校验、迁移、候选构建和合并，再一次性覆盖
+写入流程必须先在内存完成所有校验、候选构建和合并，再一次性覆盖
 `bad-cases.jsonl`，避免部分写入。
 
 ## 11. Eval 关联与状态
@@ -350,7 +347,7 @@ case。不能再复制一条 `source='bad_case'` 的相同问题。
 
 新 issue：
 
-- `convertedEvalId=origin.evalCaseId`。
+- `origin.evalCaseId=trace.id`。
 - `status='new'`，表示仍待人工归因和修复。
 
 后续 run 中 issue 对应 case 通过时：
@@ -378,8 +375,7 @@ case。不能再复制一条 `source='bad_case'` 的相同问题。
 - 缺少 retrieval issue 时返回 warning，不伪造 retrieval 根因。
 - 同一 run 重复导入为 `already_imported`。
 - 新 run 再现时 occurrence count 增加。
-- recurrence 更新最新证据，但保留人工 status、severity、note 和
-  `convertedEvalId`。
+- recurrence 更新最新证据，但保留人工 status、severity 和 note。
 - 非 faith run、run ID 不匹配、选择集 evalSetHash 不匹配、重复 trace ID
   均整批失败。
 - policy/smoke 子集 trace 的 `evalSetHash` 按选择集校验；新 run 还必须校验
@@ -388,13 +384,12 @@ case。不能再复制一条 `source='bad_case'` 的相同问题。
   run 缺少全量版本闸。
 - preview 不修改 bad-cases 文件。
 
-### 12.2 迁移测试
+### 12.2 Canonical repository 测试
 
-- 当前旧 retrieval-eval bad case 均唯一映射到 `EVAL_SET`。
-- 迁移匹配失败时输出具体失败记录，并允许人工映射入口覆盖历史 question
-  漂移。
-- 迁移后 ID 唯一。
-- 原有 triage/status/note 不变。
+- 当前 `bad-cases.jsonl` 每条记录均有 `origin.evalCaseId`。
+- 当前 `bad-cases.jsonl` 每条记录的 `id` 均等于 canonical ID。
+- 同一 canonical ID 重复合并时保留人工 status/note。
+- 合并后更新最新 actual 和 origin 观测信息。
 - `retrievalMiss()` 对同一 eval case 生成相同 canonical ID。
 
 ### 12.3 真实历史 Run 验证
@@ -433,7 +428,7 @@ git diff --check
 
 实施计划应拆成独立 Task，并在每个 Task 后停下 review：
 
-1. BadCase canonical schema、repository 测试和现有旧记录迁移。
+1. BadCase canonical schema 与 repository 测试。
 2. Faith candidate 纯转换器和 outcome/关联测试。
 3. Run selection 元数据和 CLI preview。
 4. `--write` 幂等合并与真实历史 run 验证。

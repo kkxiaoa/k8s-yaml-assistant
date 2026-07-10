@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   canonicalBadCaseId,
-  migrateBadCasesToCanonical,
+  normalizeCanonicalBadCases,
   type BadCase,
   type BadCaseOrigin,
 } from './bad-cases';
@@ -182,10 +182,7 @@ function failureForOutcome(outcome: FaithOutcome): FaithFailure | null {
 }
 
 function sameEvalCase(issue: BadCase, evalCaseId: string): boolean {
-  return (
-    issue.origin?.evalCaseId === evalCaseId ||
-    issue.convertedEvalId === evalCaseId
-  );
+  return issue.origin.evalCaseId === evalCaseId;
 }
 
 function retrievalQualityIssues(
@@ -207,7 +204,7 @@ function faithIssues(
 ): BadCase[] {
   return existingBadCases.filter(
     (issue) =>
-      sameEvalCase(issue, evalCaseId) && issue.origin?.source === 'faith_eval',
+      sameEvalCase(issue, evalCaseId) && issue.origin.source === 'faith_eval',
   );
 }
 
@@ -295,7 +292,6 @@ function issueFromTrace(params: {
     },
     severity: existing?.severity ?? failure.severity,
     status: existing?.status ?? 'new',
-    convertedEvalId: existing?.convertedEvalId ?? trace.id,
     origin: {
       ...baseOrigin,
       evalCaseId: trace.id,
@@ -342,7 +338,7 @@ function issueCandidate(params: {
   const issueId = issueIdFor(trace.id, failure);
   const existing = existingBadCases.find((issue) => issue.id === issueId);
 
-  if (existing?.origin?.observedRunIds.includes(run.id)) {
+  if (existing?.origin.observedRunIds.includes(run.id)) {
     return {
       action: 'already_imported',
       evalCaseId: trace.id,
@@ -481,23 +477,19 @@ function emptySummary(): Record<FaithBadCaseAction, number> {
 export function mergeBadCaseIssues(params: {
   existing: BadCase[];
   candidates: FaithBadCaseCandidate[];
-  evalSet: EvalCase[];
-  now?: string;
 }): {
   cases: BadCase[];
   summary: Record<FaithBadCaseAction, number>;
   warnings: string[];
 } {
-  const { existing, candidates, evalSet, now } = params;
-  const migrated = migrateBadCasesToCanonical({
-    cases: existing,
-    evalSet,
-    now,
-    onDuplicate: 'merge',
-  });
-  const byId = new Map(migrated.cases.map((badCase) => [badCase.id, badCase]));
+  const { existing, candidates } = params;
+  const byId = new Map(
+    normalizeCanonicalBadCases(existing).map((badCase) => [
+      badCase.id,
+      badCase,
+    ]),
+  );
   const summary = emptySummary();
-  const warnings = [...migrated.warnings];
 
   for (const candidate of candidates) {
     summary[candidate.action]++;
@@ -515,6 +507,6 @@ export function mergeBadCaseIssues(params: {
   return {
     cases: [...byId.values()],
     summary,
-    warnings,
+    warnings: [],
   };
 }

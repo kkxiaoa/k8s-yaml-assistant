@@ -1,6 +1,5 @@
-// §4.5 轻量反馈闭环(离线版)。失败用例沉淀成 data/eval/bad-cases.jsonl。
-// 用一个跨任务的 superset 结构:Stage 2 先填检索/解释类字段,Stage 4 再补生成/修复类。
-// eval 每次自动 upsert serving 未命中用例;按 id 去重,保留已 triage 的状态,不重复覆盖人工标注。
+// 轻量反馈闭环(离线版):失败用例沉淀成 data/eval/bad-cases.jsonl。
+// bad case 只支持 canonical identity: evalCaseId + failure.layer + failure.type。
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -106,8 +105,7 @@ export interface BadCase {
   };
   severity: 'low' | 'medium' | 'high';
   status: 'new' | 'triaged' | 'converted_to_eval' | 'fixed' | 'wont_fix';
-  convertedEvalId?: string;
-  origin?: BadCaseOrigin;
+  origin: BadCaseOrigin;
   relatedBadCaseIds?: string[];
 }
 
@@ -117,18 +115,6 @@ export const BAD_CASES_PATH = join(
   'eval',
   'bad-cases.jsonl',
 );
-
-/** 稳定 id:同一失败(任务+问题+期望来源)跨 run 生成同一 id,保证去重。 */
-export function badCaseId(
-  taskType: BadCase['taskType'],
-  question: string,
-  sourceIds: string[],
-): string {
-  return createHash('sha1')
-    .update(`${taskType}\n${question}\n${[...sourceIds].sort().join(',')}`)
-    .digest('hex')
-    .slice(0, 12);
-}
 
 export function canonicalBadCaseId(params: {
   evalCaseId: string;
@@ -141,87 +127,6 @@ export function canonicalBadCaseId(params: {
     .update(`${evalCaseId}\n${layer}\n${type}`)
     .digest('hex')
     .slice(0, 12);
-}
-
-export interface EvalSetBadCaseRef {
-  id: string;
-  question: string;
-  expectedChunkIds: string[];
-}
-
-export function migrateBadCasesToCanonical(params: {
-  cases: BadCase[];
-  evalSet: EvalSetBadCaseRef[];
-  manualMap?: Record<string, string>;
-  now?: string;
-  onDuplicate?: 'throw' | 'merge';
-}): { cases: BadCase[]; warnings: string[] } {
-  const { cases, evalSet, manualMap = {}, onDuplicate = 'throw' } = params;
-  const migrated: BadCase[] = [];
-  const warnings: string[] = [];
-
-  for (const badCase of cases) {
-    if (badCase.origin?.evalCaseId) {
-      migrated.push({ ...badCase });
-      continue;
-    }
-
-    const manualEvalCaseId = manualMap[badCase.id];
-    const matches = manualEvalCaseId
-      ? evalSet.filter((c) => c.id === manualEvalCaseId)
-      : evalSet.filter((c) => c.question === badCase.input.question);
-
-    if (matches.length !== 1) {
-      const sourceIds = badCase.expected?.sourceIds ?? [];
-      throw new Error(
-        [
-          `bad case migration failed: id=${badCase.id}`,
-          `question=${badCase.input.question ?? ''}`,
-          `expectedSourceIds=${sourceIds.join(',')}`,
-          `matches=${matches.length}`,
-        ].join(' '),
-      );
-    }
-
-    const evalCase = matches[0]!;
-    const id = canonicalBadCaseId({
-      evalCaseId: evalCase.id,
-      layer: badCase.failure.layer,
-      type: badCase.failure.type,
-    });
-
-    migrated.push({
-      ...badCase,
-      id,
-      convertedEvalId: evalCase.id,
-      origin: {
-        evalCaseId: evalCase.id,
-        source: 'retrieval_eval',
-        firstSeenAt: badCase.createdAt,
-        lastSeenAt: badCase.createdAt,
-        observedRunIds: [],
-        occurrenceCount: 1,
-      },
-    });
-  }
-
-  const deduped = new Map<string, BadCase>();
-  for (const badCase of migrated) {
-    const existing = deduped.get(badCase.id);
-    if (!existing) {
-      deduped.set(badCase.id, badCase);
-      continue;
-    }
-    if (onDuplicate === 'throw') {
-      throw new Error(
-        `bad case migration produced duplicate id: ${badCase.id}`,
-      );
-    }
-    deduped.set(badCase.id, mergeDuplicateBadCase(existing, badCase));
-    warnings.push(`merged duplicate bad case: ${badCase.id}`);
-  }
-
-  return { cases: [...deduped.values()], warnings };
 }
 
 function hasHumanState(badCase: BadCase): boolean {
@@ -240,6 +145,10 @@ function mergeOrigins(primary: BadCaseOrigin, secondary: BadCaseOrigin): BadCase
   const observedRunIds = Array.from(
     new Set([...primary.observedRunIds, ...secondary.observedRunIds]),
   );
+  const occurrenceCount =
+    observedRunIds.length > 0
+      ? Math.max(primary.occurrenceCount, secondary.occurrenceCount, observedRunIds.length)
+      : primary.occurrenceCount + secondary.occurrenceCount;
   return {
     ...primary,
     firstSeenAt: earlierIso(primary.firstSeenAt, secondary.firstSeenAt),
@@ -247,12 +156,7 @@ function mergeOrigins(primary: BadCaseOrigin, secondary: BadCaseOrigin): BadCase
     firstSeenRunId: primary.firstSeenRunId ?? secondary.firstSeenRunId,
     lastSeenRunId: secondary.lastSeenRunId ?? primary.lastSeenRunId,
     observedRunIds,
-    occurrenceCount: Math.max(
-      primary.occurrenceCount,
-      secondary.occurrenceCount,
-      observedRunIds.length,
-      1,
-    ),
+    occurrenceCount,
     scope: primary.scope ?? secondary.scope,
     models: {
       ...secondary.models,
@@ -261,16 +165,17 @@ function mergeOrigins(primary: BadCaseOrigin, secondary: BadCaseOrigin): BadCase
   };
 }
 
-function mergeDuplicateBadCase(a: BadCase, b: BadCase): BadCase {
+export function mergeCanonicalObservations(a: BadCase, b: BadCase): BadCase {
+  if (a.id !== b.id) {
+    throw new Error(`cannot merge different bad cases: ${a.id} !== ${b.id}`);
+  }
   const primary = hasHumanState(a) || !hasHumanState(b) ? a : b;
   const secondary = primary === a ? b : a;
   return {
     ...primary,
     createdAt: earlierIso(primary.createdAt, secondary.createdAt),
-    origin:
-      primary.origin && secondary.origin
-        ? mergeOrigins(primary.origin, secondary.origin)
-        : (primary.origin ?? secondary.origin),
+    actual: secondary.actual,
+    origin: mergeOrigins(primary.origin, secondary.origin),
     relatedBadCaseIds:
       primary.relatedBadCaseIds || secondary.relatedBadCaseIds
         ? Array.from(
@@ -283,31 +188,60 @@ function mergeDuplicateBadCase(a: BadCase, b: BadCase): BadCase {
   };
 }
 
+export function assertCanonicalBadCase(badCase: BadCase): void {
+  const origin = (badCase as Partial<BadCase>).origin;
+  if (!origin || !origin.evalCaseId) {
+    throw new Error(`bad case ${badCase.id} missing origin.evalCaseId`);
+  }
+  const expectedId = canonicalBadCaseId({
+    evalCaseId: origin.evalCaseId,
+    layer: badCase.failure.layer,
+    type: badCase.failure.type,
+  });
+  if (badCase.id !== expectedId) {
+    throw new Error(
+      `bad case ${badCase.id} id mismatch, expected canonical id ${expectedId}`,
+    );
+  }
+}
+
+export function normalizeCanonicalBadCases(cases: BadCase[]): BadCase[] {
+  const byId = new Map<string, BadCase>();
+  for (const badCase of cases) {
+    assertCanonicalBadCase(badCase);
+    const existing = byId.get(badCase.id);
+    byId.set(
+      badCase.id,
+      existing ? mergeCanonicalObservations(existing, badCase) : badCase,
+    );
+  }
+  return [...byId.values()];
+}
+
 export function readBadCases(): BadCase[] {
   if (!existsSync(BAD_CASES_PATH)) return [];
-  return readFileSync(BAD_CASES_PATH, 'utf8')
+  const cases = readFileSync(BAD_CASES_PATH, 'utf8')
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as BadCase);
+  return normalizeCanonicalBadCases(cases);
 }
 
-/**
- * 合并新捕获的失败用例:已存在的 id 保留原记录(不覆盖人工 triage/status),只追加新 id。
- * @returns 本次新增数量
- */
-export function upsertBadCases(incoming: BadCase[]): number {
-  const existing = readBadCases();
-  const seen = new Set(existing.map((c) => c.id));
-  const added = incoming.filter((c) => !seen.has(c.id));
-  if (added.length === 0) return 0;
-
-  const all = [...existing, ...added];
+export function writeBadCases(cases: BadCase[]): void {
+  const merged = normalizeCanonicalBadCases(cases);
   mkdirSync(dirname(BAD_CASES_PATH), { recursive: true });
   writeFileSync(
     BAD_CASES_PATH,
-    all.map((c) => JSON.stringify(c)).join('\n') + '\n',
+    merged.map((c) => JSON.stringify(c)).join('\n') + '\n',
   );
-  return added.length;
+}
+
+/** 合并新捕获的失败用例,保留人工状态并更新最新观测。 */
+export function upsertBadCases(incoming: BadCase[]): number {
+  const existing = readBadCases();
+  const seen = new Set(existing.map((c) => c.id));
+  writeBadCases([...existing, ...incoming]);
+  return incoming.filter((c) => !seen.has(c.id)).length;
 }
 
 /** 把一条 serving 检索未命中转成 BadCase(Stage 2 最小可填版本)。 */
@@ -381,7 +315,6 @@ export function retrievalMiss(params: {
     },
     severity: layer === 'retrieval' ? 'high' : 'medium',
     status: 'new',
-    convertedEvalId: evalCaseId,
     origin: {
       evalCaseId,
       source: 'retrieval_eval',

@@ -41,23 +41,23 @@
 
 ### Create
 
-- `src/eval/bad-cases.test.ts`：canonical ID、旧 retrieval-eval 记录迁移、repository merge、`retrievalMiss()` 行为测试。
+- `src/eval/bad-cases.test.ts`：canonical ID、repository merge、`retrievalMiss()` 行为测试。
 - `src/eval/faith-bad-cases.ts`：faith trace 到 bad-case candidate 的纯转换逻辑。
 - `src/eval/faith-bad-cases.test.ts`：outcome 映射、关联、幂等、历史 policy run fixture 测试。
 - `scripts/faith-bad-cases.ts`：`npm run badcases:faith -- <runId> [--write]` CLI。
 
 ### Modify
 
-- `src/eval/bad-cases.ts`：扩展 BadCase schema、canonical ID、迁移与合并函数。
+- `src/eval/bad-cases.ts`：扩展 BadCase schema、canonical ID 与合并函数。
 - `src/eval/run-store.ts`：增加 `evalSetVersionHash`、`judgeModel`、`faithSelection` 类型字段。
 - `src/eval/faithfulness-eval.ts`：新 run 写入 `evalSetVersionHash`、`judgeModel`、`faithSelection`。
 - `src/eval/retrieve-eval.ts`：调用 `retrievalMiss()` 时传入 `evalCaseId`。
 - `package.json`：新增 `badcases:faith` 脚本，并把新增测试加入 `npm test`。
-- `data/eval/bad-cases.jsonl`：在 Task 4 `--write` 后迁移旧 retrieval-eval issue，并新增历史 policy run 暴露的 generation issue。
+- `data/eval/bad-cases.jsonl`：在 Task 4 `--write` 后新增历史 policy run 暴露的 generation issue。
 
 ---
 
-## Task 1: BadCase Canonical Schema 与 Retrieval 迁移
+## Task 1: BadCase Canonical Schema 与 Repository
 
 **Files:**
 - Create: `src/eval/bad-cases.test.ts`
@@ -74,16 +74,14 @@
 - `retrievalMiss()` 必须接收 `evalCaseId`，并使用 canonical ID。
 - `retrievalMiss()` 不允许缺少 `evalCaseId` 时退回旧 question-based ID。
 
-- [x] **Step 2: 写旧 bad-case 迁移测试**
+- [x] **Step 2: 写 canonical repository 测试**
 
-用当前 `data/eval/bad-cases.jsonl` 的旧 retrieval-eval issue 作为真实 fixture，断言：
+用当前 `data/eval/bad-cases.jsonl` 作为真实 fixture，断言：
 
-- 每条旧记录能唯一映射到 `EVAL_SET`。
-- 迁移后写入 `origin.evalCaseId`、`origin.source='retrieval_eval'`。
-- 迁移后 `convertedEvalId=origin.evalCaseId`。
-- 迁移后 ID 唯一。
-- 保留 `createdAt`、`input`、`expected`、`actual`、`failure.note`、`severity`、`status`。
-- 匹配失败时返回具体旧 ID、question、expected source IDs、匹配数量，而不是只抛泛化错误。
+- 每条记录都有 `origin.evalCaseId`。
+- 每条记录 ID 都等于 `canonicalBadCaseId(origin.evalCaseId, layer, type)`。
+- 同 canonical ID 重复合并时保留人工 `status` / `failure.note`。
+- 合并后更新最新 `actual` 和 `origin` 观测信息。
 
 - [x] **Step 3: 运行测试确认失败**
 
@@ -93,7 +91,7 @@ Run:
 npx tsx src/eval/bad-cases.test.ts
 ```
 
-Expected: FAIL，因为 canonical schema 和迁移函数尚未实现。
+Expected: FAIL，因为 canonical schema 和 repository 合并尚未实现。
 
 - [x] **Step 4: 扩展 BadCase schema**
 
@@ -122,13 +120,13 @@ export interface BadCaseOrigin {
 扩展 `BadCase`：
 
 ```ts
-origin?: BadCaseOrigin;
+origin: BadCaseOrigin;
 relatedBadCaseIds?: string[];
 ```
 
-`origin` 在类型上可先允许 optional，以便读旧文件；写入和迁移后的 canonical issue 必须有 `origin`。
+`origin` 是必填字段；读到缺失或 ID 不匹配的 bad case 应直接失败。
 
-- [x] **Step 5: 实现 canonical ID 与迁移函数**
+- [x] **Step 5: 实现 canonical ID 与合并函数**
 
 新增：
 
@@ -139,20 +137,14 @@ export function canonicalBadCaseId(params: {
   type: BadCase['failure']['type'];
 }): string;
 
-export function migrateBadCasesToCanonical(params: {
-  cases: BadCase[];
-  evalSet: Array<{ id: string; question: string; expectedChunkIds: string[] }>;
-  manualMap?: Record<string, string>;
-  now?: string;
-}): { cases: BadCase[]; warnings: string[] };
+export function mergeBadCases(cases: BadCase[]): BadCase[];
 ```
 
-迁移规则：
+合并规则：
 
-- 已有 `origin.evalCaseId` 的记录视为已迁移，不重复改写。
-- 旧 retrieval 记录先按 `manualMap[oldId]` 找 eval case；没有映射时按 question 精确匹配。
-- 0 个或多个匹配时整批失败，并带具体失败记录。
-- canonical ID 冲突必须失败，不能静默覆盖。
+- 每条记录必须是 canonical bad case。
+- 缺少 `origin.evalCaseId` 或 ID 不匹配时整批失败。
+- canonical ID 冲突时合并，保留人工状态并更新最新观测。
 
 - [x] **Step 6: 修改 `retrievalMiss()` 和调用点**
 
@@ -187,7 +179,7 @@ npx tsc --noEmit -p tsconfig.json
 Stop and report:
 
 - canonical ID 是否稳定。
-- 当前旧 retrieval-eval issue 是否全部可迁移。
+- 当前 `bad-cases.jsonl` 是否全部符合 canonical schema。
 - `npm test` 是否通过。
 
 ---
@@ -285,7 +277,7 @@ export function buildFaithBadCaseCandidates(params: {
 - `actual.evaluation.unsupportedClaims=trace.verdict?.unsupported ?? []`
 - `actual.evaluation.judgeReason=trace.verdict?.reason`
 - `origin.source='faith_eval'`
-- `convertedEvalId=trace.id`
+- `origin.evalCaseId=trace.id`
 
 severity 默认：
 
@@ -457,8 +449,8 @@ Stop and report preview 输出，不进入 `--write`。
 - 新 issue 写入时 status 默认 `new`。
 - 已存在 issue 新 run 再现时追加 `observedRunIds`、增加 `occurrenceCount`、更新 `lastSeenAt/lastSeenRunId/actual`。
 - 同一 run 重复导入不增加 occurrence count。
-- 不覆盖 `failure.note`、`severity`、`status`、`convertedEvalId`。
-- 写入前先在内存完成迁移和合并；任何校验失败不产生部分写入。
+- 不覆盖 `failure.note`、`severity` 和 `status`。
+- 写入前先在内存完成校验和合并；任何校验失败不产生部分写入。
 
 - [x] **Step 2: 实现 merge/write**
 
@@ -468,8 +460,6 @@ Stop and report preview 输出，不进入 `--write`。
 export function mergeBadCaseIssues(params: {
   existing: BadCase[];
   candidates: FaithBadCaseCandidate[];
-  evalSet: EvalCase[];
-  now?: string;
 }): { cases: BadCase[]; summary: Record<string, number>; warnings: string[] };
 ```
 
@@ -491,7 +481,7 @@ npm run badcases:faith -- 2026-07-09T07-09-12-222Z-policy --write
 
 Expected:
 
-- 旧 retrieval-eval issue 迁移到 canonical schema。
+- 现有 bad-cases 通过 canonical schema 校验。
 - 新增 1 条 generation issue：`policy-conflict-latest / generation/hallucination`。
 - `policy-conflict-privileged` 不新增 generation issue，仅 `link_only`。
 
@@ -519,7 +509,7 @@ git diff -- data/eval/bad-cases.jsonl
 
 Stop and report:
 
-- 迁移了多少条旧 retrieval issue。
+- canonical schema 校验和合并是否通过。
 - 新增了多少条 generation issue。
 - 是否出现 warning。
 - 幂等验证是否通过。
