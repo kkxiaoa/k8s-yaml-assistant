@@ -7,12 +7,15 @@ export interface SourceHit {
   n?: number;
   id: string;
   title: string;
-  resource: string;
+  resource?: string;
   path?: string;
+  resources?: string[];
+  paths?: string[];
   text: string;
-  sourceType: 'schema' | 'doc' | 'example' | 'policy';
+  sourceType: 'schema' | 'docs' | 'example' | 'policy';
   /** 官方文档链接(从 chunk "More info" 提取) */
   sourceUri?: string;
+  trustLevel?: string;
   score?: number;
 }
 

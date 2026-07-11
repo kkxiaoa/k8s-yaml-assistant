@@ -1,7 +1,8 @@
 // 语料统计:可复现 chunk/resource 口径,并核对 curated 白名单的命中/缺失。
 // 用法:npm run corpus:stats
 
-import { CORPUS } from '../src/knowledge/corpus';
+import { buildCorpusManifest, CORPUS } from '../src/knowledge/corpus';
+import { chunkResources } from '../src/knowledge/chunk';
 import { SCHEMA_DOCS } from '../src/knowledge/schemas';
 import curated from '../data/schemas/curated.json';
 
@@ -19,13 +20,21 @@ const loadedKeys = new Set(
 
 // 每资源 chunk 数
 const perResource = new Map<string, number>();
-for (const c of CORPUS)
-  perResource.set(c.resource, (perResource.get(c.resource) ?? 0) + 1);
+for (const c of CORPUS) {
+  for (const resource of chunkResources(c))
+    perResource.set(resource, (perResource.get(resource) ?? 0) + 1);
+}
+const manifest = buildCorpusManifest();
 
 console.log('=== 语料规模 ===');
 console.log(`chunks(CORPUS.length)        : ${CORPUS.length}`);
 console.log(`resources(unique resource)   : ${perResource.size}`);
 console.log(`schema docs(loaded)          : ${SCHEMA_DOCS.length}`);
+console.log(`corpus hash                  : ${manifest.hash}`);
+
+console.log('\n=== 来源 manifest ===');
+for (const source of manifest.sources)
+  console.log(`${source.sourceType.padEnd(8)} count=${source.count} hash=${source.hash}`);
 
 console.log('\n=== 每资源 chunk 数(降序) ===');
 for (const [res, n] of [...perResource.entries()].sort((a, b) => b[1] - a[1])) {

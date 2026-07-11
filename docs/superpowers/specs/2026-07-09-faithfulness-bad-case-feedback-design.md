@@ -176,7 +176,7 @@ ID 不包含 question 和 expected source IDs，避免文案或标注演进导�
 ### 6.2 新增字段
 
 ```ts
-interface BadCaseOrigin {
+interface BadCaseTracking {
   evalCaseId: string;
   source: 'retrieval_eval' | 'faith_eval';
   firstSeenAt: string;
@@ -196,7 +196,7 @@ interface BadCaseOrigin {
 
 interface BadCase {
   // existing fields...
-  origin: BadCaseOrigin;
+  tracking: BadCaseTracking;
   relatedBadCaseIds?: string[];
 }
 ```
@@ -209,7 +209,6 @@ interface BadCaseActual {
   yaml?: string;
   sourceIds?: string[];
   traceId?: string;
-  diagnostics?: Array<{ stage: string; message: string }>;
   evaluation?: {
     runId: string;
     scope: 'full' | 'policy' | 'smoke';
@@ -247,16 +246,16 @@ sha1(taskType + question + expected source IDs)
 唯一合法身份是：
 
 ```text
-origin.evalCaseId + failure.layer + failure.type
+tracking.evalCaseId + failure.layer + failure.type
 ```
 
 要求：
 
-1. 每条 bad case 必须有 `origin.evalCaseId`。
-2. `id` 必须等于 `canonicalBadCaseId(origin.evalCaseId, layer, type)`。
-3. `origin.source` 标明来源：`retrieval_eval` 或 `faith_eval`。
+1. 每条 bad case 必须有 `tracking.evalCaseId`。
+2. `id` 必须等于 `canonicalBadCaseId(tracking.evalCaseId, layer, type)`。
+3. `tracking.source` 标明来源：`retrieval_eval` 或 `faith_eval`。
 4. rerank 质量问题使用 `rerank + rerank_miss`，不写成 `rerank + retrieval_miss`。
-5. 读文件时发现缺 `origin` 或 ID 不匹配应直接失败，不做静默迁移。
+5. 读文件时发现缺 `tracking` 或 ID 不匹配应直接失败，不做静默迁移。
 6. 同一 canonical ID 重复出现时只做合并：保留人工状态，更新最新观测。
 
 `retrievalMiss()` 后续必须接收 `evalCaseId`，确保新记录直接使用 canonical
@@ -347,7 +346,7 @@ case。不能再复制一条 `source='bad_case'` 的相同问题。
 
 新 issue：
 
-- `origin.evalCaseId=trace.id`。
+- `tracking.evalCaseId=trace.id`。
 - `status='new'`，表示仍待人工归因和修复。
 
 后续 run 中 issue 对应 case 通过时：
@@ -386,10 +385,10 @@ case。不能再复制一条 `source='bad_case'` 的相同问题。
 
 ### 12.2 Canonical repository 测试
 
-- 当前 `bad-cases.jsonl` 每条记录均有 `origin.evalCaseId`。
+- 当前 `bad-cases.jsonl` 每条记录均有 `tracking.evalCaseId`。
 - 当前 `bad-cases.jsonl` 每条记录的 `id` 均等于 canonical ID。
 - 同一 canonical ID 重复合并时保留人工 status/note。
-- 合并后更新最新 actual 和 origin 观测信息。
+- 合并后更新最新 actual 和 tracking 观测信息。
 - `retrievalMiss()` 对同一 eval case 生成相同 canonical ID。
 
 ### 12.3 真实历史 Run 验证

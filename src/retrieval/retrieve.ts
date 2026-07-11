@@ -3,6 +3,7 @@
 import { performance } from 'node:perf_hooks';
 import { embed, EMBEDDING_MODEL } from './embeddings';
 import { CORPUS, type Chunk } from '../knowledge/corpus';
+import { chunkPaths, chunkResources } from '../knowledge/chunk';
 import { RESOURCE_BOOST } from './router';
 import { policyBoost } from './boost';
 import { rerank, COARSE_N } from './rerank';
@@ -65,8 +66,13 @@ export function denseSearch(
       // 软加权:命中路由资源的 chunk 加分,但保留所有 chunk(误路由也不会删掉正确答案)
       score:
         cosineSimilarity(queryEmbedding, c.embedding) +
-        (boostResource && c.resource === boostResource ? RESOURCE_BOOST : 0) +
-        (normalizedPath && c.path.toLowerCase().endsWith(normalizedPath)
+        (boostResource && chunkResources(c).includes(boostResource)
+          ? RESOURCE_BOOST
+          : 0) +
+        (normalizedPath &&
+        chunkPaths(c).some((path) =>
+          path.toLowerCase().endsWith(normalizedPath),
+        )
           ? FIELD_PATH_BOOST
           : 0) +
         policyBoost(c as Chunk, boostResource, normalizedPath),

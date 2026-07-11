@@ -108,7 +108,13 @@ check('无关键词 → null(安全退化不过滤)', () => {
 // 否则 future policy 用了 RULES 没注册的 resource,boost.ts 靠 chunk.resource === boostResource
 // 会 silently 不加权、路由也永不命中它——用 canonical kind 名反查,红在这里而非线上静默失效。
 check('policy resource ⊆ router 可识别集', () => {
-  const resources = [...new Set(buildPolicyCorpus().map((c) => c.resource))];
+  const resources = [
+    ...new Set(
+      buildPolicyCorpus()
+        .map((c) => c.resource)
+        .filter((resource): resource is string => Boolean(resource)),
+    ),
+  ];
   for (const r of resources) {
     // 用 kind 名本身当 query:能路由回同名 resource 即证明 RULES 覆盖了它。
     assert.equal(inferResource(r), r, `policy resource 未被 router 识别: ${r}`);

@@ -1,12 +1,11 @@
-// 轻量反馈闭环(离线版):失败用例沉淀成 data/eval/bad-cases.jsonl。
-// bad case 只支持 canonical identity: evalCaseId + failure.layer + failure.type。
+// 失败用例沉淀为 canonical bad case: evalCaseId + failure.layer + failure.type。
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { FaithOutcome } from './faith-store';
 
-export interface BadCaseOrigin {
+export interface BadCaseTracking {
   evalCaseId: string;
   source: 'retrieval_eval' | 'faith_eval';
   firstSeenAt: string;
@@ -47,7 +46,6 @@ export interface BadCase {
     };
   };
   expected?: {
-    answerSummary?: string;
     sourceIds?: string[];
     expectedKinds?: string[];
     mustHavePaths?: string[];
@@ -62,7 +60,6 @@ export interface BadCase {
     yaml?: string;
     sourceIds?: string[];
     traceId?: string;
-    diagnostics?: Array<{ stage: string; message: string }>;
     evaluation?: {
       runId: string;
       scope: 'full' | 'policy' | 'smoke';
@@ -105,7 +102,7 @@ export interface BadCase {
   };
   severity: 'low' | 'medium' | 'high';
   status: 'new' | 'triaged' | 'converted_to_eval' | 'fixed' | 'wont_fix';
-  origin: BadCaseOrigin;
+  tracking: BadCaseTracking;
   relatedBadCaseIds?: string[];
 }
 
@@ -141,20 +138,35 @@ function laterIso(a: string, b: string): string {
   return a >= b ? a : b;
 }
 
-function mergeOrigins(primary: BadCaseOrigin, secondary: BadCaseOrigin): BadCaseOrigin {
+function mergeTracking(
+  primary: BadCaseTracking,
+  secondary: BadCaseTracking,
+): BadCaseTracking {
+  const primaryRunIds = new Set(primary.observedRunIds);
+  const newRunIds = secondary.observedRunIds.filter(
+    (runId) => !primaryRunIds.has(runId),
+  );
   const observedRunIds = Array.from(
     new Set([...primary.observedRunIds, ...secondary.observedRunIds]),
   );
-  const occurrenceCount =
-    observedRunIds.length > 0
-      ? Math.max(primary.occurrenceCount, secondary.occurrenceCount, observedRunIds.length)
-      : primary.occurrenceCount + secondary.occurrenceCount;
+  const occurrenceCount = Math.max(
+    primary.occurrenceCount + newRunIds.length,
+    observedRunIds.length,
+  );
+  const firstSeenRunId =
+    primary.firstSeenAt <= secondary.firstSeenAt
+      ? primary.firstSeenRunId
+      : secondary.firstSeenRunId;
+  const lastSeenRunId =
+    secondary.lastSeenAt >= primary.lastSeenAt
+      ? (secondary.lastSeenRunId ?? primary.lastSeenRunId)
+      : (primary.lastSeenRunId ?? secondary.lastSeenRunId);
   return {
     ...primary,
     firstSeenAt: earlierIso(primary.firstSeenAt, secondary.firstSeenAt),
     lastSeenAt: laterIso(primary.lastSeenAt, secondary.lastSeenAt),
-    firstSeenRunId: primary.firstSeenRunId ?? secondary.firstSeenRunId,
-    lastSeenRunId: secondary.lastSeenRunId ?? primary.lastSeenRunId,
+    firstSeenRunId,
+    lastSeenRunId,
     observedRunIds,
     occurrenceCount,
     scope: primary.scope ?? secondary.scope,
@@ -175,7 +187,7 @@ export function mergeCanonicalObservations(a: BadCase, b: BadCase): BadCase {
     ...primary,
     createdAt: earlierIso(primary.createdAt, secondary.createdAt),
     actual: secondary.actual,
-    origin: mergeOrigins(primary.origin, secondary.origin),
+    tracking: mergeTracking(primary.tracking, secondary.tracking),
     relatedBadCaseIds:
       primary.relatedBadCaseIds || secondary.relatedBadCaseIds
         ? Array.from(
@@ -189,12 +201,12 @@ export function mergeCanonicalObservations(a: BadCase, b: BadCase): BadCase {
 }
 
 export function assertCanonicalBadCase(badCase: BadCase): void {
-  const origin = (badCase as Partial<BadCase>).origin;
-  if (!origin || !origin.evalCaseId) {
-    throw new Error(`bad case ${badCase.id} missing origin.evalCaseId`);
+  const tracking = (badCase as Partial<BadCase>).tracking;
+  if (!tracking || !tracking.evalCaseId) {
+    throw new Error(`bad case ${badCase.id} missing tracking.evalCaseId`);
   }
   const expectedId = canonicalBadCaseId({
-    evalCaseId: origin.evalCaseId,
+    evalCaseId: tracking.evalCaseId,
     layer: badCase.failure.layer,
     type: badCase.failure.type,
   });
@@ -244,9 +256,10 @@ export function upsertBadCases(incoming: BadCase[]): number {
   return incoming.filter((c) => !seen.has(c.id)).length;
 }
 
-/** 把一条 serving 检索未命中转成 BadCase(Stage 2 最小可填版本)。 */
+/** 把一条检索评估未命中转成 canonical bad case。 */
 export function retrievalMiss(params: {
   evalCaseId: string;
+  runId: string;
   question: string;
   resource: string;
   expectedChunkIds: string[];
@@ -256,6 +269,7 @@ export function retrievalMiss(params: {
 }): BadCase {
   const {
     evalCaseId,
+    runId,
     question,
     resource,
     expectedChunkIds,
@@ -264,6 +278,7 @@ export function retrievalMiss(params: {
     k,
   } = params;
   if (!evalCaseId) throw new Error('retrievalMiss requires evalCaseId');
+  if (!runId) throw new Error('retrievalMiss requires runId');
   const topHitCount = expectedChunkIds.filter((id) =>
     actualTopIds.includes(id),
   ).length;
@@ -307,7 +322,7 @@ export function retrievalMiss(params: {
     taskType: 'explain_field',
     input: { question, context: { kind: resource } },
     expected: { sourceIds: expectedChunkIds },
-    actual: { sourceIds: actualTopIds },
+    actual: { sourceIds: actualTopIds, traceId: `${runId}:${evalCaseId}` },
     failure: {
       layer,
       type: failureType,
@@ -315,12 +330,14 @@ export function retrievalMiss(params: {
     },
     severity: layer === 'retrieval' ? 'high' : 'medium',
     status: 'new',
-    origin: {
+    tracking: {
       evalCaseId,
       source: 'retrieval_eval',
       firstSeenAt: createdAt,
       lastSeenAt: createdAt,
-      observedRunIds: [],
+      firstSeenRunId: runId,
+      lastSeenRunId: runId,
+      observedRunIds: [runId],
       occurrenceCount: 1,
     },
   };

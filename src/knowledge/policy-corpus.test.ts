@@ -23,7 +23,10 @@ check('至少 42 条,每条 chunk 主键与元数据完整', () => {
   assert.ok(chunks.length >= 42, '至少 42 条');
   for (const c of chunks) {
     assert.ok(c.id.length > 0, `id 非空: ${JSON.stringify(c)}`);
-    assert.ok(c.resource.length > 0, `resource 非空: ${c.id}`);
+    assert.ok(c.resource?.length, `resource 非空: ${c.id}`);
+    assert.deepEqual(c.resources, [c.resource], `resources 稳定: ${c.id}`);
+    assert.ok(c.appliesTo && !Array.isArray(c.appliesTo), `appliesTo 为对象: ${c.id}`);
+    assert.equal(c.appliesTo.resource, c.resource, `appliesTo.resource 稳定: ${c.id}`);
     assert.ok(c.title.length > 0, `title 非空: ${c.id}`);
     assert.ok(c.text.length > 0, `text 非空: ${c.id}`);
     assert.equal(c.sourceType, 'policy', `sourceType=policy: ${c.id}`);
@@ -41,6 +44,12 @@ check('id/title/元数据稳定(image no-latest 样本)', () => {
   assert.ok(c, '按 policy.id 作 chunk id');
   assert.equal(c.resource, 'Deployment');
   assert.equal(c.path, 'spec.template.spec.containers.image');
+  assert.deepEqual(c.resources, ['Deployment']);
+  assert.deepEqual(c.paths, ['spec.template.spec.containers.image']);
+  assert.deepEqual(c.appliesTo, {
+    resource: 'Deployment',
+    field: 'spec.template.spec.containers.image',
+  });
   assert.equal(c.title, '平台规范 · Deployment · spec.template.spec.containers.image');
   assert.match(c.text, /\[平台规范\]/);
   assert.match(c.text, /latest/);

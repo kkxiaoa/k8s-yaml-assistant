@@ -1,13 +1,6 @@
-// 生成层评估(faithfulness)的逐条明细落盘。对齐检索侧 traces.jsonl 的"逐条 NDJSON"分工:
-//   run-store  = 汇总指标(可对比 baseline)
-//   faith/<id> = 本模块,逐条明细(检索命中 + 答案 + 裁判判定 + 归因),供读盘诊断/分析
-//   bad-cases  = 失败用例回灌(后续步骤接入)
-// 每次全量跑产出一个 data/eval/faith/<runId>.jsonl,runId 与 run-store 的 EvalRun.id 对应,便于关联。
-
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 import type { Verdict } from './judge';
-import { EVAL_DIR } from './run-store';
 
 /** 单条归因,读盘即可分类。 */
 export type FaithOutcome =
@@ -21,7 +14,7 @@ export type FaithOutcome =
   | 'error'; // 网络/异常失败(重试后仍失败)
 
 export interface FaithTrace {
-  /** eval case id(对齐 eval-set,便于和检索 Recall 交叉对照) */
+  /** retrieval case id,便于和检索 Recall 交叉对照。 */
   id: string;
   question: string;
   answerable: boolean;
@@ -42,19 +35,16 @@ export interface FaithTrace {
   outcome: FaithOutcome;
 }
 
-export const FAITH_DIR = join(EVAL_DIR, 'faith'); // 复用 run-store 的 EVAL_DIR,单一真相源
-
-/** 写一次全量跑的逐条明细到 data/eval/faith/<runId>.jsonl,返回路径。 */
-export function writeFaithTraces(runId: string, details: FaithTrace[]): string {
-  mkdirSync(FAITH_DIR, { recursive: true });
-  const path = join(FAITH_DIR, `${runId}.jsonl`);
+export function writeFaithTraces(
+  path: string,
+  details: FaithTrace[],
+): string {
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, details.map((d) => JSON.stringify(d)).join('\n') + '\n');
   return path;
 }
 
-/** 读回一次跑的逐条明细(供分析脚本/后续 faith compare 复用)。 */
-export function readFaithTraces(runId: string): FaithTrace[] {
-  const path = join(FAITH_DIR, `${runId}.jsonl`);
+export function readFaithTraces(path: string): FaithTrace[] {
   if (!existsSync(path)) return [];
   return readFileSync(path, 'utf8')
     .split('\n')

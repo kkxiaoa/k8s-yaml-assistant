@@ -7,6 +7,7 @@ import {
   type AskMode,
   type EditorContext,
 } from '@/server/pipeline';
+import { appendServingTrace } from '@/retrieval/trace';
 
 export const runtime = 'nodejs'; // 需要 Node:Anthropic SDK、dotenv、fetch 向量/rerank
 
@@ -38,6 +39,7 @@ export async function POST(req: Request): Promise<Response> {
     3,
     editorContext,
     mode,
+    { traceSink: appendServingTrace },
   );
   // 把引用编号 [S{n}] + sourceUri 并到 hits,供前端"答案依据"卡片对应与溯源
   const cited = hits.map((h, i) => ({

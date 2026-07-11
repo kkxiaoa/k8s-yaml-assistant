@@ -1,4 +1,4 @@
-// 生成评估用例(§6)。与检索类 EvalCase 分开:评估单位是 parse / schema 校验 /
+// 生成评估用例。与 retrieval case 分开:评估单位是 parse / schema 校验 /
 // kind 匹配 / 必备路径覆盖 / 一致性,而不是"命中哪个 chunk"。
 // 单资源为主;多资源一致性用例(consistencyChecks)由 4b 补充。
 

@@ -2,7 +2,9 @@
 
 当前项目不是在做完整 K8s AI 产品,而是用 K8s YAML Copilot 场景训练 AI 应用开发能力。
 训练重点:**RAG 问答 / YAML 校验 / Generate-Fix 生成修复 / Eval / Trace / Feedback**。
-主线文档见 `docs/AI应用开发训练方案-K8s-YAML-Copilot.md` 和 `docs/AI应用开发能力训练实现方案.md`。
+执行前先读 `AGENTS.md`。项目定位见 `docs/AI应用开发训练方案-K8s-YAML-Copilot.md`,唯一实施路线见 `docs/AI应用开发能力训练实现方案.md`。
+
+当前质量闸:先修正 eval artifact、指标语义、evaluator 有效性和 knowledge provenance。纠偏完成前不晋升 baseline,不根据旧指标继续优化 retrieval/prompt/model。
 
 ## 命令
 
@@ -11,9 +13,12 @@
 | `npm run ask -- "<问题>"`      | RAG 问答(CLI,流式)                                                    |
 | `npm run check -- <file.yaml>` | 校验任意资源(schema 驱动,Tool Use)                                    |
 | `npm run gen -- "<需求>"`      | 生成 YAML + 自检修正闭环                                              |
-| `npm run eval`                 | 检索评估:Recall@k / MRR(当前 eval set 仍需扩展,不能代表全量 88k 语料) |
-| `npm run eval:faith`           | 生成评估:Faithfulness(LLM-as-judge,异构 pro 裁判)                     |
-| `npm test`                     | `validateResource` 纯函数单测                                         |
+| `npm run eval`                 | Semantic retrieval 评估:Recall@k / MRR                               |
+| `npm run eval:faith`           | Grounded answer / Faithfulness 评估                                   |
+| `npm run eval:judge`           | Judge calibration                                                     |
+| `npm run eval:gen`             | Generation 评估                                                        |
+| `npm run eval:fix`             | Fix 评估                                                               |
+| `npm test`                     | 本地确定性测试集合                                                      |
 | `npm run dev`                  | Next.js Web(Monaco 编辑器 + RAG 问答 + 校验)                          |
 
 ## 目录结构(分层)
@@ -25,7 +30,7 @@ src/             领域/后端层(框架无关,用 @/ 别名访问)
   validation/    validate.ts(validateResource) validate.test.ts
   server/        pipeline.ts(服务端管线,供 Web 复用)
   cli/           ask.ts check.ts gen.ts
-  eval/          eval.ts(检索) faithfulness.ts(生成) eval-set.ts
+  eval/          cases / metrics / evaluator runners / artifact store
 app/             Next.js 前端(分层)
   layout/page/globals  路由 + 全局
   api/           route handlers(/api/ask 流式, /api/check)
@@ -60,15 +65,15 @@ data/schemas/    generated registry + curated 白名单(知识源)
 - **前端分层(Next.js 最佳实践)**:`app/` 只放路由(page/layout/route);**`app/ui/` = UI 层**(展示组件,纯展示、状态与副作用都在 `page.tsx` 这个薄组合根里);`app/lib/` = 前端逻辑/工具。跨层访问后端用 `@/` 别名(`@/server/pipeline`),不写 `../../../`。新建展示组件放 `app/ui/`,新建前端纯逻辑放 `app/lib/`。**与 `/api/*` 的通信封装在 `app/lib/api.ts`,组件/page 不直接 `fetch`**(page 只做状态编排)。
 - **前端栈**:Tailwind v4(`@theme` token + `app/globals.css`)+ IBM Plex Mono/Sans(next/font),经典 VSCode Dark 风格(中性灰黑底 + VSCode 蓝 #3f9dff 强调,极淡中性网格);资源感知(从 YAML 解析 kind/apiVersion)+ Monaco 内联报错标记(path→行)。UI 用 `frontend-design` 技能。
 - **知识库 schema 驱动**:资源/CRD 应通过 ingestion pipeline 进入 `data/schemas/generated/{resources,definitions}`,不要靠手工 import 或 `data/schemas/*.json` fixture 扩覆盖。`resources` 存资源入口,`definitions` 存 OpenAPI `$ref` registry,运行时本地解析引用。
-- **单一检索路径(eval == serving)**:CLI / Web / eval 共用同一段 `retrieve`(**全量软加权,无 `chunksForResource` 硬过滤**)+ 同一份索引。语料经 `data/schemas/curated.json` 白名单收敛(~20-40 个核心 kind),不全量遍历 `generated/*`。改检索时**别把硬过滤分支引回来**(违背支柱③"不赌完美路由")。理由与依赖链见实现方案 §4.1 / §4.3。
-- **测量驱动**:改了切片/检索/路由/模型,必须与 baseline 对比。当前需要优先补 `eval:compare` 和 `data/eval/baseline.json`,不能只看单次指标。持久化索引必须在"语料收敛 + 检索路径合一"之后做(顺序见 §4.3),否则把分裂索引烤进磁盘。
+- **单一 semantic retrieval 实现**:CLI / Web / eval 共用 query expansion、软加权、dense retrieval 和 rerank。Editor exact-field 分流由独立 pipeline 测试验证,不混入 semantic retrieval Recall/MRR。当前约束见实现方案的“当前质量契约”和“Retrieval 决策”。
+- **测量驱动**:改了切片/检索/路由/模型,必须与同 kind、同 dataset hash、同 metric definition version 的 baseline 对比。当前 baseline 在 correctness 纠偏完成前不得晋升。
 
 - **注释与文档精简**:注释只解释"为什么/非显然意图",不复述代码,不写对话上下文(决策过程、方案对比、"这轮/之前/收回"、历史演变——那些进 commit / PR)。文档少写铺垫,提示用简短 tips。长对话易积累上下文注释、污染阅读与模型,发现即精简为合理注释或删除。
 
 ## Gotchas
 
 - `.env` 含真实 API key,已 gitignore,**绝不提交**;`.env.example` 是模板。
-- Voyage 免费档限流 3 RPM:`eval` 的 rerank 逐条调 13 次,撞限流就等一分钟或绑卡(仍在免费额度内)。
+- Voyage 限流和计费以当前账号配置为准。运行全量 model eval 或重建 embedding index 前先说明调用范围和成本。
 - LLM-as-judge 有 ~5-10% 噪声:Faithfulness 数字异常时**先验证裁判判得对不对**,别急着改模型(教训见 `docs/RAG-复盘-03`)。
 - DeepSeek 兼容端点**不支持** `cache_control`、图片、结构化输出;只用文本 + tool use。
 

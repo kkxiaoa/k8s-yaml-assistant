@@ -11,10 +11,10 @@ import {
   readRun,
   runKind,
 } from '../src/eval/run-store';
-
-function fmt(x: number): string {
-  return (x * 100).toFixed(1).padStart(6) + '%';
-}
+import {
+  formatMetricDelta,
+  formatMetricValue,
+} from '../src/eval/metric-format';
 
 function main(): void {
   const runPath = process.argv[2] ?? latestRunPath();
@@ -27,13 +27,13 @@ function main(): void {
   const baseline = readBaseline(kind); // 按 run 自身 kind 匹配同类型 baseline,不混检索/faith
 
   console.log(
-    `当前 run : ${runPath}(${current.createdAt}, k=${current.k}, kind=${kind})`,
+    `当前 run : ${runPath}(${current.createdAt}, k=${current.k ?? 'n/a'}, kind=${kind})`,
   );
 
   if (!baseline) {
     console.log('\n尚无 baseline。当前 run 指标:');
     for (const [key, val] of Object.entries(current.metrics).sort())
-      console.log(`  ${key.padEnd(18)} ${fmt(val)}`);
+      console.log(`  ${key.padEnd(42)} ${formatMetricValue(key, val)}`);
     console.log(
       `\n确认无误后晋升为 baseline:npm run eval:promote -- ${runPath}`,
     );
@@ -42,8 +42,12 @@ function main(): void {
 
   console.log(`baseline : ${baseline.id}(${baseline.createdAt})`);
   if (
-    current.corpusHash !== baseline.corpusHash ||
-    current.indexHash !== baseline.indexHash
+    current.corpusHash &&
+    baseline.corpusHash &&
+    current.indexHash &&
+    baseline.indexHash &&
+    (current.corpusHash !== baseline.corpusHash ||
+      current.indexHash !== baseline.indexHash)
   ) {
     console.log(
       '⚠ 语料/索引指纹与 baseline 不一致(corpusHash/indexHash 变了),对比跨越了语料变更,仅供参考。',
@@ -55,7 +59,7 @@ function main(): void {
     current.evalSetHash !== baseline.evalSetHash
   ) {
     console.log(
-      '⚠ eval-set 指纹与 baseline 不一致(标注改过),Δ 含标注变更、非纯模型改进。',
+      '⚠ retrieval case 指纹与 baseline 不一致(标注改过),Δ 含标注变更、非纯模型改进。',
     );
   } else if (current.evalSetHash && !baseline.evalSetHash) {
     console.log(
@@ -76,9 +80,8 @@ function main(): void {
   for (const r of rows) {
     const arrow = r.delta > 0 ? '↑' : r.delta < 0 ? '↓' : '=';
     if (r.delta < 0) regressed++;
-    const dPct = `${r.delta >= 0 ? '+' : ''}${(r.delta * 100).toFixed(1)}%`;
     console.log(
-      `${r.key.padEnd(18)} ${fmt(r.current)}   ${fmt(r.baseline)}   ${arrow} ${dPct}`,
+      `${r.key.padEnd(42)} ${formatMetricValue(r.key, r.current).padStart(8)}   ${formatMetricValue(r.key, r.baseline).padStart(8)}   ${arrow} ${formatMetricDelta(r.key, r.delta)}`,
     );
   }
   if (onlyCurrent.length)

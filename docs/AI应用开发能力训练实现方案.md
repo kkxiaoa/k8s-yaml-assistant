@@ -1,812 +1,385 @@
 # AI 应用开发能力训练实现方案
 
-> 目标：把 `k8s-yaml-assistant` 作为 K8s YAML Copilot 训练场，按阶段训练 AI 应用开发能力。  
-> 原则：不以“做成完整 K8s AI 产品”为当前验收标准，而以“可测、可追踪、可诊断、可迭代、可证据化”为训练目标。  
-> 价值主张：**在编辑器里，基于当前 YAML 和集群 schema，提供带依据、可拒答、可校验的字段解释、错误解释、生成与修复辅助。**
+> 状态：当前执行依据。
+> 最近核对：2026-07-12。
+> 用途：维护当前能力状态、质量门禁和唯一执行顺序。具体数据契约由已确认的 design/spec 定义，不在本文重复维护。
 
----
+## 1. 项目目标
 
-## 1. 总体实施原则
+本项目的第一目标不是做成完整 K8s AI 产品，而是：
 
-本方案不是产品发布计划，而是能力训练落地计划。
+**用 K8s YAML Authoring Copilot 这个真实场景，训练可迁移的 AI 应用开发能力。**
 
-每个阶段都必须产出三类结果：
+当前价值主张：
 
-- **代码能力**：项目中新增或改造的真实工程能力。
-- **评估能力**：能证明该阶段能力有效的 eval、trace、baseline 或测试。
-- **复盘材料**：能解释为什么这么做、怎么判断好坏、还有什么不足。
+**在编辑器里，基于当前 YAML 和已摄取的知识来源，提供带依据、可拒答、可校验的字段解释、错误解释、生成与修复辅助。**
 
-阶段推进规则：
+训练范围包括：
 
-- 先让系统可测，再继续加功能。
-- 先修尺子，再追求指标。
-- 先能解释 bad case，再追求指标提升。
-- 先在 K8s YAML Copilot 场景内做深，不扩到泛 K8s AI 平台。
-- 新增方案优先采用业界通用实现；如果使用临时方案，需要明确收益和边界。
+- schema、docs、policy、examples 的摄取与知识建模。
+- semantic retrieval、query expansion、rerank 与上下文选择。
+- grounded answer、拒答、引用和多来源冲突表达。
+- Generate/Fix 的结构化输出、校验和 repair loop。
+- eval、trace、baseline、bad case 与反馈回灌。
+- 延迟、token、成本、缓存和失败诊断。
 
----
+当前不承诺：
 
-## 2. Stage 0：训练场 Scope 与评估代表性决策
+- 集群运行时排障、日志和事件分析。
+- 自动执行 `kubectl` 或自治运维。
+- 多集群治理和完整企业权限体系。
+- 覆盖所有 Kubernetes/CRD 资源的成熟产品体验。
 
-## 2.1 目标
+## 2. 执行原则
 
-先决定训练场语料范围和 eval 覆盖策略，避免让 ingestion 体量反过来绑架训练路线。
+1. **先修尺子**：evaluator 或数据契约不可信时，不优化模型，不晋升 baseline。
+2. **证据驱动**：功能、检索策略和知识源扩展必须由场景缺口或 bad case 触发。
+3. **评估分层**：retrieval、grounded answer、judge、generation、fix 使用各自明确的 case contract，不用一个超大可选字段结构混算指标。
+4. **线上线下共实现**：eval 与 serving 复用同一 semantic retrieval、query expansion、rerank 和来源格式化实现，但按测量对象使用不同 evaluator。
+5. **来源不混淆**：知识形态、权威来源和适用资源分别建模，policy 不冒充 Kubernetes 官方事实，example 不替代 schema 校验。
+6. **失败显式化**：来源不足、模型错误、judge 不可判定和基础设施异常必须分别记录，不能用默认成功值掩盖。
+7. **反过拟合**：已知 bad case 用于回归，不用同一批调优样本证明泛化；保留不参与日常调参的 holdout。
+8. **反玩具**：不以硬编码特例、简化 fixture、截断语料或送分题换取表面跑通。
+9. **不维护无价值兼容**：ignored artifacts 可清理重跑；提交数据只做一次性迁移，迁移后删除旧兼容分支。
+10. **方案先行**：每项能力先确认 design/spec，再拆 plan；每个 Task 完成后停下 review，未经用户要求不提交。
 
-当前硬伤：
+## 3. 当前事实快照
 
-- 当前语料约 `88,879 chunks / 997 resources`。
-- 当前检索 eval set 只有 13 条，且主要是 PVC / StorageClass 等存储类问题。
-- 即使 eval 能跑完，13 条手写存储题也不能代表 997 个资源的检索质量。
+以下数字只是 2026-07-12 的工作区快照，不是永久规格。若与命令输出冲突，以命令输出为准。
 
-这不是性能问题，而是测量有效性问题。
+### 3.1 Corpus
 
-## 2.2 必须显式选择的路线
-
-### 路线 A：精选语料训练场（推荐先做）
-
-目标：
-
-- 用约 20-40 个与 YAML Copilot 强相关的核心资源 kind 打磨完整 AI 应用链路。
-- 保证 eval 能测准、跑得动、能解释。
-
-建议范围：
-
-- 核心 workload：Pod、Deployment、StatefulSet、DaemonSet、Job、CronJob、HorizontalPodAutoscaler、PodDisruptionBudget。
-- 暴露与网络：Service、Ingress、NetworkPolicy、Endpoints。
-- 配置与权限：ConfigMap、Secret、ServiceAccount、Role、RoleBinding、ClusterRole、ClusterRoleBinding。
-- 资源治理：ResourceQuota、LimitRange。
-- 存储：PVC、PV、StorageClass。
-- 选择 3-5 个真实 CRD 作为 CRD 训练样本。
-
-落地机制（list 怎么生效）：
-
-- 把选中的资源写进 `data/schemas/curated.json` 白名单。
-- `schemas.ts` / `schema-corpus.ts` 仅加载白名单内资源构建 `CORPUS`，而不是全量遍历 `data/schemas/generated/*`。
-- 全量 `generated/*` 仍保留在仓库，路线 B 或后续扩展时直接切换数据源即可，无需重新 ingestion。
-
-清退玩具残留（与本 Stage 一并做，禁止玩具思维落盘）：
-
-- **删除 `FIXTURE_SCHEMA_DOCS` 覆盖层**（`schemas.ts` 中 `storageclass / pvc / pv / vsc / vac` 5 个顶层手写 schema 的 import 与覆盖逻辑）。核实结论：这 5 个是玩具时代产物，字段数已**低于** generated（如 PVC fixture 仅 8 个 description vs generated 77 个），当前覆盖逻辑反而把丰富 generated 盖成低质，必须退场。
-- 删除后这 5 个资源**统一从 `generated/*` 流出**，和其它 curated 资源同款，消除“5 个特例”的突兀与质量不一致。
-- **`VolumeAttributesClass`** 集群侧门控默认关、live cluster 不暴露 schema，已改用**官方发布的 OpenAPI v3 spec**(`kubernetes/kubernetes` 仓库 `api/openapi-spec/v3`,与集群同版本 v1.32.7)经 `ingest:schemas` 生成进 `generated/`。注意当前版本 VAC 仍是 `storage.k8s.io/v1beta1`(GA 进 v1 要到 1.34),curated 按 v1beta1 收录。不保留手写 fixture、不留 pendingIngest 占位。
-- 删 fixture 必须与 §2.3 重建 eval set **同步**：旧 13 条用例的 `expectedChunkIds` 源自 fixture 切片，换 generated 后 chunk id 会变，否则 eval 失配。
-- 同时清理 `src/cli/gen.ts` 顶部 `submit_storageclass` / `validateStorageClass` 旧注释等单资源时代遗留口径。
-
-适合训练：
-
-- RAG 可测性
-- trace
-- generation / fix eval
-- bad case 回灌
-- grounded answer
-
-### 路线 B：全量大语料规模化压测（后期里程碑，不是路线 A 的替代）
-
-> 路线 A 与路线 B **不是二选一，而是有优先级的先后**：A 打底、B 压测。
-> A 先把整条训练链路（检索统一、baseline、compare、trace）在可控语料上跑稳、测准；
-> B 是后期一次**明确的 scale-up 动作**——把语料放回全量，专门压测路由 / scope / rerank 在大语料下的退化与成本。
-> 因为那时已有 baseline 与 `eval:compare`，B 的退化/收益是**可测**的，而不是一上来就在 88k 上瞎调。
-
-目标：
-
-- 专门训练大规模检索工程，量化大语料下的召回退化、延迟与成本。
-
-前置条件（必须先在路线 A 上完成，才进入 B）：
-
-- 统一的 eval == serving 检索路径（§4.1）。
-- 持久化索引（§4.3）+ baseline / `eval:compare`（§4.2）。
-- 半自动 eval 生成、分层采样、覆盖率统计。
-- 成本和延迟观测（§4.4 trace）。
-
-不把路线 B 作为主线起步，否则会出现“大语料很多，但尺子测不准”的问题。全量 `generated/*` 始终保留在仓库，进入 B 时直接切换数据源即可，无需重新 ingestion。
-
-## 2.3 Eval 代表性策略
-
-Stage 0 要明确 eval 不是简单“手写 50 条”。
-
-推荐组合：
-
-- **人工核心集**：覆盖真实 YAML Copilot 高频任务，数量 50-100 条。
-- **半自动 schema 派生集**：从 schema field description 反向生成 question，覆盖更多资源和字段。
-- **bad case 回灌集**：从实际失败样本转入 eval。
-
-每条 eval case 至少标记：
-
-```ts
-interface EvalCase {
-  id: string;
-  taskType: 'explain_field' | 'explain_error' | 'ask_free' | 'refusal' | 'crd';
-  resource?: string;
-  apiVersion?: string;
-  path?: string;
-  question?: string;
-  context?: EditorContext;
-  expectedChunkIds?: string[];
-  answerable: boolean;
-  source: 'human' | 'schema_generated' | 'bad_case';
-}
-```
-
-> 注意：`EvalCase` 只覆盖**检索与解释类**任务(其评估单位是"检索是否命中正确 chunk")。
-> **生成与修复类**用例不走 `EvalCase`,使用 Stage 4 的 `GenerationEvalCase`(评估单位完全不同:parse / validate / 跨资源一致性,字段是 `requirement / expectedKinds / mustHavePaths`)。
-> 两类 case 分文件存放,不要混在一个结构里。
-
-## 2.4 语料统计口径
-
-文档中所有语料规模数字必须可复现。
-
-当前 `88,879 chunks / 997 resources` 的含义：
-
-- `chunks`：运行时 `CORPUS.length`。
-- `resources`：`CORPUS` 中 unique `resource` 数量。
-- 它不等于 `data/schemas/generated` 文件数，因为 generated 文件可能包含 `*List` 变体、不同 group/version 或被 fixture 覆盖。
-
-验收时应提供统计命令或脚本，例如：
+运行：
 
 ```bash
 npm run corpus:stats
 ```
 
-## 2.5 验收标准
+当前结果：
 
-- 默认先落地路线 A（路线 B 标为后期规模化压测里程碑，不删、不并行起步）。
-- 产出 `data/schemas/curated.json` 白名单，并让 `schemas.ts` / `schema-corpus.ts` 仅加载白名单内资源(`CORPUS` 随之收敛)。
-- 文档写明语料统计口径（`npm run corpus:stats` 可复现）。
-- 至少建立 `data/eval/baseline.json` 的字段结构。
+- `8,127` chunks。
+- `26` 个 curated resources。
+- `8,085` schema chunks。
+- `42` policy chunks。
+- 已注册 provider：`schema`、`policy`。
+- 尚未注册真实数据 provider：`docs`、`example`。
+- `data/schemas/curated.json` 的显式 `crd` 集合仍为空，真实 CRD 训练样本尚未形成独立覆盖层。
 
----
+### 3.2 Eval 数据
 
-## 3. Stage 1：稳住真实场景与基础闭环
+当前 retrieval 数据集：
 
-## 3.1 目标
+- 86 条人工 case，其中 81 条可答、5 条拒答。
+- 主要覆盖字段解释，尚缺系统化的错误解释、CRD、schema 派生和 bad-case 来源分层。
+- 当前 case 尚未形成 development、regression、holdout 的用途分层。
 
-把 K8s YAML Copilot 固定为稳定训练场，确保 `ask / check / gen / fix` 形成真实闭环。
+当前生成数据集：
 
-## 3.2 实现内容
+- Generation 26 条，其中多资源 case 6 条。
+- Fix 8 条。
+- 数量已具备训练价值，但资源断言、关系断言和 fixture preflight 仍需按 Evaluator Validity 设计纠偏。
 
-- README、AGENTS、CLAUDE、docs 统一使用“AI 应用开发训练 + K8s YAML Copilot 训练场”口径。
-- 避免继续使用“完整 K8s AI 平台”“泛 Kubernetes 智能助手”“懂集群所有资源/CRD”作为当前主目标。
-- Ask 请求必须包含 `EditorContext`。
-- Ask 动作显式区分 `free`、`explain_field`、`explain_error`。
-- `/api/ask` 通过 SSE 返回 `sources`、`delta`、`done`。
-- 前端展示 answer 与 sources。
-- 保持 `check / gen / fix` 基础闭环，生成和修复结果必须再次进入校验。
+### 3.3 能力状态
 
-## 3.3 验收标准
+| 能力 | 状态 | 当前边界 |
+|---|---|---|
+| Monaco YAML 工作流与 `ask/check/gen/fix` | 已完成基础闭环 | 继续以编辑器 YAML authoring 为唯一产品场景 |
+| schema ingestion、`$ref` registry、curated corpus | 已完成基础能力 | provenance、版本化 ID 和 corpus identity 待纠偏 |
+| dense retrieval、rerank、query expansion serving | 已完成基础能力 | 历史指标需在新 evaluator 下重测，不能直接沿用 |
+| run/trace/baseline/bad case | 第一轮结构已实现，未通过 correctness review | 当前最高优先级 |
+| Generation/Fix repair loop | 已完成基础能力 | evaluator 仍可能误判通过 |
+| `[S]` 引用、schema/policy 分层 | 部分完成 | answer correctness 与 claim-level verification 未完成 |
+| Stage 6 policy | 已完成 Ask 侧接入 | docs/examples 与 Generate/Fix policy compliance 未完成 |
+| Stage 7 离线 feedback | retrieval/faith bad case 前置已完成 | serving feedback、采纳信号和审核式回灌未完成 |
 
-- 用户不需要复制 YAML 到问题里。
-- “解释当前字段”能基于 `cursorPath` 命中 schema。
-- “解释当前错误”能基于 validation errors 回答。
-- 每个可答问题至少展示 1 个 source。
-- `README / AGENTS / CLAUDE / docs` 不再出现与新目标冲突的旧口径。
+## 4. 当前质量契约
 
----
+本节只维护稳定原则。字段级契约以 `docs/superpowers/specs/2026-07-12-*.md` 为准。
 
-## 4. Stage 2：质量工程底座
+### 4.1 Eval Artifact Protocol
 
-## 4.1 目标
-
-建立 AI 应用训练项目的质量工程底座：baseline、eval compare、trace、成本延迟、轻量反馈闭环。
-
-Stage 2 不只是“让 eval 跑完”，而是让每次改动都能被比较、诊断和复盘。
-
-> **前置（本 Stage 最高优先）：检索路径统一（eval == serving），且必须在持久化索引之前完成。**
->
-> 问题：当前 `eval.ts` 在**全量 `CORPUS`** 上软加权排序（路由只加分、不删候选），而线上 `pipeline.ts` 走 `chunksForResource` **硬过滤到单资源子集**再建索引（路由错=候选池里没有正确 chunk=Recall 0）——这是两套不同的检索算法，eval 数字不代表线上行为。
->
-> **收敛目标（不可选）**：eval 与 serving 共用**同一段 `retrieve / boost / rerank` 代码**和**同一份 index**。否则 baseline 和 trace 测的是一个线上没人用的系统，后续一切对比都失去意义。
->
-> **采用行为：取向 A —— 全量软加权（线上向 eval 看齐）**。即去掉 `pipeline.ts` 的 `chunksForResource` 硬过滤分支，路由结果改为喂给软加权（`命中资源 ? +RESOURCE_BOOST : 0`）。理由：
-> 1. 硬过滤本是 88k 大语料下的性能 hack；路线 A 收敛到 ~20-40 kind 后，全量软加权已足够便宜，hack 失去必要性。
-> 2. 硬过滤违背设计支柱③“**不赌完美路由**，误路由也不丢答案”；软加权与之一致。
-> 3. 收敛成本最低：eval 现状即全量软加权，让线上向它看齐只改一处。
-> 路由误差仍会以“少加分→掉排名”反映到 Recall@k / MRR，无需靠硬过滤“暴露”。
->
-> 落地：抽一个共享 `retrieve(query, { softBoostResource })`，CLI / Web / eval 全部走它；硬过滤 / hybrid 留到路线 B 规模化压测时作为大语料优化的候选，届时用 baseline + `eval:compare` 量化其召回损失与成本收益。
-
-## 4.2 Baseline 与对比
-
-必须产出：
+一次 eval 的证据链必须是：
 
 ```text
-data/eval/
-  baseline.json
-  runs/
-    2026-xx-xx-xxxx.json
-  bad-cases.jsonl
+dataset/config/model/corpus identity
+  -> EvalRun
+  -> per-case TraceEnvelope
+  -> metrics
+  -> baseline / bad case
 ```
 
-`baseline.json` 建议结构：
+要求：
 
-```ts
-interface EvalBaseline {
-  id: string;
-  createdAt: string;
-  corpusHash: string;
-  indexHash: string;
-  embeddingModel: string;
-  rerankModel?: string;
-  answerModel?: string; // 生成类 run(含 Faithfulness 等)必填;检索类 run(仅 Recall/MRR)无作答模型参与,留空
-  k?: number;
-  metrics: Record<string, number>;
-}
-```
-
-> `answerModel` 只在含**生成类指标**的 run 里有意义(作答模型参与产出)。Stage 2 的检索类 run 只有 `embed → rerank`,不记 `answerModel`(记了等于记一个没参与的模型)。与"`metrics` 跨 Stage 并集"同一口径:字段随 Stage 增补,缺失即不适用。
-
-新增命令：
-
-```bash
-npm run eval:compare
-```
-
-输出至少包含：
-
-- 当前指标
-- baseline 指标
-- Δ Recall@k
-- Δ MRR
-- Δ Faithfulness
-- Δ parse success
-- Δ validation pass
-- Δ repair success
-
-初期可以只提示退化，不一定阻塞 CI；但必须能看到 diff。
-
-`metrics` 是**跨 Stage 并集**：Stage 2 只有检索类指标（Recall@k / MRR），Stage 4 起才会有 parse / validation / repair / consistency。`eval:compare` 只 diff baseline 与当前 run **都存在**的 key，缺失的指标跳过，不报错。
-
-`corpusHash` / `indexHash` 的定义（保证可复现）：
-
-- `corpusHash`：对 `CORPUS` 按 `id` 排序后拼接 `id + '\n' + text`，取 sha256。
-- `indexHash`：`corpusHash + embeddingModel + 索引参数`（如归一化方式）取 sha256；embedding 模型或语料任一变化都会让 hash 变化，从而提示需要重建索引。
-
-**baseline 晋升工作流**（一次 run 怎么变成新 baseline）：
-
-```bash
-npm run eval            # 跑评估,结果写入 data/eval/runs/<时间戳>.json
-npm run eval:compare    # 与 baseline.json 对比,打印 Δ
-npm run eval:promote -- data/eval/runs/<时间戳>.json   # 确认是正收益后,显式晋升为新 baseline
-```
-
-晋升必须是**显式动作**，不允许 `eval` 自动覆盖 baseline，避免"把退化当成新基线"。
-
-## 4.3 持久化索引
-
-> **前置顺序（不可提前）**：持久化必须在 Stage 0（语料收敛到 `curated.json`）**且** §4.1（检索路径合一为单一共享 `retrieve` + 单一索引）之后做。
-> 否则会把错误的东西烤进磁盘：要么持久化又大又无代表性的 88k 索引，要么持久化两条分裂路径产出的两份不一致索引。
-> 依赖链：`Stage 0 收敛语料 → §4.1 合并检索路径 → 持久化（本节）→ baseline / compare / promote / trace`。
-> 这一步做完才真正解决“eval 每次重嵌全量 CORPUS 跑不完”的根因（见 §4.2 的 `corpusHash` / `indexHash` 失效判定）。
-
-新增本地索引构建命令：
-
-```bash
-npm run index:build
-```
-
-索引格式不要默认使用纯文本 `embeddings.jsonl` 承载全量 88k × 1024 float。
-
-推荐策略：
-
-- 精选语料训练场：可以先使用 JSONL prototype。
-- 全量大语料：优先使用 `Float32Array` binary、SQLite blob、Parquet、LanceDB、sqlite-vec 或真实向量库。
-
-建议目录：
-
-```text
-data/index/
-  manifest.json
-  chunks.jsonl
-  embeddings.f32
-```
-
-## 4.4 Retrieval Trace
-
-Trace 必须同时记录质量、延迟和成本。
-
-> 落地现状(2026-07):`src/retrieval/trace.ts` 定义 `RetrievalTrace`;`searchCorpusTraced` 分档计时 embed/dense/rerank 并记录 coarse/rerank/final 命中与 `cache.indexHit`;`retrieveContext` 组装完整 trace(exact 短路 + search 两条路),`RETRIEVAL_TRACE=1` 时 append 到 `data/eval/traces.jsonl`(gitignore)。
->
-> **后续硬化(usage / 成本)**:`latencyMs` / `cache` / 三段命中已做实,但 `usage`(token / estimatedCostUsd)暂空。原因:取 Voyage `usage.total_tokens` 需改 `embed` / `rerank` 的返回值,而二者有多个消费方(ask / retrieve / faithfulness)。做法:把 Voyage `usage` 串过 `embed` / `rerank` 返回值,rerank 为主成本,query 嵌入 token 极小。不编造成本,补齐前 `usage` 保持缺省。
-
-```ts
-interface RetrievalTrace {
-  question: string;
-  mode: AskMode;
-  resourceHint?: string;
-  fieldPathHint?: string;
-  queryText: string;
-  coarseHits: TraceHit[];
-  rerankHits: TraceHit[];
-  finalHits: TraceHit[];
-  latencyMs: {
-    embed?: number;
-    dense?: number;
-    sparse?: number;
-    rerank?: number;
-    llm?: number;
-    total: number;
-  };
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    estimatedCostUsd?: number;
-  };
-  cache?: {
-    embeddingHit?: boolean;
-    indexHit?: boolean;
-  };
-}
-```
-
-## 4.5 轻量反馈闭环前置
-
-反馈闭环不是最后才开始，而是最后成熟。
-
-Stage 2 必须先建立离线版：
-
-```text
-data/eval/bad-cases.jsonl
-```
-
-Bad case 结构不要只存 `question + wrongAnswer`，否则无法归因，也无法回灌 eval。
-
-建议使用一个跨任务的 superset 结构：Stage 2 先填写检索/解释类字段，Stage 4 再补生成/修复类字段。不要为 RAG、generate、fix 各自设计完全不同的 bad case 格式，否则后续无法统一做分类、统计和回灌。
-
-```ts
-interface BadCaseOrigin {
-  evalCaseId: string;
-  source: 'retrieval_eval' | 'faith_eval';
-  firstSeenAt: string;
-  lastSeenAt: string;
-  firstSeenRunId?: string;
-  lastSeenRunId?: string;
-  observedRunIds: string[];
-  occurrenceCount: number;
-  scope?: 'full' | 'policy' | 'smoke';
-  models?: {
-    embedding?: string;
-    rerank?: string;
-    answer?: string;
-    judge?: string;
-  };
-}
-
-interface BadCase {
-  id: string;
-  createdAt: string;
-
-  taskType: 'explain_field' | 'explain_error' | 'ask_free' | 'generate' | 'fix' | 'refusal';
-
-  input: {
-    question?: string;
-    requirement?: string;
-    yaml?: string;
-    context?: {
-      kind?: string;
-      apiVersion?: string;
-      cursorPath?: string;
-      selectedText?: string;
-      validationErrors?: Array<{ path: string; message: string }>;
-    };
-  };
-
-  expected?: {
-    answerSummary?: string;
-    sourceIds?: string[];
-    expectedKinds?: string[];
-    mustHavePaths?: string[];
-    consistencyChecks?: Array<'selector_label_match' | 'service_target_port_match' | 'ingress_service_match'>;
-  };
-
-  actual: {
-    answer?: string;
-    yaml?: string;
-    sourceIds?: string[];
-    traceId?: string;
-    diagnostics?: Array<{ stage: string; message: string }>;
-    evaluation?: {
-      runId: string;
-      scope: 'full' | 'policy' | 'smoke';
-      outcome: string;
-      unsupportedClaims: string[];
-      judgeReason?: string;
-    };
-  };
-
-  failure: {
-    layer:
-      | 'retrieval'
-      | 'rerank'
-      | 'chunking'
-      | 'knowledge'
-      | 'context'
-      | 'prompt'
-      | 'generation'
-      | 'validation'
-      | 'judge'
-      | 'ui'
-      | 'unknown';
-    type:
-      | 'retrieval_miss'
-      | 'rerank_miss'
-      | 'rerank_error'
-      | 'chunk_gap'
-      | 'knowledge_missing'
-      | 'context_missing'
-      | 'prompt_error'
-      | 'hallucination'
-      | 'schema_gap'
-      | 'parse_error'
-      | 'validation_error'
-      | 'consistency_error'
-      | 'refusal_error'
-      | 'judge_error'
-      | 'ui_misleading'
-      | 'unknown';
-    note?: string;
-  };
-
-  severity: 'low' | 'medium' | 'high';
-  status: 'new' | 'triaged' | 'converted_to_eval' | 'fixed' | 'wont_fix';
-  origin: BadCaseOrigin;
-  relatedBadCaseIds?: string[];
-}
-```
-
-字段设计理由：
-
-- `taskType`：区分解释、拒答、生成、修复，因为评估标准不同。
-- `input`：保留当时的问题、YAML 和编辑器上下文，保证失败可复现。
-- `expected`：描述正确行为，后续才能转成 eval case。
-- `actual`：保留当时回答、YAML、sources 和 trace 入口，方便复盘。
-- `failure.layer`：判断应该改哪一层。
-- `failure.type`：沉淀更细的错误类型，用于统计是否需要引入 Hybrid、改 prompt、补知识源或修生成闭环。
-- `status`：确保 bad case 有闭环，不只是失败日志。
-- `origin.evalCaseId`：记录该 bad case 对应的 eval case，是去重、关联和复测的主键来源。
-- `origin.firstSeenAt / lastSeenAt / occurrenceCount`：记录首次发现、最近复现和有效复现次数，同一 run 重复导入不重复计数。
-- `actual.evaluation`：保留 faith eval 的 outcome、unsupported claims 和 judge reason，便于区分检索失败、生成幻觉和 judge 问题。
-
-Bad case 的稳定身份使用 `evalCaseId + failure.layer + failure.type`，而不是 `question + sourceIds`。统计、去重和关联统一以 `origin.evalCaseId` 为准。
-
-Stage 2 的最小可填版本：
-
-```ts
-{
-  id,
-  createdAt,
-  taskType,
-  input: { question, yaml, context },
-  expected: { answerSummary, sourceIds },
-  actual: { answer, sourceIds, traceId },
-  failure: { layer, type },
-  severity,
-  status,
-  origin: { evalCaseId, source, firstSeenAt, lastSeenAt, observedRunIds, occurrenceCount }
-}
-```
-
-Stage 4 才需要补齐 `requirement`、`expectedKinds`、`mustHavePaths`、`consistencyChecks`、`diagnostics` 等生成/修复字段。
-
-## 4.6 验收标准
-
-- **eval 与线上 `pipeline` 走同一检索入口、同一份索引**（不再是"全量软加权 vs 硬过滤子集"两套逻辑）。
-- 采用路线 A 时，精选语料 eval 能稳定跑完。
-- 不重新 embedding 全量 corpus 也能跑 eval。
-- `eval:compare` 能输出 baseline diff，`eval:promote` 能显式晋升基线。
-- 每次 eval 能输出 baseline diff。
-- 每条 eval case 能输出 trace。
-- trace 包含 latency 和可获得的 token / cost 信息。
-- 至少 5 条 bad case 完成归因。
-
----
-
-## 5. Stage 3：条件触发的 Hybrid Retrieval
-
-## 5.1 目标
-
-Hybrid 不是无条件必做项，而是由 Stage 2 的 trace 和 bad case 触发的工程解法。
-
-只有确认 dense + rerank 在以下场景失败时，才进入本阶段：
-
-- 字段名失召回
-- apiVersion / kind 失召回
-- validation error 文本失召回
-- CRD 专有名词失召回
-- enum value 精确匹配失败
-
-> **已知局限与实测复盘(2026-07,勿重踩)**:baseline serving Recall@3 = 91.0%(voyage-3 + rerank-2.5 + COARSE_N=10)。为救回 7 条 bad-case,试过三个便宜杠杆,**全是负结果**:
-> - **COARSE_N 放大**(20/60):serving 单调变差(候选越多 rerank 越被干扰项带偏)。→ COARSE_N=10 已近最优,勿再调大。
-> - **切片文本改末两段路径**:目标只挪几名、仍进不了 rerank 范围,整体 91→88.2。→ 完整路径对多数用例是净正,勿删。
-> - **换 voyage-4-lite**:纯 dense 更强(oracle 86.8→91)但 serving 91→83.3——**rerank-2.5 隐性配 voyage-3,不吃新 embedding 的候选**。→ 要升级 embedding 必须配套升级 reranker,是更大工程。
->
-> **父被子孙淹没根因**:schema 一字段一 chunk,深子孙(如 271 个 `spec.volumes.*`)在 chunk 文本里携带顶层字段名把父字段淹没;叠加**英文描述 vs 中文查询**的跨语言错配 + 父描述太泛。真要解需 embedding+reranker 配对升级 / 描述中文化 / 父 chunk 富化(高回归风险,低 ROI)。**当前决策:接受 91%,记为已知局限。**
-
-## 5.2 实现内容
-
-- 增加 BM25 / sparse index。
-- 使用 RRF 合并 dense / sparse。
-- 在 trace 中同时展示 dense hits、sparse hits、fused hits、rerank hits。
-- 对比 dense-only 与 hybrid 的指标。
-
-## 5.3 验收标准
-
-- 至少 10 条关键词类 bad case 证明 dense-only 存在问题。
-- Hybrid 后这些 bad case 的 Recall/MRR 或命中排序改善。
-- 如果没有改善，Hybrid 不应继续扩大实现范围。
-
----
-
-## 6. Stage 4：Generate / Fix 生成层
-
-## 6.1 目标
-
-系统训练 AI 应用中的生成层能力：把自然语言需求、当前 YAML、校验错误和知识检索结果转化为可校验、可修复、可解释的 Kubernetes YAML。
-
-生成层是与 RAG 检索问答并列的能力线，不是 RAG 的附属功能。
-
-## 6.2 实现内容
-
-### 结构化请求与输出
-
-```ts
-interface GenerateRequest {
-  requirement: string;
-  target?: {
-    kind?: string;
-    apiVersion?: string;
-  };
-  context?: {
-    currentYaml?: string;
-    selectedText?: string;
-    validationErrors?: Array<{ path: string; message: string }>;
-  };
-}
-
-interface GenerateResult {
-  yaml: string | null;
-  rounds: number;
-  diagnostics: Array<{
-    stage: 'generate' | 'parse' | 'validate' | 'repair';
-    message: string;
-  }>;
-}
-```
-
-### 校验闭环
-
-```text
-generate YAML
-  ↓
-parse YAML
-  ↓
-schema validate
-  ↓
-if invalid: repair with validation errors
-  ↓
-validate again
-  ↓
-return final YAML + diagnostics
-```
-
-边界：
-
-- 最大修复轮次默认为 2。
-- 如果仍失败，返回失败原因，不伪装成功。
-- 修复 prompt 必须包含具体 validation errors。
-- 修复结果必须再次校验。
-
-### 多资源一致性生成
-
-必须覆盖 K8s YAML Copilot 的核心生成难点：
-
-- Deployment + Service
-- Deployment + Service + Ingress
-- labels / selector 一致
-- containerPort / targetPort / service port 一致
-- serviceName / backend service name 一致
-- 多资源 YAML 文档分隔符正确
-
-### Generation / Fix Eval
-
-新增 eval case：
-
-```ts
-interface GenerationEvalCase {
-  id: string;
-  requirement: string;
-  expectedKinds: string[];
-  mustHavePaths: string[];
-  consistencyChecks?: Array<'selector_label_match' | 'service_target_port_match' | 'ingress_service_match'>;
-}
-```
-
-指标：
-
-- YAML parse success rate
-- schema validation pass rate
-- expected kind/apiVersion match rate
-- required paths coverage
-- multi-resource consistency pass rate
-- repair success rate
-- average rounds
-
-## 6.3 验收标准
-
-- 至少 20 条 generation / fix eval case 可稳定运行。
-- 包含至少 5 条多资源一致性生成用例。
-- 生成结果能通过 YAML parse 和 schema validation。
-- fix 尽量保留用户原始意图和已有字段。
-- eval 能输出 parse success、validation pass、repair success、consistency pass、average rounds。
-
----
-
-## 7. Stage 5：Grounded Answer 与 Judge 校准
-
-## 7.1 目标
-
-从 evidence-visible 升级到 citation-grounded，同时避免重复复盘-03 的错误：在使用 LLM-as-judge 前先校准裁判。
-
-## 7.2 Judge 校准
-
-先建立 judge calibration set：
-
-- 10-20 条人工判定样本。
-- 覆盖 faithful、hallucinated、correct refusal、unsupported default、示例值灰区。
-- 记录人工判定与 judge 判定的一致率。
-
-只有裁判达到可接受一致率后，才扩大 claim-level grounding eval。
-
-> **架构决策(2026-07,Stage 5 重做前必读)**:生成层评估**不要另起独立数据集**。
-> - **`eval:faith` 收敛到 eval-set**:复用 eval-set 的 `question` + `answerable`(它已有 72 可答 + 5 拒答),
->   同一批问题跑「检索→生成→裁判」,得到忠实度/拒答正确率。好处是**可归因**——faithfulness 挂了,
->   对照该问题的检索 Recall 就知道是"没检索到"还是"检索到了但瞎编"。删掉旧的独立 `FAITH_SET`(9 条玩具)。
-> - **judge 校准是唯一该独立的元评估**(验裁判本身可不可信),但样本必须**来自真实 pipeline 输出**
->   (真实检索上下文 + 真实模型答案 + 人工独立判定),**不要手写送分题**(手写会不自觉写成好判的,100% 一致=尺子太松)。
->   已建 `judge.ts`(共享裁判)/`answer.ts`(共享生成)供其复用;`judge:capture` 那套抓真实答案的工具本轮已删,重做时按此思路重建。
-> - 复盘-03 教训:一致率低先怀疑裁判、再怀疑被测。被测(deepseek-flash)实测很保守、少幻觉,忠实度难点在"推断/延伸"(把文档没写的好处/结论当事实)。
-
-## 7.3 Claim-level Grounding
-
-- sources 增加 `sourceType`、`sourceUri`、`version`、`trustLevel`。
-- 答案使用 `[S1] [S2]` 引用来源。
-- eval 中执行 claim extraction 和 claim-source verification。
-- unsupported claim 必须能被报告。
-
-## 7.4 验收标准
-
-- judge calibration set 有人工标注。
-- judge 与人工判定不一致的样本有复盘。
-- 答案关键事实带 source 引用。
-- Faithfulness eval 能识别 unsupported claim。
-- 文档没写的默认值不会被自由补全。
-
----
-
-## 8. Stage 6：多知识源融合
-
-## 8.1 目标
-
-从 schema facts 扩展到更真实的 AI 应用知识层。
-
-Stage 6 是 AI 应用开发训练里的必修能力，因为真实 RAG 不可能长期只依赖 schema。它不是可有可无的产品增强，但执行上应排在 Scope、baseline、trace、Generate / Fix 和 judge 校准之后，避免在尺子不准时继续扩大知识源。
-
-## 8.2 知识源
-
-- `schema`：字段事实、类型、枚举、required。
-- `doc`：官方文档、概念、行为语义。
-- `example`：YAML 示例、模板、反例。
-- `policy`：组织规范、平台推荐、禁用项。
-
-## 8.3 Source Precedence
-
-建议优先级：
-
-```text
-policy > schema > official docs > examples
-```
-
-## 8.4 验收标准
-
-- 能回答字段事实。
-- 能回答行为语义。
-- 能给出 YAML 示例。
-- 能区分官方事实和组织建议。
-
----
-
-## 9. Stage 7：反馈闭环成熟化
-
-## 9.1 目标
-
-把 Stage 2 的离线 bad case 机制升级为持续反馈系统。
-
-## 9.2 实现内容
-
-- query log
-- source hit log
-- answer log
-- latency / cost log
-- UI feedback
-- fix / generate 采纳记录
-- bad case taxonomy
-- eval additions
-
-## 9.3 验收标准
-
-- 至少沉淀 20 条 bad case。
-- 每条 bad case 有分类和处理结论。
-- 至少 10 条 bad case 回灌到 eval set。
-- 改动前后能生成对比报告。
-
----
-
-## 10. 推荐执行顺序
-
-> Stage 编号是**主题分类，不代表时序**。实际执行顺序如下（Stage 1 作为贯穿约束，不单独排期）。
-
-当前推荐顺序：
-
-1. **Stage 0：Scope 与 eval 代表性决策**
-   - 默认先采用路线 A：精选语料训练场。
-
-2. **Stage 2：质量工程底座**
-   - baseline、eval compare、trace、latency/cost、bad-cases。
-
-3. **Stage 4：Generate / Fix 生成层**
-   - 这是与 RAG 并列的能力线，应尽早补齐。
-
-4. **Stage 3：条件触发 Hybrid**
-   - 仅在 bad case 证明关键词失召回后实施。
-
-5. **Stage 5：Grounded Answer 与 Judge 校准**
-   - 先校准裁判，再扩大 LLM-as-judge。
-
-6. **Stage 6：多知识源融合**
-   - 在基础可测可诊断后再扩。
-
-7. **Stage 7：反馈闭环成熟化**
-   - Stage 2 已有离线反馈，Stage 7 做产品化增强。
-
-Stage 1 作为持续约束，保持文档、UI、README、AGENTS、CLAUDE 口径一致。
-
----
-
-## 11. 当前下一步任务清单
-
-下一轮优先做 Stage 0 + Stage 2 的最小闭环。
-
-最小任务：
-
-- **统一 eval 与 serving 的检索路径（前置，先做）**：删 `pipeline.ts` 的 `chunksForResource` / `FALLBACK_RESOURCES` / `CORPUS.slice(0, 1000)` 硬过滤与玩具 fallback，收敛为单一软加权 `retrieve`。
-- **清退玩具 fixture**：删 `schemas.ts` 的 `FIXTURE_SCHEMA_DOCS` 覆盖层，5 个存储资源改从 generated 流出，VAC 走 ingestion 补进 generated（与 eval set 重建同步）。
-- 明确采用精选语料训练场，写出 `data/schemas/curated.json` 白名单并让 `CORPUS` 据此收敛。
-- 增加 `npm run corpus:stats`，说明 chunk/resource 统计口径。
-- 建立 `data/eval/baseline.json` 与 `data/eval/bad-cases.jsonl`。
-- 新增 `npm run eval:compare` 与 `npm run eval:promote`。
-- retrieval trace 增加 latency / cache / cost 字段。
-- 先扩充 eval set 到代表性核心集，而不是只手写 50 条同类问题。
-
-最小验收：
-
-- eval 与线上检索走同一入口与索引。
-- eval 能和 baseline 输出差异，且基线晋升是显式动作。
-- 每条 eval case 有 trace，trace 有耗时数据。
-- 至少 5 条 bad case 能归因。
-- 文档说明为什么当前选择精选语料，而不是全量 88k 语料。
-
----
-
-## 12. 成功标准
-
-这个训练项目的阶段性成功标准不是“产品成熟”，而是：
-
-- 你能讲清楚一条 RAG 请求从知识源到答案的完整链路。
-- 你能定位一次错误回答发生在哪一层。
-- 你能设计 eval case 证明改动有效。
-- 你能解释为什么某个问题应该拒答。
-- 你能解释为什么一段 YAML 生成失败，以及失败发生在需求理解、YAML 结构、schema 校验还是修复闭环。
-- 你能用 baseline diff 证明一次改动是正收益还是负收益。
-- 你能让系统从 bad case 中持续变好。
-
-达到这些标准，就说明这个项目完成了当前阶段的核心使命：
-
-**用 K8s 场景训练自己成为 AI 应用开发者。**
+- `EvalRun` 是判别联合，`kind/status/scope/dataset/artifactPaths` 等关键字段不可静默缺失。
+- run 只保存相对 `data/eval/` 的可移植路径。
+- 每条 trace 有稳定 `traceId/runId/evalCaseId/kind/outcome`。
+- runner 启动先写 `running`，完成写 `completed`，异常写 `failed`。
+- run、trace、baseline、bad case 读取都经过 runtime decoder。
+- bad case 只引用可解析的真实 trace，不承担临时 trace 的职责。
+- serving trace 与 eval artifact 分流；serving trace 写入失败不能拖垮 Ask。
+
+设计依据：
+
+- `superpowers/specs/2026-07-12-eval-artifact-protocol-design.md`
+
+### 4.2 Metric Semantics
+
+每个稳定指标必须定义：
+
+- 测量对象和 evaluator kind。
+- 越高越好、越低越好或 neutral。
+- 单位、分子和分母。
+- 空样本时是 `N/A`，不能伪装为 0% 或 100%。
+
+Compare 和 baseline 要求：
+
+- dataset hash、metric definition version 或 kind 不一致时，不输出改进/退化结论。
+- baseline 有而当前缺失的稳定指标属于 harness 缺口，不能静默跳过。
+- retrieval、faith、generation、fix 只允许 full run 晋升；judge 只允许完整 calibration run 晋升。
+- 只有 `completed` 且通过门禁的 run 才能晋升。
+- baseline 晋升始终由人工显式执行。
+
+设计依据：
+
+- `superpowers/specs/2026-07-12-eval-metric-semantics-design.md`
+
+### 4.3 Evaluator Validity
+
+#### Semantic Retrieval
+
+- 使用 self-contained question 评估 `searchCorpusTraced()`。
+- 测量 dense、routing、query expansion、coarse candidate 和 rerank 的 Recall/MRR。
+- 不注入 `EditorContext`，不把 exact-field 短路计入 semantic retrieval 指标。
+
+#### Editor Context Retrieval
+
+- `kind + cursorPath -> exact-field -> fallback search` 是 serving 分流能力。
+- 当前使用确定性 pipeline 测试覆盖，不单独建立 run/baseline。
+- 只有出现大量 serving bad case、需要统计 exact/fallback rate 或离线回放时，才新增独立 ServingRetrieval evaluator。
+
+#### Grounded Answer
+
+- 可以引用 retrieval case，但必须显式声明期望行为和必需来源类型。
+- trace 保存实际发送给生成和 judge 的 context/source snapshot，不能从未来 corpus 重建旧上下文。
+- Faithfulness、answer correctness、relevance、completeness 和 refusal correctness 是不同维度，不能用 faithful 一个指标代替全部答案质量。
+
+#### Judge
+
+- 严格解析输出，字符串布尔值、缺字段和非法数组项都是无效票。
+- 记录计划票数、有效票、失败票和失败原因。
+- 默认 5 票，至少 3 票有效才形成结论；平票返回不可判定。
+- 新维度先用真实 pipeline 样本进行人工校准，再进入正式指标。
+
+#### Generation/Fix
+
+- Generation 断言绑定到明确资源，既检查 path，也检查值、集合和跨资源关系。
+- 一致性检查先确认参与资源存在且唯一，缺少关系任一端都失败。
+- Fix 在调用模型前执行 fixture preflight，确认输入确实包含声明缺陷。
+- Fix 同时检查目标资源、预期修正、意图保留和额外副作用。
+- YAML parse 和 schema validation 只证明结构合法，不等同于 admission、运行时或业务语义正确。
+
+设计依据：
+
+- `superpowers/specs/2026-07-12-evaluator-validity-design.md`
+
+### 4.4 Eval 数据治理
+
+Case 至少有三个独立维度：
+
+| 维度 | 建议值 | 用途 |
+|---|---|---|
+| task | field、error、free、refusal、crd、generation、fix | 区分测量对象 |
+| origin | human、schema_generated、bad_case | 说明样本来源 |
+| role | development、regression、holdout | 区分调优、回归和泛化验证 |
+
+规则：
+
+- schema 派生题用于覆盖诊断，不与真实用户问题混成唯一总指标。
+- bad-case case 用于证明问题不再复发，不单独证明方案可泛化。
+- holdout 不参与日常 prompt、alias、boost 或 rerank 调参。
+- 每次报告至少按 task/origin/role 分桶，不能只展示一个整体 Recall。
+- 数据集变化必须产生新 hash；新旧数据集不能直接宣称指标提升。
+
+## 5. 知识与检索架构
+
+### 5.1 Knowledge Model
+
+知识形态和权威来源分开建模：
+
+- `sourceType`：`schema | docs | policy | example`。
+- `provenance`：Kubernetes 官方、当前集群、厂商、组织或人工 curated。
+- `targets`：成对记录 `apiVersion/kind/path`，不再并行维护多套 resource/path 字段。
+
+Corpus 与索引要求：
+
+- provider 产出 content hash 和完整 manifest hash。
+- chunk ID 在全 corpus 唯一，并区分必要的 source/apiVersion/kind/path。
+- content 变化触发重新 embedding；metadata 变化至少触发 metadata/index identity 更新。
+- serving、eval、index build、corpus stats 共用同一 identity 实现。
+- CRD schema 不得标成 Kubernetes 内置官方 schema。
+
+设计依据：
+
+- `superpowers/specs/2026-07-12-knowledge-provenance-corpus-identity-design.md`
+
+### 5.2 Source Authority
+
+不存在统一的 `policy > schema > docs > examples` 排序。来源按事实域分工：
+
+| 问题 | 主要依据 | 约束 |
+|---|---|---|
+| 字段是否合法、类型、枚举、required | 与目标版本匹配的 schema | 只说明结构事实 |
+| 行为语义、使用条件、限制 | 与目标版本匹配的官方 docs | 不覆盖 schema 结构事实 |
+| 平台推荐、禁止、合规要求 | organization policy | 必须明确是组织规则 |
+| YAML 写法与组合方式 | 可追溯 example | 示例不能替代事实或校验 |
+
+检索排序负责相关性，生成层负责来源分工和冲突表达。只有 bad case 证明 top-k 容量竞争时，才设计 source quota 或 source-aware selection。
+
+### 5.3 Ingestion 要求
+
+新增 docs/examples provider 前必须定义：
+
+- 来源 URI、文档锚点、版本、采集时间和许可证边界。
+- 与目标 Kubernetes/schema 版本的匹配规则。
+- chunking、去重、更新、删除和重建策略。
+- 内容清洗和 prompt injection 边界，检索内容始终作为数据而不是系统指令。
+- 对应的 retrieval、grounded-answer 或 Generation/Fix eval case。
+
+资源覆盖继续通过 ingestion pipeline 和 generated registry 扩展，不手工维护大规模 schema。
+
+### 5.4 Retrieval 决策
+
+当前保留：
+
+- dense retrieval。
+- resource/path 软加权。
+- Voyage rerank。
+- reviewed alias 驱动的跨语言 query expansion。
+- serving 与 eval 共用 semantic retrieval 实现。
+
+后续规则：
+
+- 先在纠偏后的 evaluator 下复测历史 retrieval/rerank bad case。
+- 只有仍稳定复现的 rerank miss 才进入 rerank 候选、打分或父子 chunk 竞争优化。
+- alias 只按真实 bad case 和高价值工作流字段分批扩展，每批必须经过人工 review 和 full eval A/B。
+- BM25/RRF 只在同语言关键词、标识符或枚举精确匹配型失召回被 trace 证明后实施。
+- 不因“Hybrid 是常见做法”而无条件引入。
+
+## 6. 能力阶段状态
+
+Stage 是能力分类，不代表执行时序。
+
+| Stage | 能力主题 | 当前状态 | 未完成出口 |
+|---|---|---|---|
+| 0 | Scope 与评估代表性 | curated 26 resources 已落地 | 增加真实 CRD 样本；建立 origin/role/task 分层和 holdout |
+| 1 | YAML Copilot 工作流 | 基础闭环完成 | 持续保持 editor-context 场景，不扩张产品叙事 |
+| 2 | 质量工程底座 | 第一轮已实现，correctness 待纠偏 | 完成 artifact/metric/evaluator/provenance 契约；贯通 usage/cost |
+| 3 | 检索优化 | query expansion 已落地，Hybrid 未触发 | 新 baseline 下复测 rerank；证据触发后再选方案 |
+| 4 | Generate/Fix | agentic repair loop 和 eval runner 已有 | 修正 case contract、关系断言、fixture preflight 和指标语义 |
+| 5 | Grounding/Judge | `[S]` 引用和 policy judge 基础已有 | judge 重新校准；answer quality 分维度；Claim-level Grounding |
+| 6.1 | Policy | Ask 侧已完成 | Generate/Fix policy lint 需独立设计 |
+| 6.2 | Official Docs | 未开始 | provider、版本化 ingestion、behavior eval |
+| 6.3 | Examples | 未开始 | provider、Generation/Fix 接入与收益评估 |
+| 7.1 | 离线 feedback | retrieval/faith bad-case 前置已有 | 在新 artifact 协议下重验 |
+| 7.2 | 反馈闭环成熟化 | 未开始 | serving feedback、采纳信号、审核式回灌和对比报告 |
+
+## 7. 唯一执行顺序
+
+### Phase A：质量底座纠偏（当前）
+
+1. 已完成：四份 2026-07-12 corrective specs 及其一对一 implementation plans 已交叉自审并落盘。
+2. 当前执行：按依赖实施 Artifact Protocol -> Knowledge Provenance/Corpus Identity -> Evaluator Validity -> Metric Semantics；每个 Task 后停止 review。
+3. 对提交数据执行一次性迁移；ignored runs/traces/index 直接清理重建。
+4. 纠偏完成前不晋升 baseline，不根据旧指标优化 retrieval/prompt/model。
+
+### Phase B：工程收尾与重建尺子
+
+1. 收敛 test runner、根 README 命令入口和 scripts inventory，删除有证据证明无引用的历史脚本；不新增平行 CLI 文档。
+2. 完成 docs 状态和引用清理，不让历史文档覆盖当前路线。
+3. 迁移现有 eval case contract，增加 task/origin/role 元数据。
+4. 补第一批错误解释、真实 CRD 和 holdout case；规模以代表性为目标，不以凑数为目标。
+5. 重建 index 和 run artifacts，依次运行 retrieval、faith、judge、generation、fix。
+6. 只在人工审核指标、trace 和 bad case 后晋升各 kind baseline。
+
+### Phase C：剩余质量债
+
+1. 贯通 embedding、rerank、answer、judge 的 raw usage，并记录 pricing/version 后再计算 cost。
+2. 在新 baseline 下重新判断仍存在的 retrieval/rerank bad case。
+3. 有证据时设计 rerank 优化；无同语言关键词证据时继续不做 BM25/RRF。
+4. 按 ROI 扩展 reviewed alias，不做 Pod/Deployment 全字段 alias。
+
+### Phase D：Stage 6.2 Official Docs
+
+1. 从 schema 无法回答的行为语义、使用条件和限制 case 出发定义范围。
+2. 实现 versioned docs provider、manifest、chunking、引用锚点和更新策略。
+3. 增加 docs retrieval 与 grounded-answer cases。
+4. 证明新增知识源提高目标 case，且不破坏 schema/policy 分层。
+
+### Phase E：Stage 6.3 Examples
+
+1. 选择可追溯、版本匹配的 YAML example 和反例。
+2. examples 进入统一 corpus，但按 task-aware context selection 服务 Generate/Fix。
+3. 用资源值断言和跨资源关系 eval 验证收益。
+4. 若 policy 需要约束 Generate/Fix，另设 policy lint/compliance 层，不塞进 schema validation。
+
+### Phase F：Stage 5.3 Claim-level Grounding
+
+1. 定义可解析的 claim 与 citation reference。
+2. 实现 claim extraction、claim-source verification 和 unsupported claim 输出。
+3. 对 claim extractor 和 verifier 分别校准，避免用未经验证的 LLM judge 验证另一个 LLM。
+4. 同时报告 groundedness、correctness、relevance、completeness 和 refusal correctness。
+
+### Phase G：Stage 7 反馈闭环成熟化
+
+1. 定义 serving observation envelope 和 request correlation，不复用 eval run 语义。
+2. 记录 query、source、answer、latency/cost 前先实现 Secret/token/YAML 敏感字段脱敏。
+3. 明确默认开关、采样、保留周期、删除机制和本地/远程边界。
+4. 接入 UI feedback 和 Generate/Fix 采纳信号。
+5. 反馈先生成可审核候选，人工确认后进入 bad case 或新 eval case。
+6. 输出按失败类型、修复状态和版本变化的闭环报告。
+
+### Phase H：全量语料规模化训练（后期）
+
+只有前述质量链路稳定后才进入：
+
+- 从 curated corpus 切到版本固定的全量 schema/CRD snapshot。
+- 若数据源或集群版本变化，重新 ingestion，不假设旧 generated 永久有效。
+- 量化 Recall、MRR、延迟、内存、索引构建时间和成本退化。
+- 再根据规模证据选择 binary index、SQLite/vector extension、LanceDB 或真实向量库。
+
+## 8. 每个 Task 的完成定义
+
+一个 Task 只有同时满足以下条件才算完成：
+
+- design/spec 已确认，代码没有越出范围。
+- 正常路径、反例和失败路径均有测试。
+- 运行时数据经过校验，不依赖 TypeScript 类型断言伪造安全性。
+- 变更涉及 evaluator 时，有反例证明旧误判已被修复。
+- 变更涉及 retrieval、prompt、model、corpus 或 generation 时，有同版本 dataset 的 baseline diff。
+- trace 足以判断失败发生在数据、retrieval、rerank、context、generation、validation、judge 还是 harness。
+- 真实模型验证前说明调用范围和成本；模型波动需要重复运行或报告不可判定。
+- 文档只记录当前约束和可验证事实，历史过程放入 commit、PR 或学习复盘。
+- 完成后停下汇报，等待用户 review；不自动 commit，不自动 promote baseline。
+
+## 9. 当前验收目标
+
+本轮训练项目达到以下状态，才说明质量底座真正可用：
+
+- 任意一次 eval 都能从 run 定位 dataset、模型、corpus、trace、metrics 和 bad case。
+- 每个指标都能解释方向、分母、适用范围和不可比较条件。
+- retrieval、grounded answer、judge、generation、fix 的 evaluator 不再互相借用错误语义。
+- 已知 bad case 能稳定回归，holdout 能独立反映泛化。
+- schema、docs、policy、example 的来源和事实边界可解释。
+- 生成和修复不仅能通过 YAML/schema，还能验证需求值与跨资源关系。
+- 来源不足时系统能拒答，来源冲突时能分层表达。
+- 每次优化都能用证据说明收益、代价和剩余风险。
+
+达到这些标准，才进入更大语料和更复杂产品能力，而不是反过来用功能数量掩盖质量问题。
+
+## 10. 当前设计依据
+
+- `docs/superpowers/specs/2026-07-12-eval-artifact-protocol-design.md`
+- `docs/superpowers/specs/2026-07-12-eval-metric-semantics-design.md`
+- `docs/superpowers/specs/2026-07-12-evaluator-validity-design.md`
+- `docs/superpowers/specs/2026-07-12-knowledge-provenance-corpus-identity-design.md`
+- `docs/superpowers/plans/2026-07-10-eval-harness-source-hardening.md`：仅保留第一轮 Task 1-8 的实施记录，不作为后续实现依据。

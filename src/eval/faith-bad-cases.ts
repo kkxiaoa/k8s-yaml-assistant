@@ -4,10 +4,10 @@ import {
   canonicalBadCaseId,
   normalizeCanonicalBadCases,
   type BadCase,
-  type BadCaseOrigin,
+  type BadCaseTracking,
 } from './bad-cases';
-import { EVAL_SET, type EvalCase } from './eval-set';
-import { FAITH_DIR, type FaithOutcome, type FaithTrace } from './faith-store';
+import { RETRIEVAL_CASES, type RetrievalEvalCase } from './cases/retrieval-cases';
+import { type FaithOutcome, type FaithTrace } from './faith-store';
 import {
   computeEvalSetHash,
   RUNS_DIR,
@@ -82,8 +82,7 @@ function inferScope(run: EvalRun): FaithScope {
 export function readFaithBadCaseInput(params: {
   runId: string;
   runsDir?: string;
-  faithDir?: string;
-  evalSet?: EvalCase[];
+  evalSet?: RetrievalEvalCase[];
 }): {
   run: EvalRun;
   traces: FaithTrace[];
@@ -93,20 +92,23 @@ export function readFaithBadCaseInput(params: {
   const {
     runId,
     runsDir = RUNS_DIR,
-    faithDir = FAITH_DIR,
-    evalSet = EVAL_SET,
+    evalSet = RETRIEVAL_CASES,
   } = params;
   const runPath = join(runsDir, `${runId}.json`);
-  const tracePath = join(faithDir, `${runId}.jsonl`);
 
   if (!existsSync(runPath)) {
     throw new Error(`run file not found: ${runPath}`);
+  }
+
+  const run = readJson<EvalRun>(runPath);
+  const tracePath = run.artifactPaths?.tracePath;
+  if (!tracePath) {
+    throw new Error(`faith run ${runId} missing artifactPaths.tracePath`);
   }
   if (!existsSync(tracePath)) {
     throw new Error(`faith trace file not found: ${tracePath}`);
   }
 
-  const run = readJson<EvalRun>(runPath);
   const traces = readJsonl<FaithTrace>(tracePath);
 
   if (run.id !== runId) {
@@ -125,11 +127,11 @@ export function readFaithBadCaseInput(params: {
   }
 
   const evalById = new Map(evalSet.map((ec) => [ec.id, ec]));
-  const alignedCases: EvalCase[] = [];
+  const alignedCases: RetrievalEvalCase[] = [];
   for (const trace of traces) {
     const evalCase = evalById.get(trace.id);
     if (!evalCase) {
-      throw new Error(`trace case ${trace.id} not found in EVAL_SET`);
+      throw new Error(`trace case ${trace.id} not found in RETRIEVAL_CASES`);
     }
     if (
       trace.question !== evalCase.question ||
@@ -182,7 +184,7 @@ function failureForOutcome(outcome: FaithOutcome): FaithFailure | null {
 }
 
 function sameEvalCase(issue: BadCase, evalCaseId: string): boolean {
-  return issue.origin.evalCaseId === evalCaseId;
+  return issue.tracking.evalCaseId === evalCaseId;
 }
 
 function retrievalQualityIssues(
@@ -204,7 +206,7 @@ function faithIssues(
 ): BadCase[] {
   return existingBadCases.filter(
     (issue) =>
-      sameEvalCase(issue, evalCaseId) && issue.origin.source === 'faith_eval',
+      sameEvalCase(issue, evalCaseId) && issue.tracking.source === 'faith_eval',
   );
 }
 
@@ -216,13 +218,13 @@ function issueIdFor(evalCaseId: string, failure: FaithFailure): string {
   });
 }
 
-function nextObservedRunIds(origin: BadCaseOrigin, runId: string): string[] {
-  return origin.observedRunIds.includes(runId)
-    ? origin.observedRunIds
-    : [...origin.observedRunIds, runId];
+function nextObservedRunIds(tracking: BadCaseTracking, runId: string): string[] {
+  return tracking.observedRunIds.includes(runId)
+    ? tracking.observedRunIds
+    : [...tracking.observedRunIds, runId];
 }
 
-function modelsFromRun(run: EvalRun): BadCaseOrigin['models'] {
+function modelsFromRun(run: EvalRun): BadCaseTracking['models'] {
   const withJudge = run as EvalRun & { judgeModel?: string };
   return {
     embedding: run.embeddingModel,
@@ -252,8 +254,8 @@ function issueFromTrace(params: {
   } = params;
   const issueId = issueIdFor(trace.id, failure);
   const unsupportedClaims = trace.verdict?.unsupported ?? [];
-  const baseOrigin: BadCaseOrigin =
-    existing?.origin ??
+  const baseTracking: BadCaseTracking =
+    existing?.tracking ??
     ({
       evalCaseId: trace.id,
       source: 'faith_eval',
@@ -261,8 +263,8 @@ function issueFromTrace(params: {
       lastSeenAt: now,
       observedRunIds: [],
       occurrenceCount: 0,
-    } satisfies BadCaseOrigin);
-  const observedRunIds = nextObservedRunIds(baseOrigin, run.id);
+    } satisfies BadCaseTracking);
+  const observedRunIds = nextObservedRunIds(baseTracking, run.id);
 
   return {
     id: issueId,
@@ -292,16 +294,16 @@ function issueFromTrace(params: {
     },
     severity: existing?.severity ?? failure.severity,
     status: existing?.status ?? 'new',
-    origin: {
-      ...baseOrigin,
+    tracking: {
+      ...baseTracking,
       evalCaseId: trace.id,
       source: 'faith_eval',
       lastSeenAt: now,
       lastSeenRunId: run.id,
       observedRunIds,
-      occurrenceCount: baseOrigin.observedRunIds.includes(run.id)
-        ? baseOrigin.occurrenceCount
-        : baseOrigin.occurrenceCount + 1,
+      occurrenceCount: baseTracking.observedRunIds.includes(run.id)
+        ? baseTracking.occurrenceCount
+        : baseTracking.occurrenceCount + 1,
       scope,
       models: modelsFromRun(run),
     },
@@ -338,7 +340,7 @@ function issueCandidate(params: {
   const issueId = issueIdFor(trace.id, failure);
   const existing = existingBadCases.find((issue) => issue.id === issueId);
 
-  if (existing?.origin.observedRunIds.includes(run.id)) {
+  if (existing?.tracking.observedRunIds.includes(run.id)) {
     return {
       action: 'already_imported',
       evalCaseId: trace.id,

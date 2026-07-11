@@ -18,8 +18,9 @@
 | 生成资源 YAML | Web `/api/generate`;CLI `npm run gen` | ✅ |
 | 上下文化问答 | Web `/api/ask` | ✅ |
 | 答案依据展示 | SSE `sources` + 前端“答案依据” | ✅ |
-| 检索评估 | `npm run eval` | ✅ |
-| 生成忠实度评估 | `npm run eval:faith` | ✅ |
+| 检索评估 | `npm run eval` | correctness 纠偏中 |
+| Grounded Answer / Judge 评估 | `npm run eval:faith`、`npm run eval:judge` | correctness 纠偏中 |
+| Generation / Fix 评估 | `npm run eval:gen`、`npm run eval:fix` | evaluator 纠偏中 |
 | schema ingestion 骨架 | `npm run ingest:schemas` | ✅ |
 
 ## Web 使用
@@ -72,12 +73,12 @@ npm test
 data/schemas/generated/resources/*.json
 data/schemas/generated/definitions/*.json
 data/schemas/curated.json
+data/policies.json
+data/aliases/schema-field-aliases.jsonl
         ↓
-src/knowledge/schemas.ts
+src/knowledge/{schemas,schema-corpus,policy-corpus,corpus}.ts
         ↓
-src/knowledge/schema-corpus.ts
-        ↓
-src/retrieval/retrieve.ts + router.ts + rerank.ts
+src/retrieval/{exact-field,query-expansion,retrieve,router,rerank}.ts
         ↓
 src/server/pipeline.ts
         ↓
@@ -89,8 +90,10 @@ app/ Monaco Web UI
 关键设计:
 
 - schema 是字段事实层,同时服务问答语料和 YAML 校验。
+- policy 是组织约束层,在 Ask 中与 schema 分层表达,不冒充 schema validation。
 - `curated.json` 控制当前训练语料范围;不再读取 `data/schemas/*.json` 手写 fixture。
 - `resources/` 保存资源入口 schema,`definitions/` 保存 OpenAPI `$ref` registry,运行时本地解析引用,不请求网络。
+- reviewed alias 为中文问题补充真实英文字段术语,serving 与 eval 共用同一 query expansion。
 - 问答返回 SSE:先发送 `sources`,再发送答案 `delta`。
 - 检索会结合用户问题、当前资源、光标字段、选中文本和校验错误。
 - 生成和修复通过 agentic loop 执行“生成/修复 → schema 校验 → 再修正”。
@@ -157,7 +160,14 @@ npm run eval
 
 # 生成忠实度评估
 npm run eval:faith
+
+# Judge / Generation / Fix 评估
+npm run eval:judge
+npm run eval:gen
+npm run eval:fix
 ```
+
+当前 eval harness 正在进行 correctness 纠偏,旧 baseline 不作为继续调优的依据。
 
 说明:
 
@@ -176,11 +186,8 @@ VOYAGE_API_KEY=...
 - 回答/生成:`Anthropic SDK` 接 DeepSeek Anthropic 兼容端点
 - embedding / rerank:Voyage AI
 
-## 下一步
+## 当前实施路线
 
-P0 已开始落地,后续优先级:
+当前先修正 eval artifact、指标语义、evaluator 有效性和 knowledge provenance，不根据旧 baseline 继续调模型或检索。完成质量底座后，再依次推进 official docs、examples、Claim-level Grounding 和反馈闭环。
 
-1. 继续强化“答案依据”与低置信拒答。
-2. 增加主流内置资源的离线 OpenAPI ingestion。
-3. 将官方文档和示例模板作为 schema 之外的知识层接入。
-4. 建立 query 日志、反馈回灌和评估集增长机制。
+唯一执行顺序见 `docs/AI应用开发能力训练实现方案.md`，文档入口和状态分层见 `docs/README.md`。

@@ -1,5 +1,8 @@
 # 项目上下文交接文档
 
+> 状态：历史归档，不作为当前执行依据。
+> 当前执行依据以 `AGENTS.md`、`docs/AI应用开发训练方案-K8s-YAML-Copilot.md` 和 `docs/AI应用开发能力训练实现方案.md` 为准。
+
 > 这份文档把「前端转型 AI」系列对话里定下的所有决策固化下来，
 > 让在本目录新起的 Claude Code session 能无缝接上全部上下文。
 > 原始对话存档见同目录 `conversation-archive.jsonl`。

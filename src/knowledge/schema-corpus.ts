@@ -4,26 +4,9 @@
 
 import { resolveSchemaNode, SCHEMA_DOCS, type SchemaNode } from './schemas';
 import { extractSourceUri } from '../retrieval/sources';
+import type { Chunk } from './chunk';
 
 const MAX_SCHEMA_DEPTH = 8;
-
-export type SourceType = 'schema' | 'policy';
-export type TrustLevel = 'k8s-official' | 'org-policy';
-
-export interface Chunk {
-  id: string;
-  resource: string;
-  path: string;
-  title: string;
-  text: string;
-  sourceType: SourceType;
-  /** 官方文档/规范链接 */
-  sourceUri?: string;
-  /** 版本/日期 */
-  version?: string;
-  /** 可信层级:区分官方事实与组织策略 */
-  trustLevel?: TrustLevel;
-}
 
 function chunkText(
   resource: string,
@@ -68,6 +51,8 @@ function walk(
       id: `${resource}::${path}`,
       resource,
       path,
+      resources: [resource],
+      paths: [path],
       title: `${resource} · ${path}`,
       text: chunkText(resource, path, forText, requiredSet.has(name)),
       sourceType: 'schema',

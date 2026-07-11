@@ -8,6 +8,7 @@ import {
   readRun,
   runKind,
 } from '../src/eval/run-store';
+import { formatMetricValue } from '../src/eval/metric-format';
 
 function main(): void {
   const runArg = process.argv[2];
@@ -19,9 +20,11 @@ function main(): void {
   promote(run);
   console.log(`已晋升为 baseline → ${baselinePathFor(runKind(run))}`);
   console.log(`  run id     : ${run.id}`);
-  console.log(`  indexHash  : ${run.indexHash.slice(0, 16)}…`);
+  if (run.indexHash) {
+    console.log(`  indexHash  : ${run.indexHash.slice(0, 16)}…`);
+  }
   for (const [key, val] of Object.entries(run.metrics).sort())
-    console.log(`  ${key.padEnd(18)} ${(val * 100).toFixed(1)}%`);
+    console.log(`  ${key.padEnd(42)} ${formatMetricValue(key, val)}`);
 }
 
 main();

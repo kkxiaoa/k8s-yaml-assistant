@@ -40,94 +40,43 @@
 7. 先修尺子，再追求指标；先解释 bad case，再追求指标提升。
 8. RAG 检索层和 Generate / Fix 生成层都必须可评估，不能只训练检索。
 
-## 当前判断
+## 当前状态
 
-当前项目适合作为 AI 应用开发训练场，而不是完整 K8s 知识产品。
+当前项目已经具备真实训练场基础：
 
-已有优势：
+- `ask / check / gen / fix` 已形成编辑器工作流闭环。
+- schema ingestion、curated corpus、dense retrieval、rerank 和 query expansion 已落地。
+- Generation/Fix 已有 agentic repair loop 和独立 eval runner。
+- Ask 已有 `[S]` 引用、schema/policy 分层和冲突表达。
+- retrieval/faith bad case 已具备离线沉淀入口。
 
-- `ask / check / gen / fix` 已形成基础工作流闭环。
-- schema 驱动的语料和校验复用同一份事实来源。
-- 已有 RAG 检索评估和 faithfulness 评估。
-- Monaco 编辑器集成让产品具备明确的工作流入口。
-- Ask 已开始接入 editor context、sources、字段解释和错误解释。
-- generated schema 已把语料推进到较大规模，适合后续训练 ingestion、索引和 eval 工程。
+当前最高优先级不是扩功能，而是修正质量底座。2026-07-10 harness 计划的 Task 1-8 已完成第一轮结构实现，但 correctness review 发现以下契约仍不可信：
 
-当前缺口：
+- EvalRun、trace、baseline 与 bad case 的关联和生命周期。
+- 指标方向、分母、空样本、可比较性和 baseline 晋升门禁。
+- retrieval、faith、judge、generation、fix 的单 case 判定有效性。
+- knowledge provenance、targets、corpus identity 与 index 失效边界。
 
-- 语料规模与评估集代表性不匹配，不能用 13 条存储类题目代表约 88k chunks / 997 resources 的检索质量。
-- 缺少可提交的 `baseline.json`、`eval:compare` 和 bad case 回灌机制。
-- trace 还缺 latency、cache、token/cost、coarse/rerank/final hits 等诊断字段。
-- Generate / Fix 生成层缺少独立 eval，特别是多资源一致性生成与修复评估。
-- Hybrid retrieval 是否需要尚未由 bad case 证明，不能当成无条件必做项。
-- LLM-as-judge 扩展前缺少 judge calibration，不能直接把裁判结果当真。
-- 多知识源融合尚未开始，schema / docs / examples / policy 的边界还需要工程化。
+纠偏完成前，不晋升 baseline，不根据当前指标继续优化 retrieval、prompt 或模型。
 
 ## 当前执行优先级
 
-后续实现按 `docs/AI应用开发能力训练实现方案.md` 执行，不再按旧产品 P0/P1/P2 扩张。
+唯一执行路线维护在 `docs/AI应用开发能力训练实现方案.md`，Stage 编号只表示能力分类，不表示时序。
 
-### 1. Stage 0：训练场 Scope 与评估代表性决策
+1. 按顺序实施四份已自审的 `2026-07-12` corrective plans；当前从 Eval Artifact Protocol 开始。
+2. 完成 test runner、命令入口、scripts 和 docs cleanup，建立 eval case 的 task/origin/role 分层和 holdout。
+3. 清理 ignored artifacts、重建 index，重跑 retrieval/faith/judge/generation/fix 并人工审核 baseline。
+4. 贯通 token/usage/cost，在新尺子下复测仍存在的 retrieval/rerank bad case。
+5. 接入 Stage 6.2 official docs，再接 Stage 6.3 examples。
+6. 在多源 provenance 和 judge 稳定后实施 Claim-level Grounding。
+7. 最后成熟化 Stage 7 serving feedback、采纳信号和审核式 eval 回灌。
 
-默认先采用精选语料训练场，而不是一开始被全量大语料绑架。
+长期约束：
 
-要求：
-
-- 明确 curated resource list。
-- 写清 `88,879 chunks / 997 resources` 的统计口径。
-- eval 采用人工核心集 + schema 派生集 + bad case 回灌集。
-- 不用 13 条或 50 条手写同类问题代表全语料能力。
-
-### 2. Stage 2：质量工程底座
-
-优先补齐可测、可比、可诊断能力。
-
-要求：
-
-- 落地 `data/eval/baseline.json`。
-- 落地 `data/eval/runs/*.json`。
-- 落地 `data/eval/bad-cases.jsonl`。
-- 新增 `npm run eval:compare`，输出当前指标、baseline 指标和 delta。
-- trace 记录 coarse hits、rerank hits、final hits、latency、cache、token/cost。
-- 大语料索引不要默认使用纯文本 JSONL 存全量 float；全量场景优先考虑 `Float32Array` binary、SQLite blob、Parquet、LanceDB、sqlite-vec 或真实向量库。
-
-### 3. Stage 4：Generate / Fix 生成层
-
-Generate / Fix 与 RAG 检索并列，是 AI 应用开发训练的另一半。
-
-要求：
-
-- 生成结果必须经过 YAML parse。
-- 生成结果必须经过 schema validation。
-- fix 必须形成 repair loop，而不是一次性文本改写。
-- 多资源生成要评估跨资源一致性，例如 Deployment / Service / Ingress 的 label selector、port、service name、backend 引用。
-- 需要独立 generation / fix eval，指标至少包含 parse success、validation pass、repair success、consistency pass。
-
-### 4. Stage 3：条件触发 Hybrid Retrieval
-
-Hybrid retrieval 不是无条件必做。
-
-只有当 Stage 2 的 bad case 和 trace 证明 dense + rerank 存在关键词型失召回时，才引入 BM25 / sparse retrieval / RRF。
-
-### 5. Stage 5：Grounded Answer 与 Judge 校准
-
-在扩展 claim-level grounding 或 LLM-as-judge 前，先校准裁判。
-
-要求：
-
-- 准备 10-20 条人工标注样本。
-- 对比 LLM judge 和人工判断。
-- 明确误判类型后，再扩大 faithfulness / correctness / grounding eval。
-
-### 6. Stage 6/7：多知识源融合与反馈闭环成熟化
-
-只有当基础链路可测、可追踪、可比较后，再扩展多知识源和反馈闭环。
-
-要求：
-
-- schema / docs / examples / policy 必须有明确 sourceType 和 trustLevel。
-- feedback 初期可先离线进入 `bad-cases.jsonl`。
-- 不急于做线上产品化反馈系统。
+- BM25/RRF 仅由同语言关键词型失召回证据触发，不作为默认路线。
+- schema/docs/policy/example 使用 `sourceType + provenance + targets` 表达，不使用全局来源优先级覆盖事实边界。
+- Generation/Fix 必须验证目标值和跨资源关系，不能只检查 kind/path 存在。
+- serving 日志或反馈落盘前必须定义敏感 YAML/Secret 脱敏、采样和保留周期。
 
 ## 工程规则
 
@@ -142,12 +91,15 @@ Hybrid retrieval 不是无条件必做。
 - 来源不足时不要静默编造答案。
 - 不要手动扩充大规模 schema import；资源覆盖应通过 ingestion pipeline 和 generated schema 目录完成。
 - 当前阶段优先把问题变得可测、可诊断、可复现，再追求覆盖更多能力。
+- docs 目录必须有状态分层。历史归档、学习复盘、评估报告不能覆盖当前执行依据；新增或修改文档时必须标明状态和用途。清理 docs 前先查引用，不确定时归档，不直接删除。
 
-- 注释只解释“为什么/非显然意图”，不复述代码，不写对话上下文（决策过程、方案对比、历史演变——进 commit / PR）。文档少写铺垫，提示用简短 tips。长对话易积累上下文注释污染阅读与模型，发现即精简或删除。
+- **注释精准铁律（最高优先）**：注释必须精准、客观、可验证，只解释“为什么”和非显然约束；禁止写对话上下文、阶段性决策过程、方案对比、历史演变、情绪化判断或已被代码直接表达的信息。迭代背景进 commit / PR / docs，不进代码注释。发现旧注释与当前实现不一致、过期、含糊或污染上下文时，应优先修正或删除，不能继续在其上叠加新注释。文档同样避免长铺垫，提示用简短 tips。
 
 ## 参考文档
 
 当前训练方案：
+
+`docs/README.md`
 
 `docs/AI应用开发训练方案-K8s-YAML-Copilot.md`
 
@@ -155,6 +107,6 @@ Hybrid retrieval 不是无条件必做。
 
 `docs/AI应用开发能力训练实现方案.md`
 
-RAG 评估：
+RAG 评估参考：
 
 `docs/RAG能力训练评估报告.md`

@@ -1,10 +1,9 @@
 // 检索评估标注集(人工核心集)。chunk id = schema 驱动的 `${resource}::${path}`。
-// 结构对齐方案 §2.3 的 EvalCase superset(检索/解释类字段;生成/修复类留到 Stage 4)。
 // 设计:覆盖收敛后语料(26 资源,工作负载主导)+ 大量「易混淆硬负例」+ 少量「拒答用例」。
 // 校验用 `npm run eval:check`。拒答用例 answerable=false / expectedChunkIds=[],不进 Recall/MRR。
 
-export interface EvalCase {
-  /** 稳定唯一 id, bad-case 用 origin.evalCaseId 引用。 */
+export interface RetrievalEvalCase {
+  /** 稳定唯一 id, bad-case 用 tracking.evalCaseId 引用。 */
   id: string;
   /** 任务类型:评估标准不同 */
   taskType: 'explain_field' | 'explain_error' | 'ask_free' | 'refusal' | 'crd';
@@ -25,7 +24,7 @@ export interface EvalCase {
 const F = 'explain_field' as const;
 const H = 'human' as const;
 
-export const EVAL_SET: EvalCase[] = [
+export const RETRIEVAL_CASES: RetrievalEvalCase[] = [
   // ── Pod:容器与调度 ──────────────────────────────
   {
     id: 'pod-image',

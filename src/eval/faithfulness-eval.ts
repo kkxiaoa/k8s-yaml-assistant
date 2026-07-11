@@ -7,12 +7,12 @@ import { config } from 'dotenv';
 config({ override: true });
 import type Anthropic from '@anthropic-ai/sdk';
 import { searchCorpusTraced } from '../retrieval/retrieve';
-import { formatSources } from '../retrieval/sources';
+import { formatSources, selectContextHits } from '../retrieval/sources';
 import { inferResource } from '../retrieval/router';
 import { getClient } from '../server/pipeline';
 import { judge, JUDGE_MODEL } from './judge';
 import { MODEL, generateAnswer } from './answer';
-import { EVAL_SET, type EvalCase } from './eval-set';
+import { RETRIEVAL_CASES, type RetrievalEvalCase } from './cases/retrieval-cases';
 import { CORPUS } from '../knowledge/corpus';
 import { EMBEDDING_MODEL } from '../retrieval/embeddings';
 import { RERANK_MODEL } from '../retrieval/rerank';
@@ -23,12 +23,13 @@ import {
   type FaithTrace,
   type FaithOutcome,
 } from './faith-store';
+import { tracePathForRun } from './artifacts';
 
 /** 上下文取 rerank 后 top-3,与 serving Recall@3 baseline 对齐,归因才干净。 */
 const CONTEXT_K = 3;
 
 interface CaseSelection {
-  cases: EvalCase[];
+  cases: RetrievalEvalCase[];
   suffix: '' | '-smoke' | '-policy';
   label: string;
   scope: 'full' | 'policy' | 'smoke';
@@ -37,17 +38,17 @@ interface CaseSelection {
 /** 选择评估子集。不传 = 全量;数字 = 冒烟;--policy = 只跑 Stage 6 policy 用例。 */
 function selectCases(arg: string | undefined): CaseSelection {
   if (arg === '--policy') {
-    const cases = EVAL_SET.filter((c) => c.id.startsWith('policy-'));
+    const cases = RETRIEVAL_CASES.filter((c) => c.id.startsWith('policy-'));
     return { cases, suffix: '-policy', label: ',policy 子集', scope: 'policy' };
   }
-  if (!arg) return { cases: EVAL_SET, suffix: '', label: '', scope: 'full' };
+  if (!arg) return { cases: RETRIEVAL_CASES, suffix: '', label: '', scope: 'full' };
 
   const smokeN = Number(arg);
   if (!Number.isFinite(smokeN) || smokeN <= 0) {
     throw new Error('用法: npm run eval:faith [-- <N>|--policy]');
   }
-  const answerable = EVAL_SET.filter((c) => c.answerable).slice(0, smokeN);
-  const refusal = EVAL_SET.filter((c) => !c.answerable).slice(0, smokeN);
+  const answerable = RETRIEVAL_CASES.filter((c) => c.answerable).slice(0, smokeN);
+  const refusal = RETRIEVAL_CASES.filter((c) => !c.answerable).slice(0, smokeN);
   return {
     cases: [...answerable, ...refusal],
     suffix: '-smoke',
@@ -58,13 +59,13 @@ function selectCases(arg: string | undefined): CaseSelection {
 
 async function processCase(
   client: Anthropic,
-  ec: EvalCase,
+  ec: RetrievalEvalCase,
 ): Promise<FaithTrace> {
   const routed = inferResource(ec.question) ?? undefined;
   const { hits } = await searchCorpusTraced(ec.question, {
     boostResource: routed,
   });
-  const top = hits.slice(0, CONTEXT_K);
+  const top = selectContextHits(hits, { k: CONTEXT_K, taskType: 'faith' });
   const { context } = formatSources(top.map((h) => h.chunk));
   const topIds = top.map((h) => h.chunk.id);
   const foundCount = ec.answerable
@@ -229,19 +230,23 @@ async function main(): Promise<void> {
     `注:被测=${MODEL}(flash),裁判=${JUDGE_MODEL}(pro)。Faithfulness=只忠于检索 context,不等于事实正确。`,
   );
 
-  // 落盘:逐条明细(faith/<id>.jsonl)+ 汇总(runs/<id>.json,kind=faith,可对比 baseline)。冒烟带 -smoke。
+  // 落盘:逐条 trace + 汇总 run。冒烟/策略子集不可晋升 baseline。
   const id =
     new Date().toISOString().replace(/[:.]/g, '-') + selection.suffix;
-  const tracePath = writeFaithTraces(id, traces);
+  const tracePath = writeFaithTraces(
+    tracePathForRun(id, 'faith'),
+    traces,
+  );
   const corpusHash = computeCorpusHash(CORPUS);
   const run: EvalRun = {
     id,
     kind: 'faith',
     createdAt: new Date().toISOString(),
+    artifactPaths: { tracePath },
     corpusHash,
     indexHash: computeIndexHash(corpusHash, EMBEDDING_MODEL),
     evalSetHash: computeEvalSetHash(cases),
-    evalSetVersionHash: computeEvalSetHash(EVAL_SET),
+    evalSetVersionHash: computeEvalSetHash(RETRIEVAL_CASES),
     embeddingModel: EMBEDDING_MODEL,
     rerankModel: RERANK_MODEL,
     answerModel: MODEL,
@@ -265,7 +270,7 @@ async function main(): Promise<void> {
   };
   const runPath = writeRun(run);
   console.error(
-    `\n逐条明细 → ${tracePath}\n汇总 run → ${runPath}` +
+    `\n逐条 trace → ${tracePath}\n汇总 run → ${runPath}` +
       (selection.suffix
         ? `  (${selection.suffix.slice(1)} 子集,勿晋升 baseline)`
         : ''),

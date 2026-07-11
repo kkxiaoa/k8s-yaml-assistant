@@ -30,6 +30,22 @@ const schema: SourceInput = {
   sourceType: 'schema',
 };
 
+const docs: SourceInput = {
+  id: 'docs-1',
+  title: 'NetworkPolicy concepts',
+  text: 'NetworkPolicy controls traffic.',
+  sourceType: 'docs',
+  resources: ['NetworkPolicy'],
+};
+
+const example: SourceInput = {
+  id: 'example-1',
+  title: 'Deployment example',
+  text: 'apiVersion: apps/v1',
+  sourceType: 'example',
+  resources: ['Deployment'],
+};
+
 console.log('formatSources:');
 
 check('policy 来源带 [S1][policy][组织策略]', () => {
@@ -45,6 +61,22 @@ check('schema 来源带 [S2][schema][K8s schema]', () => {
 check('schema-only:label 逻辑不假设混合输入', () => {
   const { context } = formatSources([schema]);
   assert.ok(context.includes('[S1][schema][K8s schema]'), context);
+});
+
+check('docs/example 来源标签可区分', () => {
+  const { context } = formatSources([docs, example]);
+  assert.ok(context.includes('[S1][docs][官方文档]'), context);
+  assert.ok(context.includes('[S2][example][示例]'), context);
+});
+
+check('sources 元数据包含 resources/paths 与默认 trustLevel', () => {
+  const { sources } = formatSources([schema, docs]);
+  assert.equal(sources[0]!.trustLevel, 'k8s-official');
+  assert.deepEqual(sources[1]!.resources, ['NetworkPolicy']);
+  assert.deepEqual(sources[1]!.paths, []);
+  assert.equal(sources[1]!.resource, 'NetworkPolicy');
+  assert.equal(sources[1]!.path, undefined);
+  assert.equal(sources[1]!.trustLevel, 'k8s-docs');
 });
 
 check('空数组 → context 空串、sources 空', () => {

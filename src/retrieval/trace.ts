@@ -1,14 +1,24 @@
-// §4.4 Retrieval Trace:同时记录质量(coarse/rerank/final 命中)、延迟(分档)和成本(usage)。
-// 结构对齐方案 §4.4。当前 latency + cache + hits 做实;usage(token/成本)留待把 Voyage
-// usage 串过 embed/rerank 后补全(那三个消费方改返回值,列为后续硬化)。
+// Retrieval trace records hit lists, latency buckets and optional usage for eval/serving diagnostics.
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import {
+  chunkPaths,
+  chunkResources,
+  primaryPath,
+  primaryResource,
+  type KnowledgeChunk,
+  type SourceType,
+} from '../knowledge/chunk';
 import type { QueryExpansionTrace } from './query-expansion-runtime';
 
 export interface TraceHit {
   id: string;
-  resource: string;
+  title?: string;
+  sourceType: SourceType;
+  resources?: string[];
+  paths?: string[];
+  resource?: string;
   path?: string;
   score?: number;
 }
@@ -46,23 +56,56 @@ export interface RetrievalTrace {
 }
 
 export function toTraceHit(
-  chunk: { id: string; resource: string; path?: string },
+  chunk: Pick<
+    KnowledgeChunk,
+    | 'id'
+    | 'title'
+    | 'sourceType'
+    | 'resource'
+    | 'path'
+    | 'resources'
+    | 'paths'
+    | 'appliesTo'
+  >,
   score?: number,
 ): TraceHit {
-  return { id: chunk.id, resource: chunk.resource, path: chunk.path, score };
+  const resources = chunkResources(chunk);
+  const paths = chunkPaths(chunk);
+  return {
+    id: chunk.id,
+    title: chunk.title,
+    sourceType: chunk.sourceType,
+    resources: resources.length ? resources : undefined,
+    paths: paths.length ? paths : undefined,
+    resource: primaryResource(chunk),
+    path: primaryPath(chunk),
+    score,
+  };
 }
 
-export const TRACES_PATH = join(process.cwd(), 'data', 'eval', 'traces.jsonl');
-
-/** 追加一条 trace 到 NDJSON(仅在开启观测时调用,避免正常请求写盘)。 */
-export function appendTrace(trace: RetrievalTrace): void {
-  mkdirSync(dirname(TRACES_PATH), { recursive: true });
-  appendFileSync(TRACES_PATH, `${JSON.stringify(trace)}\n`);
+export function servingTracePath(root = process.cwd()): string {
+  return join(root, 'data', 'observability', 'serving-traces.jsonl');
 }
 
-export function readTraces(): RetrievalTrace[] {
-  if (!existsSync(TRACES_PATH)) return [];
-  return readFileSync(TRACES_PATH, 'utf8')
+export const SERVING_TRACES_PATH = servingTracePath();
+
+export function appendTraceToPath(path: string, trace: RetrievalTrace): void {
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, `${JSON.stringify(trace)}\n`);
+}
+
+export function appendServingTrace(
+  trace: RetrievalTrace,
+  path = SERVING_TRACES_PATH,
+): void {
+  appendTraceToPath(path, trace);
+}
+
+export function readRetrievalTraces(
+  path = SERVING_TRACES_PATH,
+): RetrievalTrace[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf8')
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as RetrievalTrace);

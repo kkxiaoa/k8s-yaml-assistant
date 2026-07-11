@@ -3,7 +3,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Chunk } from './schema-corpus';
+import type { Chunk } from './chunk';
 
 interface PolicyRule {
   id: string;
@@ -31,6 +31,9 @@ export function buildPolicyCorpus(): Chunk[] {
     id: p.id,
     resource: p.appliesTo.resource,
     path: p.appliesTo.field ?? '',
+    resources: [p.appliesTo.resource],
+    paths: p.appliesTo.field ? [p.appliesTo.field] : [],
+    appliesTo: p.appliesTo,
     title: `平台规范 · ${p.appliesTo.resource} · ${p.appliesTo.field ?? '(资源级)'}`,
     text: policyText(p),
     sourceType: 'policy',
