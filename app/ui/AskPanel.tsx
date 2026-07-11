@@ -162,7 +162,10 @@ export function AskPanel({
           <div className="mt-4 border-t border-line pt-3">
             <div className={LABEL}>答案依据</div>
             <ul className="mt-2 space-y-2">
-              {cited.map((source, i) => (
+              {cited.map((source, i) => {
+                const resource = source.resource ?? source.resources?.[0] ?? '通用来源';
+                const path = source.path ?? source.paths?.[0];
+                return (
                 <li key={source.id} className="rounded border border-line bg-ink/50 px-3 py-2">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-1.5">
@@ -170,7 +173,7 @@ export function AskPanel({
                         S{source.n ?? i + 1}
                       </span>
                       <span className="min-w-0 break-all font-mono text-[11px] text-brand">
-                        {source.resource}{source.path ? ` · ${source.path}` : ''}
+                        {resource}{path ? ` · ${path}` : ''}
                       </span>
                     </span>
                     <span className="shrink-0 font-mono text-[10px] uppercase text-muted">
@@ -192,7 +195,8 @@ export function AskPanel({
                     </a>
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         )}

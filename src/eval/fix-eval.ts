@@ -4,12 +4,18 @@
 
 import { config } from 'dotenv';
 config({ override: true });
-import type { GenerateResult } from '../server/agent';
-import { getClient } from '../server/pipeline';
+import { ANSWER_MODEL, getClient } from '../server/pipeline';
 import { fixResource } from '../server/agent';
 import { validateYamlDocuments } from '../validation/validate';
-import { FIX_CASES, type DefectType } from './fix-cases';
-import { attemptStats, docsOf, valuePreserved } from './generation-metrics';
+import { FIX_CASES } from './cases/fix-cases';
+import { appendJsonl, tracePathForRun } from './artifacts';
+import {
+  buildFixCaseResult,
+  computeFixEvalMetrics,
+  fixMetricsRecord,
+  type FixCaseResult,
+} from './metrics/generation-metrics';
+import { writeRun, type EvalRun } from './run-store';
 
 async function main(): Promise<void> {
   if (!process.env.DEEPSEEK_API_KEY) {
@@ -18,14 +24,11 @@ async function main(): Promise<void> {
   }
   const client = getClient();
   const n = FIX_CASES.length;
+  const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-fix`;
+  const tracePath = tracePathForRun(runId, 'fix');
   console.error(`fix 评估(${n} 条坏 YAML,逐条调 DeepSeek,稍候…)\n`);
 
-  const results: GenerateResult[] = [];
-  let fixed = 0;
-  let kindKept = 0;
-  let intentKept = 0;
-  let preserveHitSum = 0;
-  const byType = new Map<DefectType, { total: number; fixed: number }>();
+  const results: FixCaseResult[] = [];
 
   for (const c of FIX_CASES) {
     const errs = validateYamlDocuments(c.brokenYaml).errors;
@@ -35,33 +38,22 @@ async function main(): Promise<void> {
     }
 
     const r = await fixResource(client, c.brokenYaml, errs);
-    results.push(r);
-    const valid =
-      r.yaml !== null && validateYamlDocuments(r.yaml).errors.length === 0;
-    const docs = valid ? docsOf(r.yaml!) : [];
-    const kinds = docs.map((d) => d.kind);
-    const kindOk = valid && kinds.includes(c.expectedKind);
-    const preserved = c.mustPreserve.filter((p) =>
-      valuePreserved(docs, p.path, p.value),
-    );
-    const allPreserved = valid && preserved.length === c.mustPreserve.length;
+    const result = buildFixCaseResult(c, r);
+    results.push(result);
+    appendJsonl(tracePath, result);
 
-    if (valid) fixed++;
-    if (kindOk) kindKept++;
-    if (allPreserved) intentKept++;
-    if (valid) preserveHitSum += preserved.length / c.mustPreserve.length;
-    const t = byType.get(c.defectType) ?? { total: 0, fixed: 0 };
-    t.total++;
-    if (valid) t.fixed++;
-    byType.set(c.defectType, t);
-
-    const mark = valid ? (kindOk && allPreserved ? '✓' : '△') : '✗';
+    const mark = result.validYaml
+      ? result.kindKept && result.intentPreserved
+        ? '✓'
+        : '△'
+      : '✗';
     console.error(
-      `${mark} ${c.id.padEnd(24)} [${c.defectType}] 提交${r.attempts.length} 轮${r.rounds} kind=${kindOk ? 'ok' : (kinds.join(',') || '无') + '≠' + c.expectedKind} 保留=${preserved.length}/${c.mustPreserve.length}${valid ? '' : '  未修成合法 YAML'}`,
+      `${mark} ${c.id.padEnd(24)} [${c.defectType}] 提交${result.submitCount} 轮${result.rounds} kind=${result.kindKept ? 'ok' : (result.finalKinds.join(',') || '无') + '≠' + c.expectedKind} 保留=${result.preserved.length}/${result.preserveTotal}${result.validYaml ? '' : '  未修成合法 YAML'}`,
     );
   }
 
-  const s = attemptStats(results);
+  const metrics = computeFixEvalMetrics(results);
+  const s = metrics.attemptStats;
   const p1 = (x: number) => `${(x * 100).toFixed(1)}%`;
   const pct = (x: number, d = n) => `${((x / d) * 100).toFixed(1)}%`;
 
@@ -78,19 +70,31 @@ async function main(): Promise<void> {
   );
 
   console.error('\n━━━━━━ 修复质量 汇总 ━━━━━━');
-  console.error(`修复成功率           : ${pct(fixed)}  (${fixed}/${n})`);
-  console.error(`kind 保持率(未改类型): ${fixed ? pct(kindKept, fixed) : '0%'}`);
-  console.error(`意图完整保留率       : ${fixed ? pct(intentKept, fixed) : '0%'}`);
+  console.error(`修复成功率           : ${pct(metrics.validYamlCount)}  (${metrics.validYamlCount}/${n})`);
+  console.error(`kind 保持率(未改类型): ${metrics.validYamlCount ? pct(metrics.kindKeptCount, metrics.validYamlCount) : '0%'}`);
+  console.error(`意图完整保留率       : ${metrics.validYamlCount ? pct(metrics.intentPreservedCount, metrics.validYamlCount) : '0%'}`);
   console.error(
-    `关键值保留覆盖(均值) : ${fixed ? pct(preserveHitSum, fixed) : '0%'}`,
+    `关键值保留覆盖(均值) : ${metrics.validYamlCount ? p1(metrics.preserveCoverageAvg) : '0%'}`,
   );
 
   console.error('\n━━━━━━ 按缺陷类型:修复成功率 ━━━━━━');
-  for (const [type, v] of [...byType.entries()].sort()) {
+  for (const [type, v] of Object.entries(metrics.byDefectType).sort()) {
     console.error(
       `${type.padEnd(18)} : ${((v.fixed / v.total) * 100).toFixed(0)}%  (${v.fixed}/${v.total})`,
     );
   }
+  const run: EvalRun = {
+    id: runId,
+    kind: 'fix',
+    createdAt: new Date().toISOString(),
+    artifactPaths: { tracePath },
+    scope: 'full',
+    caseIds: FIX_CASES.map((c) => c.id),
+    answerModel: ANSWER_MODEL,
+    metrics: fixMetricsRecord(metrics),
+  };
+  const runPath = writeRun(run);
+  console.error(`\n逐条 trace → ${tracePath}\n汇总 run → ${runPath}`);
   console.error(
     '\n说明:多轮行为基于 attempts;△=修成合法但改了 kind 或丢了关键字段。',
   );

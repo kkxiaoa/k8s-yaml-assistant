@@ -1,4 +1,5 @@
 import type { Chunk } from '../knowledge/corpus';
+import { chunkPaths, chunkResources } from '../knowledge/chunk';
 
 export function findExactFieldChunks(
   chunks: readonly Chunk[],
@@ -10,8 +11,8 @@ export function findExactFieldChunks(
   return chunks
     .filter(
       (chunk) =>
-        chunk.resource === resource &&
-        chunk.path === fieldPath,
+        chunkResources(chunk).includes(resource) &&
+        chunkPaths(chunk).includes(fieldPath),
     )
     .slice(0, k);
 }

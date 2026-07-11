@@ -5,12 +5,29 @@
 // eval 写 run,eval:compare 对 baseline 出 Δ,eval:promote 显式把某个 run 晋升为 baseline。
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { QueryExpansionTrace } from '../retrieval/query-expansion-runtime';
 
-/** eval 类型:检索指标与生成指标各自独立 baseline / compare,不混。 */
-export type EvalKind = 'retrieval' | 'faith';
+/** eval 类型:不同任务的指标和 baseline 不混用。 */
+export type EvalKind = 'retrieval' | 'faith' | 'judge' | 'generation' | 'fix';
+
+export type EvalScope =
+  | 'full'
+  | 'policy'
+  | 'smoke'
+  | 'targeted'
+  | 'calibration';
+
+export interface EvalArtifactPaths {
+  tracePath?: string;
+}
 
 export interface QueryExpansionRunConfig {
   enabled: boolean;
@@ -26,16 +43,19 @@ export interface FaithRunSelection {
 export interface EvalRun {
   /** 时间戳 id,同时是 runs/<id>.json 文件名 */
   id: string;
-  /** 检索类=retrieval,生成/faith 类=faith。旧 run 缺省视作 retrieval(见 runKind)。 */
+  /** 旧 run 缺 kind 时按 retrieval 读取。 */
   kind?: EvalKind;
   createdAt: string;
-  corpusHash: string;
-  indexHash: string;
-  /** eval-set 指纹(id+question+expectedChunkIds)。变了说明标注改过,Δ 含标注变更、非纯模型改进。 */
+  artifactPaths?: EvalArtifactPaths;
+  scope?: EvalScope;
+  caseIds?: string[];
+  corpusHash?: string;
+  indexHash?: string;
+  /** retrieval case 指纹(id+question+expectedChunkIds)。变了说明标注改过,Δ 含标注变更、非纯模型改进。 */
   evalSetHash?: string;
-  /** 全量 eval-set 版本指纹;faith 子集 run 用它区分 selection hash 与全量版本闸。 */
+  /** 全量 retrieval case 版本指纹;faith 子集 run 用它区分 selection hash 与全量版本闸。 */
   evalSetVersionHash?: string;
-  embeddingModel: string;
+  embeddingModel?: string;
   rerankModel?: string;
   /** 检索类 eval 无作答模型,留空;Stage 4 生成类才填 */
   answerModel?: string;
@@ -43,7 +63,7 @@ export interface EvalRun {
   faithSelection?: FaithRunSelection;
   /** 生成该 run 时共享检索入口使用的 query expansion 配置。 */
   queryExpansion?: QueryExpansionRunConfig;
-  k: number;
+  k?: number;
   /** 跨 Stage 并集:Stage 2 只有检索类(如 serving.recall@3)。compare 只 diff 共有 key。 */
   metrics: Record<string, number>;
 }
@@ -58,7 +78,7 @@ export function queryExpansionRunConfig(
   };
 }
 
-/** eval-set 指纹:按 id 排序拼接 id+question+expectedChunkIds,取 sha256。标注任一变化即变化。 */
+/** retrieval case 指纹:按 id 排序拼接 id+question+expectedChunkIds,取 sha256。标注任一变化即变化。 */
 export function computeEvalSetHash(
   cases: Array<{ id: string; question: string; expectedChunkIds: string[] }>,
 ): string {
@@ -83,11 +103,11 @@ export function runKind(run: EvalRun): EvalKind {
   return run.kind ?? 'retrieval';
 }
 
-/** 按 kind 取 baseline 文件:retrieval=baseline.json(兼容旧),faith=baseline.faith.json。 */
+/** 按 kind 取 baseline 文件:retrieval=baseline.json(兼容旧)。 */
 export function baselinePathFor(kind: EvalKind): string {
-  return kind === 'faith'
-    ? join(EVAL_DIR, 'baseline.faith.json')
-    : BASELINE_PATH;
+  return kind === 'retrieval'
+    ? BASELINE_PATH
+    : join(EVAL_DIR, `baseline.${kind}.json`);
 }
 
 export function writeRun(run: EvalRun): string {

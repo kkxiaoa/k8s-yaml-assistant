@@ -6,16 +6,27 @@ config({ override: true });
 import { performance } from 'node:perf_hooks';
 import Anthropic from '@anthropic-ai/sdk';
 import { searchCorpusTraced } from '../retrieval/retrieve';
-import { formatSources, CONFLICT_RULES, type Source } from '../retrieval/sources';
+import {
+  formatSources,
+  CONFLICT_RULES,
+  selectContextHits,
+  type Source,
+} from '../retrieval/sources';
 import { CORPUS } from '../knowledge/corpus';
-import type { SourceType, TrustLevel } from '../knowledge/schema-corpus';
+import {
+  chunkPaths,
+  chunkResources,
+  primaryPath,
+  primaryResource,
+  type SourceType,
+  type TrustLevel,
+} from '../knowledge/chunk';
 import { inferResource } from '../retrieval/router';
 import {
   validateYamlDocuments,
   type ValidationError,
 } from '../validation/validate';
 import {
-  appendTrace,
   toTraceHit,
   type RetrievalTrace,
 } from '../retrieval/trace';
@@ -49,8 +60,10 @@ export function getClient(): Anthropic {
 export interface Hit {
   id: string;
   title: string;
-  resource: string;
+  resource?: string;
   path?: string;
+  resources?: string[];
+  paths?: string[];
   text: string;
   sourceType: SourceType;
   sourceUri?: string;
@@ -68,6 +81,14 @@ export interface EditorContext {
 }
 
 export type AskMode = 'free' | 'explain_field' | 'explain_error';
+
+export type RetrievalTraceSink = (trace: RetrievalTrace) => void;
+
+export interface RetrieveContextOptions {
+  traceSink?: RetrievalTraceSink;
+  search?: typeof searchCorpusTraced;
+  queryExpansion?: boolean;
+}
 
 export interface RetrievalQuery {
   userQuestion: string;
@@ -117,8 +138,10 @@ function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
   return {
     id: chunk.id,
     title: chunk.title,
-    resource: chunk.resource,
-    path: chunk.path,
+    resource: primaryResource(chunk),
+    path: primaryPath(chunk),
+    resources: chunkResources(chunk),
+    paths: chunkPaths(chunk),
     text: chunk.text,
     sourceType: chunk.sourceType,
     sourceUri: chunk.sourceUri,
@@ -159,6 +182,7 @@ export async function retrieveContext(
   k = 3,
   editorContext?: EditorContext,
   mode: AskMode = 'free',
+  options: RetrieveContextOptions = {},
 ): Promise<{
   context: string;
   hits: Hit[];
@@ -178,12 +202,15 @@ export async function retrieveContext(
     createdAt: new Date().toISOString(),
   };
   const emit = (trace: RetrievalTrace): RetrievalTrace => {
-    appendTrace(trace);
+    options.traceSink?.(trace);
     return trace;
   };
 
   // 完整字段路径命中时短路;模糊叶子字段交给统一检索处理。
-  const exactHits = exactFieldHits(routed ?? undefined, query.fieldPathHint, k);
+  const exactHits = selectContextHits(
+    exactFieldHits(routed ?? undefined, query.fieldPathHint, k),
+    { k, taskType: 'ask' },
+  );
   if (exactHits.length > 0) {
     const trace = emit({
       ...baseTrace,
@@ -191,7 +218,7 @@ export async function retrieveContext(
       queryExpansion: skippedExactQueryExpansionTrace(
         text,
         routed ?? undefined,
-        resolveQueryExpansionEnabled(undefined),
+        resolveQueryExpansionEnabled(options.queryExpansion),
       ),
       path: 'exact',
       coarseHits: [],
@@ -205,23 +232,15 @@ export async function retrieveContext(
   }
 
   // 全量软加权检索(无硬过滤),与 eval 共用同一索引与同一段代码。serving 取 top-k。
-  const { hits: ranked, trace: searchTrace } = await searchCorpusTraced(text, {
+  const search = options.search ?? searchCorpusTraced;
+  const { hits: ranked, trace: searchTrace } = await search(text, {
     boostResource: routed ?? undefined,
     boostPath: query.fieldPathHint,
+    queryExpansion: options.queryExpansion,
   });
-  const hits = ranked.slice(0, k);
+  const hits = selectContextHits(ranked, { k, taskType: 'ask' });
   const { context, sources } = formatSources(hits.map((h) => h.chunk));
-  const finalHits = hits.map(({ chunk, score }) => ({
-    id: chunk.id,
-    title: chunk.title,
-    resource: chunk.resource,
-    path: chunk.path,
-    text: chunk.text,
-    sourceType: chunk.sourceType,
-    sourceUri: chunk.sourceUri,
-    trustLevel: chunk.trustLevel,
-    score,
-  }));
+  const finalHits = hits.map(({ chunk, score }) => toHit(chunk, score));
 
   const trace = emit({
     ...baseTrace,

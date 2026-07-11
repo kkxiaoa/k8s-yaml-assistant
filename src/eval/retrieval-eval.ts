@@ -10,10 +10,11 @@ import { config } from 'dotenv';
 config({ override: true });
 import { embed, EMBEDDING_MODEL } from '../retrieval/embeddings';
 import { CORPUS } from '../knowledge/corpus';
-import { EVAL_SET } from './eval-set';
+import { chunkResources } from '../knowledge/chunk';
+import { RETRIEVAL_CASES } from './cases/retrieval-cases';
 import { inferResource, RESOURCE_BOOST } from '../retrieval/router';
 import { getCorpusIndex, searchCorpusTraced } from '../retrieval/retrieve';
-import { appendTrace, toTraceHit } from '../retrieval/trace';
+import { appendTraceToPath, toTraceHit } from '../retrieval/trace';
 import { RERANK_MODEL } from '../retrieval/rerank';
 import { computeCorpusHash, computeIndexHash } from '../retrieval/index-store';
 import {
@@ -23,6 +24,7 @@ import {
   type EvalRun,
   type QueryExpansionRunConfig,
 } from './run-store';
+import { tracePathForRun } from './artifacts';
 import { retrievalMiss, upsertBadCases, type BadCase } from './bad-cases';
 
 type Mode = 'none' | 'oracle' | 'auto';
@@ -61,8 +63,8 @@ function evaluate(
   let mrrSum = 0;
   let n = 0; // 可答用例数(分母);拒答用例不进检索指标
 
-  for (let i = 0; i < EVAL_SET.length; i++) {
-    const ec = EVAL_SET[i]!;
+  for (let i = 0; i < RETRIEVAL_CASES.length; i++) {
+    const ec = RETRIEVAL_CASES[i]!;
     if (!ec.answerable) continue; // 拒答用例无 expectedChunkIds,不算 Recall/MRR
     n++;
     const qv = queryEmb[i]!;
@@ -77,11 +79,13 @@ function evaluate(
 
     const ranked = CORPUS.map((c, j) => ({
       id: c.id,
-      resource: c.resource,
+      resources: chunkResources(c),
       // ② 软加权:命中路由资源的 chunk 加分,但保留所有资源(误路由不会删掉正确答案)
       score:
         cosine(qv, corpusEmb[j]!) +
-        (filterRes && c.resource === filterRes ? RESOURCE_BOOST : 0),
+        (filterRes && chunkResources(c).includes(filterRes)
+          ? RESOURCE_BOOST
+          : 0),
     })).sort((a, b) => b.score - a.score);
 
     const topK = ranked.slice(0, k);
@@ -111,14 +115,19 @@ interface ServingResult extends Result {
   queryExpansion: QueryExpansionRunConfig;
 }
 
-async function evaluateServing(k: number): Promise<ServingResult> {
+async function evaluateServing(params: {
+  k: number;
+  runId: string;
+  tracePath: string;
+}): Promise<ServingResult> {
+  const { k, runId, tracePath } = params;
   let recallSum = 0;
   let mrrSum = 0;
   let n = 0; // 可答用例数(分母)
   const misses: BadCase[] = [];
   let queryExpansion: QueryExpansionRunConfig | undefined;
 
-  for (const ec of EVAL_SET) {
+  for (const ec of RETRIEVAL_CASES) {
     if (!ec.answerable) continue; // 拒答用例不进检索指标
     n++;
     const routed = inferResource(ec.question) ?? undefined;
@@ -139,7 +148,7 @@ async function evaluateServing(k: number): Promise<ServingResult> {
     recallSum += recall;
     mrrSum += rank > 0 ? 1 / rank : 0;
 
-    appendTrace({
+    appendTraceToPath(tracePath, {
       ...st,
       question: ec.question,
       mode: 'free',
@@ -154,6 +163,7 @@ async function evaluateServing(k: number): Promise<ServingResult> {
       misses.push(
         retrievalMiss({
           evalCaseId: ec.id,
+          runId,
           question: ec.question,
           resource: ec.resource!, // 已过 answerable 守卫,可答用例必有 resource
           expectedChunkIds: ec.expectedChunkIds,
@@ -179,22 +189,24 @@ async function evaluateServing(k: number): Promise<ServingResult> {
 
 async function main(): Promise<void> {
   const k = Number(process.argv[2]) || 3;
-  const answerable = EVAL_SET.filter((c) => c.answerable).length;
+  const runId = new Date().toISOString().replace(/[:.]/g, '-');
+  const tracePath = tracePathForRun(runId, 'retrieval');
+  const answerable = RETRIEVAL_CASES.filter((c) => c.answerable).length;
   console.error(
-    `评估(k=${k},语料 ${CORPUS.length} 段,标注 ${EVAL_SET.length} 条 / 可答 ${answerable} 条,检索指标仅算可答)\n`,
+    `评估(k=${k},语料 ${CORPUS.length} 段,标注 ${RETRIEVAL_CASES.length} 条 / 可答 ${answerable} 条,检索指标仅算可答)\n`,
   );
 
   const index = await getCorpusIndex();
   const corpusEmb = index.map((c) => c.embedding);
   const queryEmb = await embed(
-    EVAL_SET.map((c) => c.question),
+    RETRIEVAL_CASES.map((c) => c.question),
     'query',
   );
 
   const none = evaluate(queryEmb, corpusEmb, k, 'none');
   const oracle = evaluate(queryEmb, corpusEmb, k, 'oracle');
   const auto = evaluate(queryEmb, corpusEmb, k, 'auto');
-  const reranked = await evaluateServing(k);
+  const reranked = await evaluateServing({ k, runId, tracePath });
 
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
   console.error('━━━━━━ 汇总 对比 ━━━━━━');
@@ -226,12 +238,13 @@ async function main(): Promise<void> {
   };
   const corpusHash = computeCorpusHash(CORPUS);
   const run: EvalRun = {
-    id: new Date().toISOString().replace(/[:.]/g, '-'),
+    id: runId,
     kind: 'retrieval',
     createdAt: new Date().toISOString(),
+    artifactPaths: { tracePath },
     corpusHash,
     indexHash: computeIndexHash(corpusHash, EMBEDDING_MODEL),
-    evalSetHash: computeEvalSetHash(EVAL_SET),
+    evalSetHash: computeEvalSetHash(RETRIEVAL_CASES),
     embeddingModel: EMBEDDING_MODEL,
     rerankModel: RERANK_MODEL,
     queryExpansion: reranked.queryExpansion,

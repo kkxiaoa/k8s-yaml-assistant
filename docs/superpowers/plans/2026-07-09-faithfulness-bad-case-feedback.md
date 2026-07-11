@@ -78,10 +78,10 @@
 
 用当前 `data/eval/bad-cases.jsonl` 作为真实 fixture，断言：
 
-- 每条记录都有 `origin.evalCaseId`。
-- 每条记录 ID 都等于 `canonicalBadCaseId(origin.evalCaseId, layer, type)`。
+- 每条记录都有 `tracking.evalCaseId`。
+- 每条记录 ID 都等于 `canonicalBadCaseId(tracking.evalCaseId, layer, type)`。
 - 同 canonical ID 重复合并时保留人工 `status` / `failure.note`。
-- 合并后更新最新 `actual` 和 `origin` 观测信息。
+- 合并后更新最新 `actual` 和 `tracking` 观测信息。
 
 - [x] **Step 3: 运行测试确认失败**
 
@@ -98,7 +98,7 @@ Expected: FAIL，因为 canonical schema 和 repository 合并尚未实现。
 在 `src/eval/bad-cases.ts` 中新增：
 
 ```ts
-export interface BadCaseOrigin {
+export interface BadCaseTracking {
   evalCaseId: string;
   source: 'retrieval_eval' | 'faith_eval';
   firstSeenAt: string;
@@ -120,11 +120,11 @@ export interface BadCaseOrigin {
 扩展 `BadCase`：
 
 ```ts
-origin: BadCaseOrigin;
+tracking: BadCaseTracking;
 relatedBadCaseIds?: string[];
 ```
 
-`origin` 是必填字段；读到缺失或 ID 不匹配的 bad case 应直接失败。
+`tracking` 是必填字段；读到缺失或 ID 不匹配的 bad case 应直接失败。
 
 - [x] **Step 5: 实现 canonical ID 与合并函数**
 
@@ -143,7 +143,7 @@ export function mergeBadCases(cases: BadCase[]): BadCase[];
 合并规则：
 
 - 每条记录必须是 canonical bad case。
-- 缺少 `origin.evalCaseId` 或 ID 不匹配时整批失败。
+- 缺少 `tracking.evalCaseId` 或 ID 不匹配时整批失败。
 - canonical ID 冲突时合并，保留人工状态并更新最新观测。
 
 - [x] **Step 6: 修改 `retrievalMiss()` 和调用点**
@@ -276,8 +276,8 @@ export function buildFaithBadCaseCandidates(params: {
 - `actual.evaluation.outcome=trace.outcome`
 - `actual.evaluation.unsupportedClaims=trace.verdict?.unsupported ?? []`
 - `actual.evaluation.judgeReason=trace.verdict?.reason`
-- `origin.source='faith_eval'`
-- `origin.evalCaseId=trace.id`
+- `tracking.source='faith_eval'`
+- `tracking.evalCaseId=trace.id`
 
 severity 默认：
 

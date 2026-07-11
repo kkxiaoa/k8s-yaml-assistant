@@ -5,7 +5,7 @@ import { config } from 'dotenv';
 config({ override: true });
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EVAL_SET, type EvalCase } from '../src/eval/eval-set';
+import { RETRIEVAL_CASES, type RetrievalEvalCase } from '../src/eval/cases/retrieval-cases';
 import { inferResource } from '../src/retrieval/router';
 import { searchCorpusTraced } from '../src/retrieval/retrieve';
 import {
@@ -30,7 +30,7 @@ interface AliasTarget {
 }
 
 interface ABCase {
-  evalCase: EvalCase;
+  evalCase: RetrievalEvalCase;
   metric: boolean;
   targetIds: string[];
   targetChunkIds: string[];
@@ -71,7 +71,7 @@ function readTargets(): AliasTarget[] {
 }
 
 function loadABCases(): ABCase[] {
-  const evalById = new Map(EVAL_SET.map((ec) => [ec.id, ec]));
+  const evalById = new Map(RETRIEVAL_CASES.map((ec) => [ec.id, ec]));
   const byEvalId = new Map<string, ABCase>();
 
   for (const target of readTargets()) {
@@ -277,7 +277,7 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
 }
 
 async function evaluateAllCase(
-  evalCase: EvalCase,
+  evalCase: RetrievalEvalCase,
 ): Promise<AllABResult> {
   const autoResource = inferResource(evalCase.question) ?? undefined;
 
@@ -457,7 +457,7 @@ async function runTargeted(): Promise<void> {
 }
 
 async function runAll(): Promise<void> {
-  const cases = EVAL_SET.filter((ec) => ec.answerable);
+  const cases = RETRIEVAL_CASES.filter((ec) => ec.answerable);
   console.error(`A3 full eval A/B answerable cases: ${cases.length} 条`);
 
   const results: AllABResult[] = [];

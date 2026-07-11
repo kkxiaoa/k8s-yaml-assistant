@@ -6,7 +6,7 @@ import { config } from 'dotenv';
 config({ override: true });
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EVAL_SET } from '../src/eval/eval-set';
+import { RETRIEVAL_CASES } from '../src/eval/cases/retrieval-cases';
 import { embed } from '../src/retrieval/embeddings';
 import { readIndex } from '../src/retrieval/index-store';
 import { COARSE_N, rerank } from '../src/retrieval/rerank';
@@ -61,7 +61,7 @@ function loadABCases(): ABCase[] {
       expectedChunkIds: row.expected!.sourceIds!,
     }));
 
-  const conflictCases = EVAL_SET.filter(
+  const conflictCases = RETRIEVAL_CASES.filter(
     (c) => c.id === 'policy-conflict-latest' || c.id === 'policy-conflict-nodeport',
   ).map((c) => ({
     label: c.id,

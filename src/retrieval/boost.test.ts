@@ -37,6 +37,17 @@ const resourceLevelPolicyChunk: Chunk = {
   sourceType: 'policy',
 };
 
+const appliesToOnlyPolicyChunk: Chunk = {
+  id: 'policy.deployment.image.tag.no-latest',
+  title: '平台规范 · Deployment · spec.template.spec.containers.image',
+  text: '[平台规范] 禁止 latest tag。(组织策略/平台规范,非 K8s 官方强制)',
+  sourceType: 'policy',
+  appliesTo: {
+    resource: 'Deployment',
+    field: 'spec.template.spec.containers.image',
+  },
+};
+
 const schemaChunk: Chunk = {
   id: 'schema.deployment.spec.replicas',
   resource: 'Deployment',
@@ -55,6 +66,15 @@ check('policy + resource 匹配 → 加权(无需 path)', () => {
 check('policy + resource 匹配 + path 匹配 → 叠加增强', () => {
   // boostPath 约定已归一化(小写),故传小写。
   const boosted = policyBoost(policyChunk, 'Deployment', 'spec.replicas');
+  assert.ok(boosted > POLICY_RELATED_BOOST);
+});
+
+check('policy 可从 appliesTo 推导 resource/path 加权', () => {
+  const boosted = policyBoost(
+    appliesToOnlyPolicyChunk,
+    'Deployment',
+    'spec.template.spec.containers.image',
+  );
   assert.ok(boosted > POLICY_RELATED_BOOST);
 });
 

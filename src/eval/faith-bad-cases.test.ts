@@ -11,11 +11,11 @@ import {
 import {
   canonicalBadCaseId,
   type BadCase,
-  type BadCaseOrigin,
+  type BadCaseTracking,
 } from './bad-cases';
 import type { FaithOutcome, FaithTrace } from './faith-store';
 import { computeEvalSetHash, type EvalRun } from './run-store';
-import type { EvalCase } from './eval-set';
+import type { RetrievalEvalCase } from './cases/retrieval-cases';
 
 const RUN: EvalRun = {
   id: 'faith-run-1',
@@ -23,7 +23,7 @@ const RUN: EvalRun = {
   createdAt: '2026-07-10T00:00:00.000Z',
   corpusHash: 'corpus',
   indexHash: 'index',
-  evalSetHash: 'eval-set',
+  evalSetHash: 'retrieval-cases',
   embeddingModel: 'voyage-3',
   rerankModel: 'rerank-2.5',
   answerModel: 'claude-sonnet-4-6',
@@ -31,7 +31,7 @@ const RUN: EvalRun = {
   metrics: {},
 };
 
-const MINI_EVAL_SET: EvalCase[] = [
+const MINI_RETRIEVAL_CASES: RetrievalEvalCase[] = [
   {
     id: 'case-a',
     taskType: 'ask_free',
@@ -53,7 +53,7 @@ const MINI_EVAL_SET: EvalCase[] = [
 ];
 
 function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
-  const ec = MINI_EVAL_SET.find((c) => c.id === id)!;
+  const ec = MINI_RETRIEVAL_CASES.find((c) => c.id === id)!;
   return {
     id: ec.id,
     question: ec.question,
@@ -72,13 +72,17 @@ function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
 }
 
 function withInputFiles(
-  fn: (paths: { dir: string; runsDir: string; faithDir: string }) => void,
+  fn: (paths: {
+    dir: string;
+    runsDir: string;
+    tracesDir: string;
+  }) => void,
 ): void {
   const dir = mkdtempSync(join(tmpdir(), 'faith-bad-cases-'));
   try {
     const runsDir = join(dir, 'runs');
-    const faithDir = join(dir, 'faith');
-    fn({ dir, runsDir, faithDir });
+    const tracesDir = join(dir, 'traces');
+    fn({ dir, runsDir, tracesDir });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -86,17 +90,19 @@ function withInputFiles(
 
 function writeInput(params: {
   runsDir: string;
-  faithDir: string;
+  tracesDir: string;
   runId: string;
   traces: FaithTrace[];
   run?: Partial<EvalRun>;
 }): EvalRun {
   mkdirSync(params.runsDir, { recursive: true });
-  mkdirSync(params.faithDir, { recursive: true });
+  mkdirSync(params.tracesDir, { recursive: true });
+  const tracePath = join(params.tracesDir, `${params.runId}.faith.jsonl`);
   const run: EvalRun = {
     ...RUN,
     id: params.runId,
     kind: 'faith',
+    artifactPaths: { tracePath },
     evalSetHash: computeEvalSetHash(
       params.traces.map((t) => ({
         id: t.id,
@@ -104,7 +110,7 @@ function writeInput(params: {
         expectedChunkIds: t.retrieval.expectedChunkIds,
       })),
     ),
-    evalSetVersionHash: computeEvalSetHash(MINI_EVAL_SET),
+    evalSetVersionHash: computeEvalSetHash(MINI_RETRIEVAL_CASES),
     faithSelection: {
       scope: 'full',
       caseIds: params.traces.map((t) => t.id),
@@ -116,7 +122,7 @@ function writeInput(params: {
     `${JSON.stringify(run, null, 2)}\n`,
   );
   writeFileSync(
-    join(params.faithDir, `${params.runId}.jsonl`),
+    tracePath,
     params.traces.map((t) => JSON.stringify(t)).join('\n') + '\n',
   );
   return run;
@@ -158,11 +164,11 @@ function trace(
   };
 }
 
-function origin(
+function tracking(
   evalCaseId: string,
-  source: BadCaseOrigin['source'],
+  source: BadCaseTracking['source'],
   observedRunIds: string[] = [],
-): BadCaseOrigin {
+): BadCaseTracking {
   return {
     evalCaseId,
     source,
@@ -177,7 +183,7 @@ function badCase(params: {
   evalCaseId: string;
   layer: BadCase['failure']['layer'];
   type: BadCase['failure']['type'];
-  source: BadCaseOrigin['source'];
+  source: BadCaseTracking['source'];
   observedRunIds?: string[];
   status?: BadCase['status'];
 }): BadCase {
@@ -199,7 +205,7 @@ function badCase(params: {
     },
     severity: 'medium',
     status: params.status ?? 'triaged',
-    origin: origin(
+    tracking: tracking(
       params.evalCaseId,
       params.source,
       params.observedRunIds ?? [],
@@ -212,20 +218,19 @@ function onlyCandidate(candidates: FaithBadCaseCandidate[]) {
   return candidates[0]!;
 }
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir }) => {
   assert.throws(
     () =>
       readFaithBadCaseInput({
         runId: 'missing',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /run file not found/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir }) => {
   mkdirSync(runsDir, { recursive: true });
   writeFileSync(
     join(runsDir, 'run-1.json'),
@@ -236,17 +241,40 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
+      }),
+    /artifactPaths\.tracePath/,
+  );
+});
+
+withInputFiles(({ runsDir, tracesDir }) => {
+  mkdirSync(runsDir, { recursive: true });
+  writeFileSync(
+    join(runsDir, 'run-1.json'),
+    `${JSON.stringify({
+      ...RUN,
+      id: 'run-1',
+      kind: 'faith',
+      artifactPaths: {
+        tracePath: join(tracesDir, 'missing.faith.jsonl'),
+      },
+    })}\n`,
+  );
+  assert.throws(
+    () =>
+      readFaithBadCaseInput({
+        runId: 'run-1',
+        runsDir,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /faith trace file not found/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [inputTrace('case-a')],
     run: { id: 'other-run' },
@@ -256,17 +284,16 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /run id mismatch/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [inputTrace('case-a')],
     run: { kind: 'retrieval' },
@@ -276,17 +303,16 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /expected faith run/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [inputTrace('case-a'), inputTrace('case-a')],
   });
@@ -295,17 +321,16 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /duplicate trace id/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [{ ...inputTrace('case-a'), id: 'unknown' }],
   });
@@ -314,17 +339,16 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
-    /not found in EVAL_SET/,
+    /not found in RETRIEVAL_CASES/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [{ ...inputTrace('case-a'), question: '漂移的问题' }],
   });
@@ -333,17 +357,16 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /trace case drift/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [
       {
@@ -360,17 +383,16 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /trace case drift/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [inputTrace('case-a')],
     run: { evalSetHash: 'bad-selection-hash' },
@@ -380,17 +402,16 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /evalSetHash mismatch/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [inputTrace('case-a')],
     run: { evalSetVersionHash: 'bad-version-hash' },
@@ -400,17 +421,16 @@ withInputFiles(({ runsDir, faithDir }) => {
       readFaithBadCaseInput({
         runId: 'run-1',
         runsDir,
-        faithDir,
-        evalSet: MINI_EVAL_SET,
+        evalSet: MINI_RETRIEVAL_CASES,
       }),
     /evalSetVersionHash mismatch/,
   );
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'legacy-policy',
     traces: [inputTrace('case-a')],
     run: {
@@ -421,18 +441,17 @@ withInputFiles(({ runsDir, faithDir }) => {
   const input = readFaithBadCaseInput({
     runId: 'legacy-policy',
     runsDir,
-    faithDir,
-    evalSet: MINI_EVAL_SET,
+    evalSet: MINI_RETRIEVAL_CASES,
   });
 
   assert.equal(input.scope, 'policy');
   assert.deepEqual(input.warnings, ['legacy run missing evalSetVersionHash']);
 });
 
-withInputFiles(({ runsDir, faithDir }) => {
+withInputFiles(({ runsDir, tracesDir }) => {
   writeInput({
     runsDir,
-    faithDir,
+    tracesDir,
     runId: 'run-1',
     traces: [inputTrace('case-a')],
     run: {
@@ -445,8 +464,7 @@ withInputFiles(({ runsDir, faithDir }) => {
   const input = readFaithBadCaseInput({
     runId: 'run-1',
     runsDir,
-    faithDir,
-    evalSet: MINI_EVAL_SET,
+    evalSet: MINI_RETRIEVAL_CASES,
   });
 
   assert.equal(input.scope, 'smoke');
@@ -521,8 +539,8 @@ withInputFiles(({ runsDir, faithDir }) => {
   assert.equal(c.issue?.failure.layer, 'generation');
   assert.equal(c.issue?.failure.type, 'hallucination');
   assert.equal(c.issue?.severity, 'high');
-  assert.equal(c.issue?.origin.source, 'faith_eval');
-  assert.deepEqual(c.issue?.origin.observedRunIds, ['faith-run-1']);
+  assert.equal(c.issue?.tracking.source, 'faith_eval');
+  assert.deepEqual(c.issue?.tracking.observedRunIds, ['faith-run-1']);
   assert.equal(c.issue?.actual.evaluation?.runId, 'faith-run-1');
   assert.equal(c.issue?.actual.evaluation?.scope, 'policy');
   assert.equal(c.issue?.actual.evaluation?.outcome, 'hallucination');
@@ -649,11 +667,11 @@ withInputFiles(({ runsDir, faithDir }) => {
 
   assert.equal(c.action, 'recur');
   assert.equal(c.issue?.status, 'fixed');
-  assert.deepEqual(c.issue?.origin.observedRunIds, [
+  assert.deepEqual(c.issue?.tracking.observedRunIds, [
     'older-run',
     'faith-run-1',
   ]);
-  assert.equal(c.issue?.origin.occurrenceCount, 2);
+  assert.equal(c.issue?.tracking.occurrenceCount, 2);
 }
 
 {
@@ -730,11 +748,11 @@ withInputFiles(({ runsDir, faithDir }) => {
 
   assert.equal(merged.cases.length, 1);
   assert.equal(merged.cases[0]!.status, 'fixed');
-  assert.deepEqual(merged.cases[0]!.origin.observedRunIds, [
+  assert.deepEqual(merged.cases[0]!.tracking.observedRunIds, [
     'older-run',
     'faith-run-1',
   ]);
-  assert.equal(merged.cases[0]!.origin.occurrenceCount, 2);
+  assert.equal(merged.cases[0]!.tracking.occurrenceCount, 2);
   assert.equal(merged.summary.recur, 1);
 }
 
@@ -761,8 +779,8 @@ withInputFiles(({ runsDir, faithDir }) => {
   });
 
   assert.equal(merged.cases.length, 1);
-  assert.deepEqual(merged.cases[0]!.origin.observedRunIds, ['faith-run-1']);
-  assert.equal(merged.cases[0]!.origin.occurrenceCount, 1);
+  assert.deepEqual(merged.cases[0]!.tracking.observedRunIds, ['faith-run-1']);
+  assert.equal(merged.cases[0]!.tracking.occurrenceCount, 1);
   assert.equal(merged.summary.already_imported, 1);
 }
 

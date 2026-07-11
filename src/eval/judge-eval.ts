@@ -8,27 +8,22 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getClient } from '../server/pipeline';
 import { judge, JUDGE_MODEL } from './judge';
-
-type PolicyDimension =
-  | 'distinguished'
-  | 'conflictExplained'
-  | 'misstatedAsOfficial';
-
-interface CalCase {
-  id: string;
-  category: string;
-  question: string;
-  context: string;
-  answer: string;
-  human: {
-    faithful: boolean;
-    policy?: Partial<Record<PolicyDimension, boolean>>;
-    note: string;
-  };
-}
+import { tracePathForRun, appendJsonl } from './artifacts';
+import {
+  buildJudgeCalibrationTrace,
+  computeJudgeCalibrationHash,
+  computeJudgeCalibrationMetrics,
+  judgeMetricsRecord,
+  POLICY_DIMENSIONS,
+  type JudgeCalibrationCase,
+  type JudgeCalibrationTrace,
+  type JudgeVote,
+} from './metrics/judge-metrics';
+import { writeRun, type EvalRun } from './run-store';
 
 const CALIBRATION_PATH = join(process.cwd(), 'data', 'eval', 'judge-calibration.jsonl');
 const ACCEPTABLE = 0.8; // §7.2:达标才扩大 grounding eval
+const VOTES = 5; // 每条判 N 次取多数,降低 judge 边界噪声。
 
 async function main(): Promise<void> {
   if (!process.env.DEEPSEEK_API_KEY) {
@@ -39,147 +34,123 @@ async function main(): Promise<void> {
   const cases = readFileSync(CALIBRATION_PATH, 'utf8')
     .split('\n')
     .filter(Boolean)
-    .map((l) => JSON.parse(l) as CalCase);
+    .map((l) => JSON.parse(l) as JudgeCalibrationCase);
   console.error(
     `Judge 校准(${cases.length} 条:对固化 context+answer 跑线上裁判 vs 人工 label)\n`,
   );
 
-  const VOTES = 5; // 每条判 N 次取多数,压 LLM judge 边界噪声,得可复现判定
-  let agree = 0;
-  let judged = 0;
-  let judgeFailed = 0;
-  let unstableCount = 0; // judge N 次判定分裂(如 3:2)的条数
-  const disagreements: Array<CalCase & { judge: boolean; reason: string }> = [];
-  const policyStats: Record<
-    PolicyDimension,
-    { total: number; agree: number; missing: number; unstable: number }
-  > = {
-    distinguished: { total: 0, agree: 0, missing: 0, unstable: 0 },
-    conflictExplained: { total: 0, agree: 0, missing: 0, unstable: 0 },
-    misstatedAsOfficial: { total: 0, agree: 0, missing: 0, unstable: 0 },
-  };
-  const policyDisagreements: Array<{
-    id: string;
-    dimension: PolicyDimension;
-    human: boolean;
-    judge: boolean | null;
-    note: string;
-  }> = [];
+  const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-judge`;
+  const tracePath = tracePathForRun(id, 'judge');
+  const traces: JudgeCalibrationTrace[] = [];
 
   for (const c of cases) {
-    const votes: boolean[] = [];
-    const policyVotes: Record<PolicyDimension, boolean[]> = {
-      distinguished: [],
-      conflictExplained: [],
-      misstatedAsOfficial: [],
-    };
-    let lastReason = '';
+    const votes: JudgeVote[] = [];
     for (let i = 0; i < VOTES; i++) {
       const v = await judge(client, c.context, c.answer);
       if (v) {
-        votes.push(v.faithful);
-        for (const dim of Object.keys(policyVotes) as PolicyDimension[]) {
-          const value = v.policy?.[dim];
-          if (typeof value === 'boolean') policyVotes[dim].push(value);
-        }
-        if (!v.faithful) lastReason = v.reason;
+        votes.push({
+          faithful: v.faithful,
+          unsupported: v.unsupported,
+          reason: v.reason,
+          policy: v.policy,
+        });
       }
     }
-    if (votes.length === 0) {
-      judgeFailed++;
+    const trace = buildJudgeCalibrationTrace({
+      calibrationCase: c,
+      votes,
+    });
+    traces.push(trace);
+    appendJsonl(tracePath, trace);
+
+    if (trace.majority.faithful === null) {
       console.error(`⚠ 判定失败 ${c.id}`);
       continue;
     }
-    judged++;
-    const trueN = votes.filter(Boolean).length;
-    const judgeFaithful = trueN * 2 > votes.length; // 多数
-    const unstable = trueN > 0 && trueN < votes.length; // N 次判定分裂 = judge 自己不稳
-    if (unstable) unstableCount++;
-    const match = judgeFaithful === c.human.faithful;
-    if (match) agree++;
-    else disagreements.push({ ...c, judge: judgeFaithful, reason: lastReason });
-
     const policyMarks: string[] = [];
-    for (const dim of Object.keys(policyStats) as PolicyDimension[]) {
-      const expected = c.human.policy?.[dim];
-      if (typeof expected !== 'boolean') continue;
-
-      const stat = policyStats[dim];
-      stat.total++;
-      const dimVotes = policyVotes[dim];
-      if (dimVotes.length === 0) {
-        stat.missing++;
-        policyDisagreements.push({
-          id: c.id,
-          dimension: dim,
-          human: expected,
-          judge: null,
-          note: c.human.note,
-        });
-        policyMarks.push(`${dim}=missing`);
-        continue;
-      }
-
-      const trueDimN = dimVotes.filter(Boolean).length;
-      const judgeValue = trueDimN * 2 > dimVotes.length;
-      const dimUnstable = trueDimN > 0 && trueDimN < dimVotes.length;
-      if (dimUnstable) stat.unstable++;
-      if (judgeValue === expected) stat.agree++;
+    for (const dim of POLICY_DIMENSIONS) {
+      const result = trace.policy[dim];
+      if (!result) continue;
+      if (result.missing) policyMarks.push(`${dim}=missing`);
       else {
-        policyDisagreements.push({
-          id: c.id,
-          dimension: dim,
-          human: expected,
-          judge: judgeValue,
-          note: c.human.note,
-        });
+        policyMarks.push(
+          `${dim}=${result.agree ? '✓' : '✗'}(${result.trueVotes}/${result.totalVotes})${result.unstable ? '⚠' : ''}`,
+        );
       }
-      policyMarks.push(
-        `${dim}=${judgeValue === expected ? '✓' : '✗'}(${trueDimN}/${dimVotes.length})${dimUnstable ? '⚠' : ''}`,
-      );
     }
 
     console.error(
-      `${match ? '✓一致' : '✗分歧'} ${c.id.padEnd(28)} human=${c.human.faithful} judge=${judgeFaithful}(${trueN}/${votes.length})${unstable ? ' ⚠不稳' : ''}  [${c.category}]${policyMarks.length ? ` policy: ${policyMarks.join(' ')}` : ''}`,
+      `${trace.majority.agree ? '✓一致' : '✗分歧'} ${c.id.padEnd(28)} human=${c.human.faithful} judge=${trace.majority.faithful}(${trace.majority.trueVotes}/${trace.majority.totalVotes})${trace.majority.unstable ? ' ⚠不稳' : ''}  [${c.category}]${policyMarks.length ? ` policy: ${policyMarks.join(' ')}` : ''}`,
     );
   }
 
-  const rate = judged ? agree / judged : 0;
+  const metrics = computeJudgeCalibrationMetrics(traces);
   console.error('\n━━━━━━ 汇总 ━━━━━━');
-  console.error(`一致率 = ${(rate * 100).toFixed(1)}%  (${agree}/${judged})`);
-  console.error(`判定失败(不计入)= ${judgeFailed} 条  |  裁判=${JUDGE_MODEL}`);
   console.error(
-    `judge 内部不稳定(${VOTES} 次判定分裂)= ${unstableCount} 条  ← 这些是 judge 自身对该 case 就拿不准`,
+    `一致率 = ${(metrics.agreementRate * 100).toFixed(1)}%  (${metrics.agree}/${metrics.judged})`,
+  );
+  console.error(`判定失败(不计入)= ${metrics.judgeFailed} 条  |  裁判=${JUDGE_MODEL}`);
+  console.error(
+    `judge 内部不稳定(${VOTES} 次判定分裂)= ${metrics.unstableCount} 条  ← 这些是 judge 自身对该 case 就拿不准`,
   );
   console.error('\npolicy 维度一致率(只统计 human.policy 明确标注的维度):');
-  for (const dim of Object.keys(policyStats) as PolicyDimension[]) {
-    const s = policyStats[dim];
-    const judgedPolicy = s.total - s.missing;
-    const rate = judgedPolicy ? (s.agree / judgedPolicy) * 100 : null;
+  for (const dim of POLICY_DIMENSIONS) {
+    const s = metrics.policy[dim];
+    const rate =
+      s.agreementRate === null ? null : s.agreementRate * 100;
     console.error(
-      `- ${dim}: ${rate === null ? 'N/A' : `${rate.toFixed(1)}%`} (${s.agree}/${judgedPolicy}, missing=${s.missing}, unstable=${s.unstable})`,
+      `- ${dim}: ${rate === null ? 'N/A' : `${rate.toFixed(1)}%`} (${s.agree}/${s.judged}, missing=${s.missing}, unstable=${s.unstable})`,
     );
   }
 
+  const disagreements = traces.filter(
+    (trace) => trace.majority.agree === false,
+  );
   if (disagreements.length) {
     console.error('\n分歧复盘(§7.4):');
     for (const d of disagreements) {
-      console.error(`\n▸ ${d.id} [${d.category}]  human=${d.human.faithful} vs judge=${d.judge}`);
+      const judgeReason = [...d.votes]
+        .reverse()
+        .find((vote) => !vote.faithful)?.reason ?? '';
+      console.error(`\n▸ ${d.id} [${d.category}]  human=${d.human.faithful} vs judge=${d.majority.faithful}`);
       console.error(`  human 依据: ${d.human.note}`);
-      console.error(`  judge 理由: ${d.reason}`);
+      console.error(`  judge 理由: ${judgeReason}`);
     }
   }
+  const policyDisagreements = traces.flatMap((trace) =>
+    POLICY_DIMENSIONS.flatMap((dim) => {
+      const result = trace.policy[dim];
+      return result && !result.agree
+        ? [{ trace, dim, result }]
+        : [];
+    }),
+  );
   if (policyDisagreements.length) {
     console.error('\npolicy 维度分歧复盘:');
-    for (const d of policyDisagreements) {
+    for (const { trace, dim, result } of policyDisagreements) {
       console.error(
-        `\n▸ ${d.id} ${d.dimension} human=${d.human} vs judge=${d.judge ?? 'missing'}`,
+        `\n▸ ${trace.id} ${dim} human=${result.human} vs judge=${result.judge ?? 'missing'}`,
       );
-      console.error(`  human 依据: ${d.note}`);
+      console.error(`  human 依据: ${trace.human.note}`);
     }
   }
+
+  const run: EvalRun = {
+    id,
+    kind: 'judge',
+    createdAt: new Date().toISOString(),
+    artifactPaths: { tracePath },
+    scope: 'calibration',
+    caseIds: cases.map((c) => c.id),
+    evalSetHash: computeJudgeCalibrationHash(cases),
+    judgeModel: JUDGE_MODEL,
+    k: VOTES,
+    metrics: judgeMetricsRecord(metrics),
+  };
+  const runPath = writeRun(run);
+  console.error(`\n逐条 trace → ${tracePath}\n汇总 run → ${runPath}`);
   console.error(
-    rate >= ACCEPTABLE
+    metrics.agreementRate >= ACCEPTABLE
       ? `\n裁判一致率 ≥ ${ACCEPTABLE * 100}%,可接受,方可扩大 grounding eval(§7.2)。`
       : `\n一致率 < ${ACCEPTABLE * 100}%,先复盘/修裁判再用。`,
   );

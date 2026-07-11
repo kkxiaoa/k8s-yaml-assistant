@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CORPUS } from '../src/knowledge/corpus';
-import { EVAL_SET } from '../src/eval/eval-set';
+import { RETRIEVAL_CASES } from '../src/eval/cases/retrieval-cases';
 import {
   DEFAULT_ALIASES_PATH,
   parseSchemaFieldAliasesJsonl,
@@ -79,7 +79,7 @@ function main(): void {
   const targets = readTargets();
   const targetIds = new Set<string>();
   const targetByChunkId = new Map<string, AliasTarget>();
-  const evalIds = new Set(EVAL_SET.map((c) => c.id));
+  const evalIds = new Set(RETRIEVAL_CASES.map((c) => c.id));
 
   for (const target of targets) {
     if (targetIds.has(target.id)) fail(`target id 重复: ${target.id}`);

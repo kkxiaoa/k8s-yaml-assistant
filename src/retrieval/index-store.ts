@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Chunk } from '../knowledge/corpus';
+import type { Chunk } from '../knowledge/corpus';
 import type { IndexedChunk } from './retrieve';
 
 /** 索引目录:env INDEX_DIR 优先,默认 data/index。A/B 用隔离目录(如 data/index-ab)。 */
@@ -84,9 +84,15 @@ export function writeIndex(
         id: c.id,
         resource: c.resource,
         path: c.path,
+        resources: c.resources,
+        paths: c.paths,
+        appliesTo: c.appliesTo,
         title: c.title,
         text: c.text,
         sourceType: c.sourceType,
+        sourceUri: c.sourceUri,
+        version: c.version,
+        trustLevel: c.trustLevel,
       }),
     )
     .join('\n');
