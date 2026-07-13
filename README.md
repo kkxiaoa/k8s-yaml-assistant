@@ -169,6 +169,23 @@ npm run eval:fix
 
 当前 eval harness 正在进行 correctness 纠偏,旧 baseline 不作为继续调优的依据。
 
+评估数据与运行产物的边界:
+
+```text
+data/eval/
+  bad-cases.jsonl                 # 可提交的问题台账
+  judge-calibration-labels.jsonl  # 可提交的人工 calibration 标签
+  judge-calibration.jsonl         # 可提交的 calibration case snapshot
+  baselines/<kind>.json           # 人工晋升后提交的可移植 baseline snapshot
+  runs/<runId>.json               # 本地 EvalRun,不提交
+  traces/<runId>.<kind>.jsonl     # 本地逐 case TraceEnvelope,不提交
+
+data/observability/
+  serving-traces.jsonl            # serving 观测数据,不属于 eval run,不提交
+```
+
+`EvalRun.artifactPaths.trace` 保存相对 `data/eval/` 的 POSIX 路径,由运行时解析到当前工作区。`runs/`、`traces/` 和 `data/observability/` 由运行时按需创建,可以清理后重建;旧 artifact 格式不提供兼容读取。baseline 不复制 run 文件,也不保存 ignored trace 路径。
+
 说明:
 
 - `npm run build` 会使用 `next/font` 拉取 Google Fonts,离线或沙箱网络受限时可能失败。

@@ -10,6 +10,8 @@ import {
   type SchemaNode,
 } from '../knowledge/schemas';
 
+export const VALIDATION_LOGIC_REVISION = 'schema-validator-v1';
+
 export interface ValidationError {
   /** 出错字段路径,如 'spec.accessModes';给编辑器定位用 */
   path: string;

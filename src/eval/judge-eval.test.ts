@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import {
   buildJudgeCalibrationTrace,
-  computeJudgeCalibrationHash,
   computeJudgeCalibrationMetrics,
   judgeMetricsRecord,
   type JudgeCalibrationCase,
   type JudgeVote,
 } from './metrics/judge-metrics';
+import { metricObservation } from './protocol';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -151,50 +151,35 @@ check('computeJudgeCalibrationMetrics 汇总 faithful 与 policy 指标', () => 
   assert.equal(metrics.policy.distinguished.agreementRate, 1);
 
   assert.deepEqual(judgeMetricsRecord(metrics), {
-    'judge.agree': 2,
-    'judge.agreement_rate': 2 / 3,
-    'judge.failed': 1,
-    'judge.judged': 3,
-    'judge.policy.conflictExplained.agree': 0,
-    'judge.policy.conflictExplained.judged': 0,
-    'judge.policy.conflictExplained.missing': 0,
-    'judge.policy.conflictExplained.unstable': 0,
-    'judge.policy.distinguished.agree': 1,
-    'judge.policy.distinguished.agreement_rate': 1,
-    'judge.policy.distinguished.judged': 1,
-    'judge.policy.distinguished.missing': 0,
-    'judge.policy.distinguished.unstable': 1,
-    'judge.policy.misstatedAsOfficial.agree': 0,
-    'judge.policy.misstatedAsOfficial.judged': 0,
-    'judge.policy.misstatedAsOfficial.missing': 0,
-    'judge.policy.misstatedAsOfficial.unstable': 0,
-    'judge.unstable': 1,
+    'judge.agree': metricObservation(2),
+    'judge.agreement_rate': metricObservation(2 / 3, 2, 3),
+    'judge.failed': metricObservation(1),
+    'judge.judged': metricObservation(3),
+    'judge.policy.conflictExplained.agree': metricObservation(0),
+    'judge.policy.conflictExplained.agreement_rate': metricObservation(
+      null,
+      0,
+      0,
+    ),
+    'judge.policy.conflictExplained.judged': metricObservation(0),
+    'judge.policy.conflictExplained.missing': metricObservation(0),
+    'judge.policy.conflictExplained.unstable': metricObservation(0),
+    'judge.policy.distinguished.agree': metricObservation(1),
+    'judge.policy.distinguished.agreement_rate': metricObservation(1, 1, 1),
+    'judge.policy.distinguished.judged': metricObservation(1),
+    'judge.policy.distinguished.missing': metricObservation(0),
+    'judge.policy.distinguished.unstable': metricObservation(1),
+    'judge.policy.misstatedAsOfficial.agree': metricObservation(0),
+    'judge.policy.misstatedAsOfficial.agreement_rate': metricObservation(
+      null,
+      0,
+      0,
+    ),
+    'judge.policy.misstatedAsOfficial.judged': metricObservation(0),
+    'judge.policy.misstatedAsOfficial.missing': metricObservation(0),
+    'judge.policy.misstatedAsOfficial.unstable': metricObservation(0),
+    'judge.unstable': metricObservation(1),
   });
-});
-
-check('computeJudgeCalibrationHash 对顺序稳定且内容/label 变化会改变', () => {
-  const first = calibrationCase('a', true);
-  const second = calibrationCase('b', false, { distinguished: true });
-  const hashA = computeJudgeCalibrationHash([first, second]);
-  const hashB = computeJudgeCalibrationHash([second, first]);
-  const labelChanged = computeJudgeCalibrationHash([
-    first,
-    calibrationCase('b', true, { distinguished: true }),
-  ]);
-  const answerChanged = computeJudgeCalibrationHash([
-    first,
-    { ...second, answer: 'changed answer' },
-  ]);
-  const contextChanged = computeJudgeCalibrationHash([
-    first,
-    { ...second, context: 'changed context' },
-  ]);
-
-  assert.match(hashA, /^[a-f0-9]{64}$/);
-  assert.equal(hashA, hashB);
-  assert.notEqual(hashA, labelChanged);
-  assert.notEqual(hashA, answerChanged);
-  assert.notEqual(hashA, contextChanged);
 });
 
 console.log(`\n通过 ${passed} 项`);

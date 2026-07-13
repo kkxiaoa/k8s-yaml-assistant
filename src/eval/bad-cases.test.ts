@@ -1,14 +1,40 @@
 import assert from 'node:assert/strict';
 import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  appendTraceEnvelope,
+  evalArtifactPath,
+  runPath,
+  traceRelativePath,
+  writeJsonAtomic,
+} from './artifacts';
+import {
   assertCanonicalBadCase,
   canonicalBadCaseId,
+  decodeBadCase,
   mergeCanonicalObservations,
   normalizeCanonicalBadCases,
   readBadCases,
   retrievalMiss,
+  upsertBadCases,
+  verifyBadCaseLatestEvidence,
+  writeBadCases,
   type BadCase,
   type BadCaseTracking,
 } from './bad-cases';
+import {
+  EVAL_SCHEMA_VERSION,
+  metricObservation,
+  type EvalRun,
+} from './protocol';
+import { createTraceEnvelope } from './run-session';
 
 function tracking(
   evalCaseId: string,
@@ -35,6 +61,7 @@ function badCase(params: {
   type: BadCase['failure']['type'];
   status?: BadCase['status'];
   observedRunIds?: string[];
+  latestEvidence?: BadCase['latestEvidence'];
 }): BadCase {
   return {
     id: canonicalBadCaseId({
@@ -59,7 +86,55 @@ function badCase(params: {
       'retrieval_eval',
       params.observedRunIds,
     ),
+    ...(params.latestEvidence
+      ? { latestEvidence: params.latestEvidence }
+      : {}),
   };
+}
+
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
+
+function retrievalRun(id: string, evalCaseId: string): EvalRun {
+  return {
+    schemaVersion: EVAL_SCHEMA_VERSION,
+    id,
+    kind: 'retrieval',
+    status: 'completed',
+    scope: 'full',
+    createdAt: '2026-07-12T00:00:00.000Z',
+    completedAt: '2026-07-12T00:01:00.000Z',
+    dataset: {
+      id: 'retrieval/answerable',
+      hash: HASH_A,
+      caseIds: [evalCaseId],
+      caseCount: 1,
+    },
+    artifactPaths: { trace: traceRelativePath(id, 'retrieval') },
+    metricDefinitionVersion: 'legacy-v1',
+    config: {
+      corpusHash: HASH_A,
+      indexHash: HASH_B,
+      embeddingModel: 'embedding-model',
+      rerankModel: 'rerank-model',
+      queryExpansion: {
+        enabled: false,
+        registryHash: null,
+        reviewedAliasCount: 0,
+      },
+      k: 3,
+    },
+    metrics: { 'serving.recall@3': metricObservation(0, 0, 1) },
+  };
+}
+
+function withTempDir(fn: (directory: string) => void): void {
+  const directory = mkdtempSync(join(tmpdir(), 'bad-cases-'));
+  try {
+    fn(directory);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 {
@@ -88,6 +163,7 @@ function badCase(params: {
   const miss = retrievalMiss({
     evalCaseId: 'pod-volumes',
     runId: 'run-a',
+    traceId: 'trace-a',
     question: 'Pod 用哪个字段挂载卷来源?',
     resource: 'Pod',
     expectedChunkIds: ['Pod::spec.volumes'],
@@ -110,7 +186,11 @@ function badCase(params: {
   assert.equal(miss.tracking.lastSeenRunId, 'run-a');
   assert.deepEqual(miss.tracking.observedRunIds, ['run-a']);
   assert.equal(miss.tracking.occurrenceCount, 1);
-  assert.equal(miss.actual.traceId, 'run-a:pod-volumes');
+  assert.deepEqual(miss.latestEvidence, {
+    runId: 'run-a',
+    traceId: 'trace-a',
+  });
+  assert.equal('traceId' in miss.actual, false);
 }
 
 {
@@ -119,6 +199,7 @@ function badCase(params: {
       retrievalMiss({
         evalCaseId: '',
         runId: 'run-a',
+        traceId: 'trace-a',
         question: 'Pod 用哪个字段挂载卷来源?',
         resource: 'Pod',
         expectedChunkIds: ['Pod::spec.volumes'],
@@ -136,6 +217,7 @@ function badCase(params: {
       retrievalMiss({
         evalCaseId: 'pod-volumes',
         runId: '',
+        traceId: 'trace-a',
         question: 'Pod 用哪个字段挂载卷来源?',
         resource: 'Pod',
         expectedChunkIds: ['Pod::spec.volumes'],
@@ -151,6 +233,7 @@ function badCase(params: {
   const miss = retrievalMiss({
     evalCaseId: 'endpoints-subsets',
     runId: 'run-a',
+    traceId: 'trace-a',
     question: 'Endpoints 用哪个字段声明后端地址和端口?',
     resource: 'Endpoints',
     expectedChunkIds: [
@@ -174,6 +257,7 @@ function badCase(params: {
   const miss = retrievalMiss({
     evalCaseId: 'pvc-resources',
     runId: 'run-a',
+    traceId: 'trace-a',
     question: 'PVC 怎么申请存储大小?',
     resource: 'PersistentVolumeClaim',
     expectedChunkIds: ['PersistentVolumeClaim::spec.resources.requests'],
@@ -306,4 +390,193 @@ function badCase(params: {
   assert.equal(merged.tracking.lastSeenRunId, 'run-b');
   assert.deepEqual(merged.tracking.observedRunIds, ['run-b']);
   assert.equal(merged.tracking.occurrenceCount, 2);
+}
+
+{
+  const valid = badCase({
+    evalCaseId: 'case-e',
+    layer: 'retrieval',
+    type: 'retrieval_miss',
+    observedRunIds: ['run-a'],
+    latestEvidence: { runId: 'run-a', traceId: 'trace-a' },
+  });
+
+  assert.deepEqual(decodeBadCase(valid), valid);
+  assert.throws(
+    () =>
+      decodeBadCase({
+        ...valid,
+        actual: { ...valid.actual, traceId: 'run-a:case-e' },
+      }),
+    /traceId|unrecognized/i,
+  );
+  assert.throws(
+    () =>
+      decodeBadCase({
+        ...valid,
+        failure: { layer: 'rerank', type: 'retrieval_miss' },
+      }),
+    /failure.*combination|retrieval_miss/i,
+  );
+  assert.throws(
+    () =>
+      decodeBadCase({
+        ...valid,
+        latestEvidence: { runId: 'run-a' },
+      }),
+    /traceId/i,
+  );
+}
+
+{
+  withTempDir((directory) => {
+    const path = join(directory, 'bad-cases.jsonl');
+    const valid = badCase({
+      evalCaseId: 'case-f',
+      layer: 'retrieval',
+      type: 'retrieval_miss',
+      observedRunIds: ['missing-local-run'],
+      latestEvidence: {
+        runId: 'missing-local-run',
+        traceId: 'missing-local-trace',
+      },
+    });
+    writeFileSync(path, `${JSON.stringify(valid)}\n`);
+
+    assert.deepEqual(readBadCases({ path }), [valid]);
+    assert.equal(existsSync(join(directory, 'runs')), false);
+  });
+}
+
+{
+  withTempDir((directory) => {
+    const path = join(directory, 'bad-cases.jsonl');
+    const valid = badCase({
+      evalCaseId: 'case-g',
+      layer: 'retrieval',
+      type: 'retrieval_miss',
+    });
+    writeBadCases([valid], { path });
+    const before = readFileSync(path, 'utf8');
+
+    assert.throws(
+      () =>
+        writeBadCases(
+          [
+            valid,
+            {
+              ...valid,
+              id: 'not-canonical',
+              tracking: { ...valid.tracking, evalCaseId: 'case-h' },
+            },
+          ],
+          { path },
+        ),
+      /canonical|id mismatch/i,
+    );
+    assert.equal(readFileSync(path, 'utf8'), before);
+  });
+}
+
+{
+  withTempDir((evalRoot) => {
+    const run = retrievalRun('run-evidence', 'case-i');
+    writeJsonAtomic(runPath(run.id, evalRoot), run);
+    const envelope = createTraceEnvelope({
+      runId: run.id,
+      evalCaseId: 'case-i',
+      kind: 'retrieval',
+      outcome: 'failed',
+      payload: { ranking: { recall: 0 } },
+    });
+    appendTraceEnvelope(
+      evalArtifactPath(run.artifactPaths.trace, evalRoot),
+      envelope,
+    );
+    const issue = badCase({
+      evalCaseId: 'case-i',
+      layer: 'retrieval',
+      type: 'retrieval_miss',
+      observedRunIds: [run.id],
+      latestEvidence: { runId: run.id, traceId: envelope.traceId },
+    });
+
+    assert.doesNotThrow(() =>
+      verifyBadCaseLatestEvidence(issue, { evalRoot }),
+    );
+    assert.throws(
+      () =>
+        verifyBadCaseLatestEvidence(
+          {
+            ...issue,
+            latestEvidence: {
+              runId: run.id,
+              traceId: 'missing-trace-id',
+            },
+          },
+          { evalRoot },
+        ),
+      /missing-trace-id.*not found|trace.*missing-trace-id/i,
+    );
+
+    const wrongCaseEnvelope = createTraceEnvelope({
+      runId: run.id,
+      evalCaseId: 'other-case',
+      kind: 'retrieval',
+      outcome: 'failed',
+      payload: { ranking: { recall: 0 } },
+    });
+    appendTraceEnvelope(
+      evalArtifactPath(run.artifactPaths.trace, evalRoot),
+      wrongCaseEnvelope,
+    );
+    assert.throws(
+      () =>
+        verifyBadCaseLatestEvidence(
+          {
+            ...issue,
+            latestEvidence: {
+              runId: run.id,
+              traceId: wrongCaseEnvelope.traceId,
+            },
+          },
+          { evalRoot },
+        ),
+      /other-case.*case-i|evalCaseId.*other-case/i,
+    );
+  });
+}
+
+{
+  withTempDir((directory) => {
+    const evalRoot = join(directory, 'eval');
+    const path = join(directory, 'bad-cases.jsonl');
+    const run = retrievalRun('run-upsert', 'case-j');
+    writeJsonAtomic(runPath(run.id, evalRoot), run);
+    const envelope = createTraceEnvelope({
+      runId: run.id,
+      evalCaseId: 'case-j',
+      kind: 'retrieval',
+      outcome: 'failed',
+      payload: { ranking: { recall: 0 } },
+    });
+    appendTraceEnvelope(
+      evalArtifactPath(run.artifactPaths.trace, evalRoot),
+      envelope,
+    );
+    const issue = retrievalMiss({
+      evalCaseId: 'case-j',
+      runId: run.id,
+      traceId: envelope.traceId,
+      question: 'question',
+      resource: 'Pod',
+      expectedChunkIds: ['Chunk::expected'],
+      actualTopIds: ['Chunk::actual'],
+      rankedIds: ['Chunk::actual'],
+      k: 1,
+    });
+
+    assert.equal(upsertBadCases([issue], { path, evalRoot }), 1);
+    assert.deepEqual(readBadCases({ path }), [issue]);
+  });
 }

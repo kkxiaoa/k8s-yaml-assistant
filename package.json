@@ -27,7 +27,7 @@
     "corpus:stats": "tsx scripts/corpus-stats.ts",
     "corpus:closure": "tsx scripts/curated-closure.ts",
     "index:build": "tsx scripts/index-build.ts",
-    "test": "tsx src/validation/validate.test.ts && tsx src/server/agent.test.ts && tsx src/server/pipeline-retrieval.test.ts && tsx src/knowledge/chunk.test.ts && tsx src/knowledge/corpus.test.ts && tsx src/knowledge/policy-corpus.test.ts && tsx src/retrieval/source-policy.test.ts && tsx src/retrieval/boost.test.ts && tsx src/retrieval/sources.test.ts && tsx src/retrieval/router.test.ts && tsx src/retrieval/embeddings.test.ts && tsx src/retrieval/query-expansion.test.ts && tsx src/retrieval/query-expansion-runtime.test.ts && tsx src/retrieval/exact-field.test.ts && tsx src/eval/run-store.test.ts && tsx src/eval/artifacts.test.ts && tsx src/eval/bad-cases.test.ts && tsx src/eval/faith-bad-cases.test.ts && tsx src/eval/judge-eval.test.ts && tsx src/eval/metric-format.test.ts && tsx src/eval/metrics/generation-metrics.test.ts",
+    "test": "tsx src/validation/validate.test.ts && tsx src/server/agent.test.ts && tsx src/server/pipeline-retrieval.test.ts && tsx src/knowledge/chunk.test.ts && tsx src/knowledge/corpus.test.ts && tsx src/knowledge/policy-corpus.test.ts && tsx src/retrieval/source-policy.test.ts && tsx src/retrieval/boost.test.ts && tsx src/retrieval/sources.test.ts && tsx src/retrieval/router.test.ts && tsx src/retrieval/embeddings.test.ts && tsx src/retrieval/query-expansion.test.ts && tsx src/retrieval/query-expansion-runtime.test.ts && tsx src/retrieval/exact-field.test.ts && tsx src/eval/protocol.test.ts && tsx src/eval/artifacts.test.ts && tsx src/eval/run-session.test.ts && tsx src/eval/runner-protocol.test.ts && tsx src/eval/run-store.test.ts && tsx src/eval/bad-cases.test.ts && tsx src/eval/faith-bad-cases.test.ts && tsx src/eval/calibration-snapshot.test.ts && tsx src/eval/judge-eval.test.ts && tsx src/eval/metric-format.test.ts && tsx src/eval/metrics/generation-metrics.test.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
@@ -41,7 +41,8 @@
     "react": "latest",
     "react-dom": "latest",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.1",

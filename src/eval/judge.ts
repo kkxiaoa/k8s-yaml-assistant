@@ -3,6 +3,8 @@ import { textOf } from './llm';
 
 /** 裁判模型:DeepSeek 映射 deepseek-v4-pro,更强 + 与被测异构,降低"自评偏袒"。 */
 export const JUDGE_MODEL = 'claude-opus-4-8';
+export const JUDGE_PARSE_ATTEMPTS = 2;
+export const JUDGE_PARSER_SCHEMA_IDENTITY = 'judge-verdict-parser-v1';
 
 export const JUDGE_SYSTEM = `你是严格的事实核查裁判。判断【回答】有没有编造【文档】里没有的具体事实。
 判定规则:
@@ -61,7 +63,7 @@ export async function judge(
   answer: string,
 ): Promise<Verdict | null> {
   const user = `【文档】\n${context}\n\n【回答】\n${answer}`;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < JUDGE_PARSE_ATTEMPTS; attempt++) {
     const raw = await textOf(client, JUDGE_MODEL, JUDGE_SYSTEM, user);
     const v = parseJson(raw);
     if (v) return v;

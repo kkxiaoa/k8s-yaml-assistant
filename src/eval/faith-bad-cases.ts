@@ -1,19 +1,35 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import {
   canonicalBadCaseId,
+  decodeBadCase,
   normalizeCanonicalBadCases,
   type BadCase,
+  type BadCaseEvidenceReference,
   type BadCaseTracking,
 } from './bad-cases';
 import { RETRIEVAL_CASES, type RetrievalEvalCase } from './cases/retrieval-cases';
-import { type FaithOutcome, type FaithTrace } from './faith-store';
 import {
-  computeEvalSetHash,
-  RUNS_DIR,
-  runKind,
+  decodeFaithTrace,
+  type FaithOutcome,
+  type FaithTrace,
+} from './faith-store';
+import {
+  evalArtifactPath,
+  readTraceEnvelopes,
+  runPath,
+} from './artifacts';
+import { faithDatasetIdentity } from './runner-protocol';
+import { readRun } from './run-store';
+import {
   type EvalRun,
-} from './run-store';
+} from './protocol';
+
+type FaithEvalRun = Extract<EvalRun, { kind: 'faith' }>;
+
+export interface FaithTraceObservation {
+  trace: FaithTrace;
+  latestEvidence: BadCaseEvidenceReference;
+}
 
 export type FaithBadCaseAction =
   | 'create'
@@ -54,17 +70,6 @@ interface FaithFailure {
   severity: BadCase['severity'];
 }
 
-function readJson<T>(path: string): T {
-  return JSON.parse(readFileSync(path, 'utf8')) as T;
-}
-
-function readJsonl<T>(path: string): T[] {
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as T);
-}
-
 function equalSorted(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const left = [...a].sort();
@@ -72,63 +77,77 @@ function equalSorted(a: string[], b: string[]): boolean {
   return left.every((value, index) => value === right[index]);
 }
 
-function inferScope(run: EvalRun): FaithScope {
-  if (run.faithSelection?.scope) return run.faithSelection.scope;
-  if (run.id.endsWith('-policy')) return 'policy';
-  if (run.id.endsWith('-smoke')) return 'smoke';
-  return 'full';
+function faithScope(run: FaithEvalRun): FaithScope {
+  if (run.scope === 'full' || run.scope === 'policy' || run.scope === 'smoke') {
+    return run.scope;
+  }
+  throw new Error(`unsupported faith scope: ${run.scope}`);
 }
 
 export function readFaithBadCaseInput(params: {
   runId: string;
-  runsDir?: string;
+  evalRoot?: string;
   evalSet?: RetrievalEvalCase[];
 }): {
-  run: EvalRun;
-  traces: FaithTrace[];
+  run: FaithEvalRun;
+  observations: FaithTraceObservation[];
   scope: FaithScope;
   warnings: string[];
 } {
   const {
     runId,
-    runsDir = RUNS_DIR,
+    evalRoot,
     evalSet = RETRIEVAL_CASES,
   } = params;
-  const runPath = join(runsDir, `${runId}.json`);
+  const runFilePath = runPath(runId, evalRoot);
 
-  if (!existsSync(runPath)) {
-    throw new Error(`run file not found: ${runPath}`);
+  if (!existsSync(runFilePath)) {
+    throw new Error(`run file not found: ${runFilePath}`);
   }
 
-  const run = readJson<EvalRun>(runPath);
-  const tracePath = run.artifactPaths?.tracePath;
-  if (!tracePath) {
-    throw new Error(`faith run ${runId} missing artifactPaths.tracePath`);
+  const decodedRun = readRun(runId, { evalRoot });
+  if (decodedRun.kind !== 'faith') {
+    throw new Error(`expected faith run, got ${decodedRun.kind}`);
   }
+  const run = decodedRun;
+  if (run.status !== 'completed') {
+    throw new Error(`faith run ${run.id} is ${run.status}, expected completed`);
+  }
+  const tracePath = evalArtifactPath(run.artifactPaths.trace, evalRoot);
   if (!existsSync(tracePath)) {
     throw new Error(`faith trace file not found: ${tracePath}`);
   }
+  const envelopes = readTraceEnvelopes(tracePath);
+  const observations: FaithTraceObservation[] = [];
 
-  const traces = readJsonl<FaithTrace>(tracePath);
-
-  if (run.id !== runId) {
-    throw new Error(`run id mismatch: expected ${runId}, got ${run.id}`);
-  }
-  if (runKind(run) !== 'faith') {
-    throw new Error(`expected faith run, got ${runKind(run)}`);
-  }
-
-  const seenTraceIds = new Set<string>();
-  for (const trace of traces) {
-    if (seenTraceIds.has(trace.id)) {
-      throw new Error(`duplicate trace id: ${trace.id}`);
+  const seenCaseIds = new Set<string>();
+  for (const envelope of envelopes) {
+    if (envelope.runId !== run.id || envelope.kind !== 'faith') {
+      throw new Error(`faith trace envelope mismatch: ${envelope.traceId}`);
     }
-    seenTraceIds.add(trace.id);
+    if (seenCaseIds.has(envelope.evalCaseId)) {
+      throw new Error(`duplicate trace case id: ${envelope.evalCaseId}`);
+    }
+    const trace = decodeFaithTrace(envelope.payload);
+    if (trace.id !== envelope.evalCaseId) {
+      throw new Error(
+        `faith payload id mismatch: envelope=${envelope.evalCaseId} payload=${trace.id}`,
+      );
+    }
+    seenCaseIds.add(envelope.evalCaseId);
+    observations.push({
+      trace,
+      latestEvidence: { runId: run.id, traceId: envelope.traceId },
+    });
+  }
+
+  if (!equalSorted([...seenCaseIds], run.dataset.caseIds)) {
+    throw new Error('faith trace cases do not match run dataset');
   }
 
   const evalById = new Map(evalSet.map((ec) => [ec.id, ec]));
   const alignedCases: RetrievalEvalCase[] = [];
-  for (const trace of traces) {
+  for (const { trace } of observations) {
     const evalCase = evalById.get(trace.id);
     if (!evalCase) {
       throw new Error(`trace case ${trace.id} not found in RETRIEVAL_CASES`);
@@ -142,30 +161,18 @@ export function readFaithBadCaseInput(params: {
     alignedCases.push(evalCase);
   }
 
-  const selectionHash = computeEvalSetHash(alignedCases);
-  if (run.evalSetHash !== selectionHash) {
+  const selectionHash = faithDatasetIdentity(alignedCases).hash;
+  if (run.dataset.hash !== selectionHash) {
     throw new Error(
-      `evalSetHash mismatch: run=${run.evalSetHash ?? '<missing>'} trace=${selectionHash}`,
+      `dataset hash mismatch: run=${run.dataset.hash} trace=${selectionHash}`,
     );
-  }
-
-  const warnings: string[] = [];
-  const fullHash = computeEvalSetHash(evalSet);
-  if (run.evalSetVersionHash) {
-    if (run.evalSetVersionHash !== fullHash) {
-      throw new Error(
-        `evalSetVersionHash mismatch: run=${run.evalSetVersionHash} current=${fullHash}`,
-      );
-    }
-  } else {
-    warnings.push('legacy run missing evalSetVersionHash');
   }
 
   return {
     run,
-    traces,
-    scope: inferScope(run),
-    warnings,
+    observations,
+    scope: faithScope(run),
+    warnings: [],
   };
 }
 
@@ -224,22 +231,22 @@ function nextObservedRunIds(tracking: BadCaseTracking, runId: string): string[] 
     : [...tracking.observedRunIds, runId];
 }
 
-function modelsFromRun(run: EvalRun): BadCaseTracking['models'] {
-  const withJudge = run as EvalRun & { judgeModel?: string };
+function modelsFromRun(run: FaithEvalRun): BadCaseTracking['models'] {
   return {
-    embedding: run.embeddingModel,
-    rerank: run.rerankModel,
-    answer: run.answerModel,
-    judge: withJudge.judgeModel,
+    embedding: run.config.embeddingModel,
+    rerank: run.config.rerankModel,
+    answer: run.config.answerModel,
+    judge: run.config.judgeModel,
   };
 }
 
 function issueFromTrace(params: {
   trace: FaithTrace;
-  run: EvalRun;
+  run: FaithEvalRun;
   scope: FaithScope;
   now: string;
   failure: FaithFailure;
+  latestEvidence: BadCaseEvidenceReference;
   existing?: BadCase;
   relatedBadCaseIds?: string[];
 }): BadCase {
@@ -249,6 +256,7 @@ function issueFromTrace(params: {
     scope,
     now,
     failure,
+    latestEvidence,
     existing,
     relatedBadCaseIds = [],
   } = params;
@@ -266,7 +274,7 @@ function issueFromTrace(params: {
     } satisfies BadCaseTracking);
   const observedRunIds = nextObservedRunIds(baseTracking, run.id);
 
-  return {
+  return decodeBadCase({
     id: issueId,
     createdAt: existing?.createdAt ?? now,
     taskType: existing?.taskType ?? 'ask_free',
@@ -278,7 +286,6 @@ function issueFromTrace(params: {
       ...existing?.actual,
       answer: trace.answer,
       sourceIds: trace.retrieval.topIds,
-      traceId: `${run.id}:${trace.id}`,
       evaluation: {
         runId: run.id,
         scope,
@@ -307,6 +314,7 @@ function issueFromTrace(params: {
       scope,
       models: modelsFromRun(run),
     },
+    latestEvidence,
     relatedBadCaseIds:
       relatedBadCaseIds.length > 0
         ? Array.from(
@@ -316,16 +324,17 @@ function issueFromTrace(params: {
             ]),
           )
         : existing?.relatedBadCaseIds,
-  };
+  });
 }
 
 function issueCandidate(params: {
   trace: FaithTrace;
   existingBadCases: BadCase[];
-  run: EvalRun;
+  run: FaithEvalRun;
   scope: FaithScope;
   now: string;
   failure: FaithFailure;
+  latestEvidence: BadCaseEvidenceReference;
   relatedBadCaseIds?: string[];
 }): FaithBadCaseCandidate {
   const {
@@ -335,6 +344,7 @@ function issueCandidate(params: {
     scope,
     now,
     failure,
+    latestEvidence,
     relatedBadCaseIds,
   } = params;
   const issueId = issueIdFor(trace.id, failure);
@@ -360,6 +370,7 @@ function issueCandidate(params: {
       scope,
       now,
       failure,
+      latestEvidence,
       existing,
       relatedBadCaseIds,
     }),
@@ -380,14 +391,14 @@ function warningCandidate(
 }
 
 export function buildFaithBadCaseCandidates(params: {
-  traces: FaithTrace[];
+  observations: FaithTraceObservation[];
   existingBadCases: BadCase[];
-  run: EvalRun;
+  run: FaithEvalRun;
   scope: FaithScope;
   now?: string;
 }): FaithBadCaseCandidate[] {
   const {
-    traces,
+    observations,
     existingBadCases,
     run,
     scope,
@@ -395,7 +406,12 @@ export function buildFaithBadCaseCandidates(params: {
   } = params;
   const candidates: FaithBadCaseCandidate[] = [];
 
-  for (const trace of traces) {
+  for (const { trace, latestEvidence } of observations) {
+    if (latestEvidence.runId !== run.id) {
+      throw new Error(
+        `faith evidence run ${latestEvidence.runId} does not match ${run.id}`,
+      );
+    }
     if (trace.outcome === 'error') {
       candidates.push({
         action: 'error',
@@ -455,6 +471,7 @@ export function buildFaithBadCaseCandidates(params: {
         scope,
         now,
         failure,
+        latestEvidence,
         relatedBadCaseIds: related.map((issue) => issue.id),
       }),
     );

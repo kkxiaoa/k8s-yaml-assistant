@@ -1,4 +1,7 @@
-import { createHash } from 'node:crypto';
+import {
+  metricObservation,
+  type MetricObservation,
+} from '../protocol';
 
 export type PolicyDimension =
   | 'distinguished'
@@ -201,44 +204,31 @@ export function computeJudgeCalibrationMetrics(
   };
 }
 
-export function computeJudgeCalibrationHash(
-  cases: JudgeCalibrationCase[],
-): string {
-  const h = createHash('sha256');
-  for (const item of [...cases].sort((a, b) => a.id.localeCompare(b.id))) {
-    h.update(item.id);
-    h.update('\n');
-    h.update(item.question);
-    h.update('\n');
-    h.update(item.context);
-    h.update('\n');
-    h.update(item.answer);
-    h.update('\n');
-    h.update(JSON.stringify(item.human));
-    h.update('\n');
-  }
-  return h.digest('hex');
-}
-
 export function judgeMetricsRecord(
   metrics: JudgeCalibrationMetrics,
-): Record<string, number> {
-  const record: Record<string, number> = {
-    'judge.agreement_rate': metrics.agreementRate,
-    'judge.agree': metrics.agree,
-    'judge.judged': metrics.judged,
-    'judge.failed': metrics.judgeFailed,
-    'judge.unstable': metrics.unstableCount,
+): Record<string, MetricObservation> {
+  const record: Record<string, MetricObservation> = {
+    'judge.agreement_rate': metricObservation(
+      metrics.judged ? metrics.agreementRate : null,
+      metrics.agree,
+      metrics.judged,
+    ),
+    'judge.agree': metricObservation(metrics.agree),
+    'judge.judged': metricObservation(metrics.judged),
+    'judge.failed': metricObservation(metrics.judgeFailed),
+    'judge.unstable': metricObservation(metrics.unstableCount),
   };
   for (const dim of POLICY_DIMENSIONS) {
     const stat = metrics.policy[dim];
-    if (stat.agreementRate !== null) {
-      record[`judge.policy.${dim}.agreement_rate`] = stat.agreementRate;
-    }
-    record[`judge.policy.${dim}.agree`] = stat.agree;
-    record[`judge.policy.${dim}.judged`] = stat.judged;
-    record[`judge.policy.${dim}.missing`] = stat.missing;
-    record[`judge.policy.${dim}.unstable`] = stat.unstable;
+    record[`judge.policy.${dim}.agreement_rate`] = metricObservation(
+      stat.agreementRate,
+      stat.agree,
+      stat.judged,
+    );
+    record[`judge.policy.${dim}.agree`] = metricObservation(stat.agree);
+    record[`judge.policy.${dim}.judged`] = metricObservation(stat.judged);
+    record[`judge.policy.${dim}.missing`] = metricObservation(stat.missing);
+    record[`judge.policy.${dim}.unstable`] = metricObservation(stat.unstable);
   }
   return record;
 }

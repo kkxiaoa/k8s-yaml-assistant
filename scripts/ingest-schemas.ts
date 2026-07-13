@@ -231,7 +231,7 @@ function fromOpenApiDoc(openapi: OpenApiDoc, source: 'builtin' | 'cluster'): Ing
 function main(): void {
   const source = requireArg('source');
   const outDir = arg('out') ?? join('data', 'schemas', 'generated');
-  const input = arg('input') ?? process.argv[process.argv.length - 1];
+  const input = arg('input') ?? process.argv[process.argv.length - 1]!;
   let bundle: IngestBundle;
 
   if (source === 'dir') {

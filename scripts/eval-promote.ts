@@ -1,30 +1,24 @@
-// §4.2:把某次 eval run 显式晋升为新 baseline。必须显式动作,eval 不会自动覆盖 baseline
-// (避免把退化当成新基线)。纯本地,不花额度。
-// 用法:npm run eval:promote -- data/eval/runs/<id>.json
+// baseline 晋升入口。legacy-v1 以及结构不完整的 run 不允许晋升。
+// 用法:npm run eval:promote -- <runId>
 
-import {
-  baselinePathFor,
-  promote,
-  readRun,
-  runKind,
-} from '../src/eval/run-store';
-import { formatMetricValue } from '../src/eval/metric-format';
+import { baselinePath } from '../src/eval/artifacts';
+import { promoteRun } from '../src/eval/run-store';
 
 function main(): void {
-  const runArg = process.argv[2];
-  if (!runArg) {
-    console.error('用法:npm run eval:promote -- data/eval/runs/<id>.json');
+  const runId = process.argv[2];
+  if (!runId) {
+    console.error('用法:npm run eval:promote -- <runId>');
     process.exit(1);
   }
-  const run = readRun(runArg);
-  promote(run);
-  console.log(`已晋升为 baseline → ${baselinePathFor(runKind(run))}`);
-  console.log(`  run id     : ${run.id}`);
-  if (run.indexHash) {
-    console.log(`  indexHash  : ${run.indexHash.slice(0, 16)}…`);
-  }
-  for (const [key, val] of Object.entries(run.metrics).sort())
-    console.log(`  ${key.padEnd(42)} ${formatMetricValue(key, val)}`);
+
+  const baseline = promoteRun(runId);
+  console.log(`已晋升 baseline → ${baselinePath(baseline.kind)}`);
+  console.log(`source run: ${baseline.sourceRunId}`);
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}

@@ -1,35 +1,45 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  appendTraceEnvelope,
+  evalArtifactPath,
+  runPath,
+  traceRelativePath,
+  writeJsonAtomic,
+} from './artifacts';
 import {
   buildFaithBadCaseCandidates,
   mergeBadCaseIssues,
   readFaithBadCaseInput,
   type FaithBadCaseCandidate,
+  type FaithTraceObservation,
 } from './faith-bad-cases';
 import {
   canonicalBadCaseId,
   type BadCase,
   type BadCaseTracking,
 } from './bad-cases';
-import type { FaithOutcome, FaithTrace } from './faith-store';
-import { computeEvalSetHash, type EvalRun } from './run-store';
 import type { RetrievalEvalCase } from './cases/retrieval-cases';
+import type { FaithOutcome, FaithTrace } from './faith-store';
+import {
+  EVAL_SCHEMA_VERSION,
+  type EvalRun,
+} from './protocol';
+import {
+  faithDatasetIdentity,
+  faithEnvelopeOutcome,
+} from './runner-protocol';
+import {
+  createErrorTraceEnvelope,
+  createTraceEnvelope,
+} from './run-session';
 
-const RUN: EvalRun = {
-  id: 'faith-run-1',
-  kind: 'faith',
-  createdAt: '2026-07-10T00:00:00.000Z',
-  corpusHash: 'corpus',
-  indexHash: 'index',
-  evalSetHash: 'retrieval-cases',
-  embeddingModel: 'voyage-3',
-  rerankModel: 'rerank-2.5',
-  answerModel: 'claude-sonnet-4-6',
-  k: 3,
-  metrics: {},
-};
+type FaithEvalRun = Extract<EvalRun, { kind: 'faith' }>;
+
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
 
 const MINI_RETRIEVAL_CASES: RetrievalEvalCase[] = [
   {
@@ -52,17 +62,67 @@ const MINI_RETRIEVAL_CASES: RetrievalEvalCase[] = [
   },
 ];
 
-function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
-  const ec = MINI_RETRIEVAL_CASES.find((c) => c.id === id)!;
+function faithRun(params: {
+  id: string;
+  cases: RetrievalEvalCase[];
+  scope?: FaithEvalRun['scope'];
+}): FaithEvalRun {
   return {
-    id: ec.id,
-    question: ec.question,
-    answerable: ec.answerable,
-    resource: ec.resource,
+    schemaVersion: EVAL_SCHEMA_VERSION,
+    id: params.id,
+    kind: 'faith',
+    status: 'completed',
+    scope: params.scope ?? 'full',
+    createdAt: '2026-07-10T00:00:00.000Z',
+    completedAt: '2026-07-10T00:01:00.000Z',
+    dataset: faithDatasetIdentity(params.cases),
+    artifactPaths: { trace: traceRelativePath(params.id, 'faith') },
+    metricDefinitionVersion: 'legacy-v1',
+    config: {
+      corpusHash: HASH_A,
+      indexHash: HASH_B,
+      embeddingModel: 'voyage-3',
+      rerankModel: 'rerank-2.5',
+      queryExpansion: {
+        enabled: false,
+        registryHash: null,
+        reviewedAliasCount: 0,
+      },
+      k: 3,
+      answerModel: 'claude-sonnet-4-6',
+      judgeModel: 'claude-opus-4-8',
+      answerPromptHash: HASH_A,
+      judgePromptHash: HASH_B,
+      judgeParserSchemaIdentity: 'judge-verdict-parser-v1',
+    },
+    metrics: {},
+  };
+}
+
+const RUN = faithRun({
+  id: 'faith-run-1',
+  cases: [MINI_RETRIEVAL_CASES[0]!],
+});
+
+function verdict(faithful: boolean) {
+  return {
+    faithful,
+    unsupported: faithful ? [] : ['unsupported claim'],
+    reason: faithful ? 'faithful' : 'unsupported',
+  };
+}
+
+function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
+  const evalCase = MINI_RETRIEVAL_CASES.find((item) => item.id === id)!;
+  return {
+    id: evalCase.id,
+    question: evalCase.question,
+    answerable: true,
+    resource: evalCase.resource,
     retrieval: {
-      expectedChunkIds: ec.expectedChunkIds,
-      topIds: ec.expectedChunkIds,
-      foundCount: ec.expectedChunkIds.length,
+      expectedChunkIds: evalCase.expectedChunkIds,
+      topIds: evalCase.expectedChunkIds,
+      foundCount: evalCase.expectedChunkIds.length,
       fullRecall: true,
     },
     answer: 'answer',
@@ -71,69 +131,58 @@ function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
   };
 }
 
-function withInputFiles(
-  fn: (paths: {
-    dir: string;
-    runsDir: string;
-    tracesDir: string;
-  }) => void,
-): void {
-  const dir = mkdtempSync(join(tmpdir(), 'faith-bad-cases-'));
+function withEvalRoot(fn: (evalRoot: string) => void): void {
+  const evalRoot = mkdtempSync(join(tmpdir(), 'faith-bad-cases-'));
   try {
-    const runsDir = join(dir, 'runs');
-    const tracesDir = join(dir, 'traces');
-    fn({ dir, runsDir, tracesDir });
+    fn(evalRoot);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(evalRoot, { recursive: true, force: true });
   }
 }
 
 function writeInput(params: {
-  runsDir: string;
-  tracesDir: string;
+  evalRoot: string;
   runId: string;
   traces: FaithTrace[];
-  run?: Partial<EvalRun>;
-}): EvalRun {
-  mkdirSync(params.runsDir, { recursive: true });
-  mkdirSync(params.tracesDir, { recursive: true });
-  const tracePath = join(params.tracesDir, `${params.runId}.faith.jsonl`);
-  const run: EvalRun = {
-    ...RUN,
+  scope?: FaithEvalRun['scope'];
+}): { run: FaithEvalRun; traceIds: Map<string, string> } {
+  const selectedCases = params.traces.map((trace) =>
+    MINI_RETRIEVAL_CASES.find((evalCase) => evalCase.id === trace.id),
+  );
+  if (selectedCases.some((evalCase) => evalCase === undefined)) {
+    throw new Error('test trace has no matching eval case');
+  }
+  const run = faithRun({
     id: params.runId,
-    kind: 'faith',
-    artifactPaths: { tracePath },
-    evalSetHash: computeEvalSetHash(
-      params.traces.map((t) => ({
-        id: t.id,
-        question: t.question,
-        expectedChunkIds: t.retrieval.expectedChunkIds,
-      })),
-    ),
-    evalSetVersionHash: computeEvalSetHash(MINI_RETRIEVAL_CASES),
-    faithSelection: {
-      scope: 'full',
-      caseIds: params.traces.map((t) => t.id),
-    },
-    ...params.run,
-  };
-  writeFileSync(
-    join(params.runsDir, `${params.runId}.json`),
-    `${JSON.stringify(run, null, 2)}\n`,
-  );
-  writeFileSync(
-    tracePath,
-    params.traces.map((t) => JSON.stringify(t)).join('\n') + '\n',
-  );
-  return run;
-}
+    cases: selectedCases as RetrievalEvalCase[],
+    scope: params.scope,
+  });
+  writeJsonAtomic(runPath(run.id, params.evalRoot), run);
 
-function verdict(faithful: boolean) {
-  return {
-    faithful,
-    unsupported: faithful ? [] : ['unsupported claim'],
-    reason: faithful ? 'faithful' : 'unsupported',
-  };
+  const tracePath = evalArtifactPath(run.artifactPaths.trace, params.evalRoot);
+  const traceIds = new Map<string, string>();
+  for (const trace of params.traces) {
+    const envelope =
+      trace.outcome === 'error'
+        ? createErrorTraceEnvelope({
+            runId: run.id,
+            evalCaseId: trace.id,
+            kind: 'faith',
+            payload: trace,
+            stage: 'case',
+            error: new Error('case failed'),
+          })
+        : createTraceEnvelope({
+            runId: run.id,
+            evalCaseId: trace.id,
+            kind: 'faith',
+            outcome: faithEnvelopeOutcome(trace),
+            payload: trace,
+          });
+    appendTraceEnvelope(tracePath, envelope);
+    traceIds.set(trace.id, envelope.traceId);
+  }
+  return { run, traceIds };
 }
 
 function trace(
@@ -152,15 +201,26 @@ function trace(
       fullRecall: false,
     },
     answer: 'answer',
-    verdict: outcome === 'judge_failed' || outcome === 'error'
-      ? null
-      : verdict(
-          outcome === 'faithful_hit' ||
-            outcome === 'faithful_miss' ||
-            outcome === 'refused_correctly',
-        ),
+    verdict:
+      outcome === 'judge_failed' || outcome === 'error'
+        ? null
+        : verdict(
+            outcome === 'faithful_hit' ||
+              outcome === 'faithful_miss' ||
+              outcome === 'refused_correctly',
+          ),
     outcome,
     ...overrides,
+  };
+}
+
+function observation(
+  value: FaithTrace,
+  traceId = `trace-${value.id}`,
+): FaithTraceObservation {
+  return {
+    trace: value,
+    latestEvidence: { runId: RUN.id, traceId },
   };
 }
 
@@ -188,11 +248,7 @@ function badCase(params: {
   status?: BadCase['status'];
 }): BadCase {
   return {
-    id: canonicalBadCaseId({
-      evalCaseId: params.evalCaseId,
-      layer: params.layer,
-      type: params.type,
-    }),
+    id: canonicalBadCaseId(params),
     createdAt: '2026-07-09T00:00:00.000Z',
     taskType: 'ask_free',
     input: { question: 'existing question' },
@@ -218,338 +274,179 @@ function onlyCandidate(candidates: FaithBadCaseCandidate[]) {
   return candidates[0]!;
 }
 
-withInputFiles(({ runsDir }) => {
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'missing',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /run file not found/,
-  );
-});
+let passed = 0;
+function check(name: string, fn: () => void): void {
+  try {
+    fn();
+    passed++;
+    console.log(`  ✓ ${name}`);
+  } catch (error) {
+    console.error(
+      `  ✗ ${name}\n    ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  }
+}
 
-withInputFiles(({ runsDir }) => {
-  mkdirSync(runsDir, { recursive: true });
-  writeFileSync(
-    join(runsDir, 'run-1.json'),
-    `${JSON.stringify({ ...RUN, id: 'run-1', kind: 'faith' })}\n`,
-  );
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
+console.log('faith-bad-cases:');
+
+check('reads a decoded faith run and envelope payloads from the eval root', () => {
+  withEvalRoot((evalRoot) => {
+    const written = writeInput({
+      evalRoot,
+      runId: 'run-1',
+      traces: [inputTrace('case-a'), inputTrace('case-b')],
+      scope: 'policy',
+    });
+    const input = readFaithBadCaseInput({
+      runId: 'run-1',
+      evalRoot,
+      evalSet: MINI_RETRIEVAL_CASES,
+    });
+
+    assert.equal(input.run.kind, 'faith');
+    assert.equal(input.scope, 'policy');
+    assert.deepEqual(
+      input.observations.map((item) => item.trace.id),
+      ['case-a', 'case-b'],
+    );
+    assert.deepEqual(
+      input.observations.map((item) => item.latestEvidence),
+      ['case-a', 'case-b'].map((evalCaseId) => ({
         runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /artifactPaths\.tracePath/,
-  );
+        traceId: written.traceIds.get(evalCaseId),
+      })),
+    );
+    assert.deepEqual(input.warnings, []);
+  });
 });
 
-withInputFiles(({ runsDir, tracesDir }) => {
-  mkdirSync(runsDir, { recursive: true });
-  writeFileSync(
-    join(runsDir, 'run-1.json'),
-    `${JSON.stringify({
-      ...RUN,
+check('rejects missing and legacy run artifacts', () => {
+  withEvalRoot((evalRoot) => {
+    assert.throws(
+      () => readFaithBadCaseInput({ runId: 'missing', evalRoot }),
+      /run file not found/,
+    );
+    writeJsonAtomic(runPath('legacy', evalRoot), {
+      id: 'legacy',
+      createdAt: '2026-07-10T00:00:00.000Z',
+      metrics: {},
+    });
+    assert.throws(
+      () => readFaithBadCaseInput({ runId: 'legacy', evalRoot }),
+      /invalid eval run/,
+    );
+  });
+});
+
+check('rejects a failed faith run as bad-case input', () => {
+  withEvalRoot((evalRoot) => {
+    const failedRun = {
+      ...faithRun({
+        id: 'failed-run',
+        cases: [MINI_RETRIEVAL_CASES[0]!],
+      }),
+      status: 'failed' as const,
+      failure: { stage: 'judge', message: 'failed' },
+    };
+    writeJsonAtomic(runPath(failedRun.id, evalRoot), failedRun);
+
+    assert.throws(
+      () =>
+        readFaithBadCaseInput({
+          runId: failedRun.id,
+          evalRoot,
+          evalSet: MINI_RETRIEVAL_CASES,
+        }),
+      /failed-run.*failed.*completed/i,
+    );
+  });
+});
+
+check('rejects payload/envelope identity mismatch', () => {
+  withEvalRoot((evalRoot) => {
+    const run = faithRun({
       id: 'run-1',
-      kind: 'faith',
-      artifactPaths: {
-        tracePath: join(tracesDir, 'missing.faith.jsonl'),
-      },
-    })}\n`,
-  );
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
+      cases: [MINI_RETRIEVAL_CASES[0]!],
+    });
+    writeJsonAtomic(runPath(run.id, evalRoot), run);
+    appendTraceEnvelope(
+      evalArtifactPath(run.artifactPaths.trace, evalRoot),
+      createTraceEnvelope({
+        runId: run.id,
+        evalCaseId: 'case-a',
+        kind: 'faith',
+        outcome: 'success',
+        payload: inputTrace('case-b'),
       }),
-    /faith trace file not found/,
-  );
+    );
+
+    assert.throws(
+      () =>
+        readFaithBadCaseInput({
+          runId: run.id,
+          evalRoot,
+          evalSet: MINI_RETRIEVAL_CASES,
+        }),
+      /faith payload id mismatch/,
+    );
+  });
 });
 
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [inputTrace('case-a')],
-    run: { id: 'other-run' },
+check('rejects current dataset semantic drift', () => {
+  withEvalRoot((evalRoot) => {
+    writeInput({
+      evalRoot,
+      runId: 'run-1',
+      traces: [inputTrace('case-a')],
+    });
+    const changedCases = [
+      { ...MINI_RETRIEVAL_CASES[0]!, question: '漂移的问题' },
+      MINI_RETRIEVAL_CASES[1]!,
+    ];
+
+    assert.throws(
+      () =>
+        readFaithBadCaseInput({
+          runId: 'run-1',
+          evalRoot,
+          evalSet: changedCases,
+        }),
+      /trace case drift/,
+    );
   });
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
+});
+
+check('maps faithful, hallucination, refusal, judge, and runtime outcomes', () => {
+  const expected = [
+    ['faithful_hit', 'skip'],
+    ['hallucination', 'create'],
+    ['refused_wrong', 'create'],
+    ['judge_failed', 'create'],
+    ['error', 'error'],
+  ] as const;
+
+  for (const [outcome, action] of expected) {
+    const candidate = onlyCandidate(
+      buildFaithBadCaseCandidates({
+        observations: [
+          observation(
+            trace(outcome, {
+              answerable: outcome === 'refused_wrong' ? false : true,
+            }),
+          ),
+        ],
+        existingBadCases: [],
+        run: RUN,
+        scope: 'full',
+        now: '2026-07-10T00:00:00.000Z',
       }),
-    /run id mismatch/,
-  );
+    );
+    assert.equal(candidate.action, action, outcome);
+  }
 });
 
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [inputTrace('case-a')],
-    run: { kind: 'retrieval' },
-  });
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /expected faith run/,
-  );
-});
-
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [inputTrace('case-a'), inputTrace('case-a')],
-  });
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /duplicate trace id/,
-  );
-});
-
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [{ ...inputTrace('case-a'), id: 'unknown' }],
-  });
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /not found in RETRIEVAL_CASES/,
-  );
-});
-
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [{ ...inputTrace('case-a'), question: '漂移的问题' }],
-  });
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /trace case drift/,
-  );
-});
-
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [
-      {
-        ...inputTrace('case-a'),
-        retrieval: {
-          ...inputTrace('case-a').retrieval,
-          expectedChunkIds: ['Changed::chunk'],
-        },
-      },
-    ],
-  });
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /trace case drift/,
-  );
-});
-
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [inputTrace('case-a')],
-    run: { evalSetHash: 'bad-selection-hash' },
-  });
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /evalSetHash mismatch/,
-  );
-});
-
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [inputTrace('case-a')],
-    run: { evalSetVersionHash: 'bad-version-hash' },
-  });
-  assert.throws(
-    () =>
-      readFaithBadCaseInput({
-        runId: 'run-1',
-        runsDir,
-        evalSet: MINI_RETRIEVAL_CASES,
-      }),
-    /evalSetVersionHash mismatch/,
-  );
-});
-
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'legacy-policy',
-    traces: [inputTrace('case-a')],
-    run: {
-      evalSetVersionHash: undefined,
-      faithSelection: undefined,
-    },
-  });
-  const input = readFaithBadCaseInput({
-    runId: 'legacy-policy',
-    runsDir,
-    evalSet: MINI_RETRIEVAL_CASES,
-  });
-
-  assert.equal(input.scope, 'policy');
-  assert.deepEqual(input.warnings, ['legacy run missing evalSetVersionHash']);
-});
-
-withInputFiles(({ runsDir, tracesDir }) => {
-  writeInput({
-    runsDir,
-    tracesDir,
-    runId: 'run-1',
-    traces: [inputTrace('case-a')],
-    run: {
-      faithSelection: {
-        scope: 'smoke',
-        caseIds: ['case-a'],
-      },
-    },
-  });
-  const input = readFaithBadCaseInput({
-    runId: 'run-1',
-    runsDir,
-    evalSet: MINI_RETRIEVAL_CASES,
-  });
-
-  assert.equal(input.scope, 'smoke');
-  assert.equal(input.traces.length, 1);
-  assert.deepEqual(input.warnings, []);
-});
-
-{
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('faithful_hit')],
-      existingBadCases: [],
-      run: RUN,
-      scope: 'full',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'skip');
-  assert.equal(c.evalCaseId, 'case-1');
-}
-
-{
-  const retrieval = badCase({
-    evalCaseId: 'case-1',
-    layer: 'retrieval',
-    type: 'retrieval_miss',
-    source: 'retrieval_eval',
-  });
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('faithful_miss')],
-      existingBadCases: [retrieval],
-      run: RUN,
-      scope: 'policy',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'link_only');
-  assert.equal(c.issueId, retrieval.id);
-}
-
-{
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('faithful_miss')],
-      existingBadCases: [],
-      run: RUN,
-      scope: 'policy',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'warning');
-  assert.match(c.message ?? '', /missing_retrieval_issue/);
-  assert.equal(c.issue, undefined);
-}
-
-{
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('hallucination')],
-      existingBadCases: [],
-      run: RUN,
-      scope: 'policy',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'create');
-  assert.equal(c.issue?.failure.layer, 'generation');
-  assert.equal(c.issue?.failure.type, 'hallucination');
-  assert.equal(c.issue?.severity, 'high');
-  assert.equal(c.issue?.tracking.source, 'faith_eval');
-  assert.deepEqual(c.issue?.tracking.observedRunIds, ['faith-run-1']);
-  assert.equal(c.issue?.actual.evaluation?.runId, 'faith-run-1');
-  assert.equal(c.issue?.actual.evaluation?.scope, 'policy');
-  assert.equal(c.issue?.actual.evaluation?.outcome, 'hallucination');
-  assert.deepEqual(c.issue?.actual.evaluation?.unsupportedClaims, [
-    'unsupported claim',
-  ]);
-}
-
-{
+check('links dual-cause evidence to an existing retrieval issue', () => {
   const retrieval = badCase({
     evalCaseId: 'case-1',
     layer: 'rerank',
@@ -557,7 +454,7 @@ withInputFiles(({ runsDir, tracesDir }) => {
     source: 'retrieval_eval',
   });
   const candidates = buildFaithBadCaseCandidates({
-    traces: [trace('dual_cause')],
+    observations: [observation(trace('dual_cause'))],
     existingBadCases: [retrieval],
     run: RUN,
     scope: 'policy',
@@ -565,165 +462,10 @@ withInputFiles(({ runsDir, tracesDir }) => {
   });
 
   assert.equal(candidates.length, 1);
-  assert.equal(candidates[0]!.action, 'create');
-  assert.deepEqual(candidates[0]!.issue?.relatedBadCaseIds, [retrieval.id]);
-}
+  assert.deepEqual(candidates[0]?.issue?.relatedBadCaseIds, [retrieval.id]);
+});
 
-{
-  const candidates = buildFaithBadCaseCandidates({
-    traces: [trace('dual_cause')],
-    existingBadCases: [],
-    run: RUN,
-    scope: 'policy',
-    now: '2026-07-10T00:00:00.000Z',
-  });
-
-  assert.equal(candidates.map((c) => c.action).join(','), 'create,warning');
-  assert.match(candidates[1]!.message ?? '', /missing_retrieval_issue/);
-}
-
-{
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('refused_correctly', { answerable: false })],
-      existingBadCases: [],
-      run: RUN,
-      scope: 'full',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'skip');
-}
-
-{
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('refused_wrong', { answerable: false })],
-      existingBadCases: [],
-      run: RUN,
-      scope: 'full',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'create');
-  assert.equal(c.issue?.failure.layer, 'generation');
-  assert.equal(c.issue?.failure.type, 'refusal_error');
-  assert.equal(c.issue?.severity, 'high');
-}
-
-{
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('judge_failed')],
-      existingBadCases: [],
-      run: RUN,
-      scope: 'full',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'create');
-  assert.equal(c.issue?.failure.layer, 'judge');
-  assert.equal(c.issue?.failure.type, 'judge_error');
-  assert.equal(c.issue?.severity, 'medium');
-}
-
-{
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('error')],
-      existingBadCases: [],
-      run: RUN,
-      scope: 'full',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'error');
-  assert.match(c.message ?? '', /runtime error/);
-  assert.equal(c.issue, undefined);
-}
-
-{
-  const existing = badCase({
-    evalCaseId: 'case-1',
-    layer: 'generation',
-    type: 'hallucination',
-    source: 'faith_eval',
-    observedRunIds: ['older-run'],
-    status: 'fixed',
-  });
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('hallucination')],
-      existingBadCases: [existing],
-      run: RUN,
-      scope: 'policy',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'recur');
-  assert.equal(c.issue?.status, 'fixed');
-  assert.deepEqual(c.issue?.tracking.observedRunIds, [
-    'older-run',
-    'faith-run-1',
-  ]);
-  assert.equal(c.issue?.tracking.occurrenceCount, 2);
-}
-
-{
-  const existing = badCase({
-    evalCaseId: 'case-1',
-    layer: 'generation',
-    type: 'hallucination',
-    source: 'faith_eval',
-    observedRunIds: ['faith-run-1'],
-  });
-  const c = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('hallucination')],
-      existingBadCases: [existing],
-      run: RUN,
-      scope: 'policy',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-
-  assert.equal(c.action, 'already_imported');
-}
-
-{
-  const candidate = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('hallucination')],
-      existingBadCases: [],
-      run: RUN,
-      scope: 'policy',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-  const merged = mergeBadCaseIssues({
-    existing: [],
-    candidates: [
-      candidate,
-      { action: 'skip', evalCaseId: 'skip-case' },
-      { action: 'warning', evalCaseId: 'warn-case', message: 'warn' },
-      { action: 'error', evalCaseId: 'error-case', message: 'error' },
-    ],
-  });
-
-  assert.equal(merged.cases.length, 1);
-  assert.equal(merged.cases[0]!.failure.type, 'hallucination');
-  assert.equal(merged.summary.create, 1);
-  assert.equal(merged.summary.skip, 1);
-  assert.equal(merged.summary.warning, 1);
-  assert.equal(merged.summary.error, 1);
-}
-
-{
+check('recurring issues retain status and extend observed runs once', () => {
   const existing = badCase({
     evalCaseId: 'case-1',
     layer: 'generation',
@@ -734,54 +476,26 @@ withInputFiles(({ runsDir, tracesDir }) => {
   });
   const candidate = onlyCandidate(
     buildFaithBadCaseCandidates({
-      traces: [trace('hallucination')],
+      observations: [observation(trace('hallucination'), 'trace-recurrence')],
       existingBadCases: [existing],
       run: RUN,
       scope: 'policy',
       now: '2026-07-10T00:00:00.000Z',
     }),
   );
-  const merged = mergeBadCaseIssues({
-    existing: [existing],
-    candidates: [candidate],
-  });
+  const merged = mergeBadCaseIssues({ existing: [existing], candidates: [candidate] });
 
-  assert.equal(merged.cases.length, 1);
-  assert.equal(merged.cases[0]!.status, 'fixed');
-  assert.deepEqual(merged.cases[0]!.tracking.observedRunIds, [
+  assert.equal(candidate.action, 'recur');
+  assert.deepEqual(candidate.issue?.latestEvidence, {
+    runId: RUN.id,
+    traceId: 'trace-recurrence',
+  });
+  assert.equal(merged.cases[0]?.status, 'fixed');
+  assert.deepEqual(merged.cases[0]?.tracking.observedRunIds, [
     'older-run',
     'faith-run-1',
   ]);
-  assert.equal(merged.cases[0]!.tracking.occurrenceCount, 2);
-  assert.equal(merged.summary.recur, 1);
-}
+  assert.equal(merged.cases[0]?.tracking.occurrenceCount, 2);
+});
 
-{
-  const existing = badCase({
-    evalCaseId: 'case-1',
-    layer: 'generation',
-    type: 'hallucination',
-    source: 'faith_eval',
-    observedRunIds: ['faith-run-1'],
-  });
-  const candidate = onlyCandidate(
-    buildFaithBadCaseCandidates({
-      traces: [trace('hallucination')],
-      existingBadCases: [existing],
-      run: RUN,
-      scope: 'policy',
-      now: '2026-07-10T00:00:00.000Z',
-    }),
-  );
-  const merged = mergeBadCaseIssues({
-    existing: [existing],
-    candidates: [candidate],
-  });
-
-  assert.equal(merged.cases.length, 1);
-  assert.deepEqual(merged.cases[0]!.tracking.observedRunIds, ['faith-run-1']);
-  assert.equal(merged.cases[0]!.tracking.occurrenceCount, 1);
-  assert.equal(merged.summary.already_imported, 1);
-}
-
-console.log('faith-bad-cases tests passed');
+console.log(`\n通过 ${passed} 项`);

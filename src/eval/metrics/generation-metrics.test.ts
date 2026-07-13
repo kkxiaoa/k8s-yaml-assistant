@@ -10,6 +10,7 @@ import {
   fixMetricsRecord,
   generationMetricsRecord,
 } from './generation-metrics';
+import { metricObservation } from '../protocol';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -97,16 +98,17 @@ check('computeGenerationEvalMetrics 汇总合法率和内容覆盖', () => {
   assert.equal(metrics.kindMatchCount, 1);
   assert.equal(metrics.requiredPathCoverageAvg, 1);
   assert.deepEqual(generationMetricsRecord(metrics), {
-    'generation.avg_rounds': 1,
-    'generation.avg_submits': 1,
-    'generation.first_parse_ok_rate': 0.5,
-    'generation.first_validation_ok_rate': 0.5,
-    'generation.kind_match_rate': 1,
-    'generation.max_round_failure_rate': 0.5,
-    'generation.repair_attempted_rate': 0,
-    'generation.repair_success_after_fail_rate': 0,
-    'generation.required_path_coverage': 1,
-    'generation.valid_yaml_rate': 0.5,
+    'generation.avg_rounds': metricObservation(1, 2, 2),
+    'generation.avg_submits': metricObservation(1, 2, 2),
+    'generation.consistency_pass_rate': metricObservation(null, 0, 0),
+    'generation.first_parse_ok_rate': metricObservation(0.5, 1, 2),
+    'generation.first_validation_ok_rate': metricObservation(0.5, 1, 2),
+    'generation.kind_match_rate': metricObservation(1, 1, 1),
+    'generation.max_round_failure_rate': metricObservation(0.5, 1, 2),
+    'generation.repair_attempted_rate': metricObservation(0, 0, 2),
+    'generation.repair_success_after_fail_rate': metricObservation(0, 0, 1),
+    'generation.required_path_coverage': metricObservation(1, 1, 1),
+    'generation.valid_yaml_rate': metricObservation(0.5, 1, 2),
   });
 });
 
@@ -128,18 +130,18 @@ check('buildFixCaseResult 和 fix metrics 统计 kind/意图保留', () => {
   assert.equal(item.intentPreserved, true);
   assert.equal(metrics.validYamlCount, 1);
   assert.deepEqual(fixMetricsRecord(metrics), {
-    'fix.avg_rounds': 0,
-    'fix.avg_submits': 1,
-    'fix.defect.parse_error.success_rate': 1,
-    'fix.first_parse_ok_rate': 1,
-    'fix.first_validation_ok_rate': 1,
-    'fix.intent_preserved_rate': 1,
-    'fix.kind_kept_rate': 1,
-    'fix.max_round_failure_rate': 0,
-    'fix.preserve_coverage': 1,
-    'fix.repair_attempted_rate': 0,
-    'fix.repair_success_after_fail_rate': 1,
-    'fix.success_rate': 1,
+    'fix.avg_rounds': metricObservation(0, 0, 1),
+    'fix.avg_submits': metricObservation(1, 1, 1),
+    'fix.defect.parse_error.success_rate': metricObservation(1, 1, 1),
+    'fix.first_parse_ok_rate': metricObservation(1, 1, 1),
+    'fix.first_validation_ok_rate': metricObservation(1, 1, 1),
+    'fix.intent_preserved_rate': metricObservation(1, 1, 1),
+    'fix.kind_kept_rate': metricObservation(1, 1, 1),
+    'fix.max_round_failure_rate': metricObservation(0, 0, 1),
+    'fix.preserve_coverage': metricObservation(1, 1, 1),
+    'fix.repair_attempted_rate': metricObservation(0, 0, 1),
+    'fix.repair_success_after_fail_rate': metricObservation(null, 0, 0),
+    'fix.success_rate': metricObservation(1, 1, 1),
   });
 });
 

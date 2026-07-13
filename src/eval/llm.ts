@@ -1,5 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
+export const TEXT_MAX_TOKENS = 1024;
+
 /** 调一次模型,把 text block 拼成纯字符串返回。 */
 export async function textOf(
   client: Anthropic,
@@ -9,7 +11,7 @@ export async function textOf(
 ): Promise<string> {
   const resp = await client.messages.create({
     model,
-    max_tokens: 1024,
+    max_tokens: TEXT_MAX_TOKENS,
     system,
     messages: [{ role: 'user', content: user }],
   });

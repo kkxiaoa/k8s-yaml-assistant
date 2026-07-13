@@ -63,7 +63,7 @@
 
 唯一执行路线维护在 `docs/AI应用开发能力训练实现方案.md`，Stage 编号只表示能力分类，不表示时序。
 
-1. 按顺序实施四份已自审的 `2026-07-12` corrective plans；当前从 Eval Artifact Protocol 开始。
+1. 按顺序实施四份已自审的 `2026-07-12` corrective plans；Eval Artifact Protocol 已完成并 review，当前执行 Knowledge Provenance / Corpus Identity。
 2. 完成 test runner、命令入口、scripts 和 docs cleanup，建立 eval case 的 task/origin/role 分层和 holdout。
 3. 清理 ignored artifacts、重建 index，重跑 retrieval/faith/judge/generation/fix 并人工审核 baseline。
 4. 贯通 token/usage/cost，在新尺子下复测仍存在的 retrieval/rerank bad case。

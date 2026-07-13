@@ -35,8 +35,9 @@ import {
   resolveQueryExpansionEnabled,
   skippedExactQueryExpansionTrace,
 } from '../retrieval/query-expansion-runtime';
+import { ANSWER_MODEL } from './agent-contract';
 
-export const ANSWER_MODEL = 'claude-sonnet-4-6'; // DeepSeek 映射 deepseek-v4-flash
+export { ANSWER_MODEL } from './agent-contract';
 
 export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,服务于一个容器云平台控制台。
 基于给定的 <ask_mode>、<editor_context>、<current_yaml> 和 <docs> 片段准确回答用户关于当前 YAML 配置的问题。
