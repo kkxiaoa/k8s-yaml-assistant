@@ -1,99 +1,106 @@
-// §4.2:把某次 eval run 与 baseline 对比,打印每个共有指标的 Δ。纯本地,不花额度。
+// 把某次 eval run 与同 kind baseline 对比。纯本地,不调用模型。
 // 用法:
-//   npm run eval:compare                         对比最近一次 run 与 baseline
-//   npm run eval:compare -- data/eval/runs/<id>.json   指定 run
-// 初期只提示退化、不阻塞;缺 baseline 时打印当前 run 供人工确认后 promote。
+//   npm run eval:compare
+//   npm run eval:compare -- <runId>
 
 import {
   compareMetrics,
-  latestRunPath,
+  latestRun,
   readBaseline,
   readRun,
-  runKind,
 } from '../src/eval/run-store';
+import { runPath } from '../src/eval/artifacts';
 import {
   formatMetricDelta,
   formatMetricValue,
 } from '../src/eval/metric-format';
+import type {
+  EvalBaseline,
+  EvalRun,
+  MetricObservation,
+} from '../src/eval/protocol';
+
+function metricText(key: string, observation: MetricObservation): string {
+  return observation.value === null
+    ? 'N/A'
+    : formatMetricValue(key, observation.value);
+}
+
+function retrievalIdentity(
+  artifact: EvalRun | EvalBaseline,
+): { corpusHash: string; indexHash: string; k: number } | null {
+  return artifact.kind === 'retrieval' || artifact.kind === 'faith'
+    ? {
+        corpusHash: artifact.config.corpusHash,
+        indexHash: artifact.config.indexHash,
+        k: artifact.config.k,
+      }
+    : null;
+}
 
 function main(): void {
-  const runPath = process.argv[2] ?? latestRunPath();
-  if (!runPath) {
-    console.error('没有可对比的 run。先跑 `npm run eval`。');
+  const runId = process.argv[2];
+  const current = runId ? readRun(runId) : latestRun();
+  if (!current) {
+    console.error('没有可对比的 run。先执行对应 eval。');
     process.exit(1);
   }
-  const current = readRun(runPath);
-  const kind = runKind(current);
-  const baseline = readBaseline(kind); // 按 run 自身 kind 匹配同类型 baseline,不混检索/faith
+  const baseline = readBaseline(current.kind);
+  const currentRetrieval = retrievalIdentity(current);
 
   console.log(
-    `当前 run : ${runPath}(${current.createdAt}, k=${current.k ?? 'n/a'}, kind=${kind})`,
+    `当前 run : ${runPath(current.id)}(${current.createdAt}, k=${currentRetrieval?.k ?? 'n/a'}, kind=${current.kind})`,
   );
 
   if (!baseline) {
     console.log('\n尚无 baseline。当前 run 指标:');
-    for (const [key, val] of Object.entries(current.metrics).sort())
-      console.log(`  ${key.padEnd(42)} ${formatMetricValue(key, val)}`);
+    for (const [key, observation] of Object.entries(current.metrics).sort()) {
+      console.log(`  ${key.padEnd(42)} ${metricText(key, observation)}`);
+    }
     console.log(
-      `\n确认无误后晋升为 baseline:npm run eval:promote -- ${runPath}`,
+      `\nmetricDefinitionVersion=${current.metricDefinitionVersion}; legacy-v1 run 不可晋升。`,
     );
     return;
   }
 
-  console.log(`baseline : ${baseline.id}(${baseline.createdAt})`);
+  console.log(
+    `baseline : ${baseline.sourceRunId}(${baseline.promotedAt}, kind=${baseline.kind})`,
+  );
+  const baselineRetrieval = retrievalIdentity(baseline);
   if (
-    current.corpusHash &&
-    baseline.corpusHash &&
-    current.indexHash &&
-    baseline.indexHash &&
-    (current.corpusHash !== baseline.corpusHash ||
-      current.indexHash !== baseline.indexHash)
+    currentRetrieval &&
+    baselineRetrieval &&
+    (currentRetrieval.corpusHash !== baselineRetrieval.corpusHash ||
+      currentRetrieval.indexHash !== baselineRetrieval.indexHash)
   ) {
     console.log(
-      '⚠ 语料/索引指纹与 baseline 不一致(corpusHash/indexHash 变了),对比跨越了语料变更,仅供参考。',
+      '⚠ 语料/索引指纹与 baseline 不一致,对比跨越了语料或索引变更,仅供参考。',
     );
   }
-  if (
-    current.evalSetHash &&
-    baseline.evalSetHash &&
-    current.evalSetHash !== baseline.evalSetHash
-  ) {
-    console.log(
-      '⚠ retrieval case 指纹与 baseline 不一致(标注改过),Δ 含标注变更、非纯模型改进。',
-    );
-  } else if (current.evalSetHash && !baseline.evalSetHash) {
-    console.log(
-      'ℹ baseline 无 evalSetHash(旧版 run),无法判定标注是否变更。',
-    );
+  if (current.dataset.hash !== baseline.dataset.hash) {
+    console.log('⚠ dataset hash 与 baseline 不一致,Δ 含数据集语义变更。');
   }
 
   const rows = compareMetrics(current.metrics, baseline.metrics);
   const onlyCurrent = Object.keys(current.metrics).filter(
-    (k) => !(k in baseline.metrics),
+    (key) => !(key in baseline.metrics),
   );
   const onlyBaseline = Object.keys(baseline.metrics).filter(
-    (k) => !(k in current.metrics),
+    (key) => !(key in current.metrics),
   );
 
   console.log('\n指标                 当前      baseline   Δ');
-  let regressed = 0;
-  for (const r of rows) {
-    const arrow = r.delta > 0 ? '↑' : r.delta < 0 ? '↓' : '=';
-    if (r.delta < 0) regressed++;
+  for (const row of rows) {
     console.log(
-      `${r.key.padEnd(42)} ${formatMetricValue(r.key, r.current).padStart(8)}   ${formatMetricValue(r.key, r.baseline).padStart(8)}   ${arrow} ${formatMetricDelta(r.key, r.delta)}`,
+      `${row.key.padEnd(42)} ${formatMetricValue(row.key, row.current).padStart(8)}   ${formatMetricValue(row.key, row.baseline).padStart(8)}   ${formatMetricDelta(row.key, row.delta)}`,
     );
   }
-  if (onlyCurrent.length)
+  if (onlyCurrent.length) {
     console.log(`\n仅当前 run 有(baseline 缺,跳过):${onlyCurrent.join(', ')}`);
-  if (onlyBaseline.length)
+  }
+  if (onlyBaseline.length) {
     console.log(`仅 baseline 有(当前缺,跳过):${onlyBaseline.join(', ')}`);
-
-  console.log(
-    regressed > 0
-      ? `\n⚠ ${regressed} 个指标较 baseline 退化。确认是预期后再决定是否 promote。`
-      : '\n✓ 无退化。',
-  );
+  }
 }
 
 main();

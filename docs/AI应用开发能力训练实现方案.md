@@ -288,9 +288,10 @@ Stage 是能力分类，不代表执行时序。
 ### Phase A：质量底座纠偏（当前）
 
 1. 已完成：四份 2026-07-12 corrective specs 及其一对一 implementation plans 已交叉自审并落盘。
-2. 当前执行：按依赖实施 Artifact Protocol -> Knowledge Provenance/Corpus Identity -> Evaluator Validity -> Metric Semantics；每个 Task 后停止 review。
-3. 对提交数据执行一次性迁移；ignored runs/traces/index 直接清理重建。
-4. 纠偏完成前不晋升 baseline，不根据旧指标优化 retrieval/prompt/model。
+2. 已完成：Eval Artifact Protocol 已实施并完成 review。
+3. 当前执行：Knowledge Provenance/Corpus Identity；完成后依次实施 Evaluator Validity 和 Metric Semantics，每个 Task 后停止 review。
+4. 对提交数据执行一次性迁移；ignored runs/traces/index 直接清理重建。
+5. 纠偏完成前不晋升 baseline，不根据旧指标优化 retrieval/prompt/model。
 
 ### Phase B：工程收尾与重建尺子
 

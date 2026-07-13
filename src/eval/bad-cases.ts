@@ -1,110 +1,317 @@
-// 失败用例沉淀为 canonical bad case: evalCaseId + failure.layer + failure.type。
-
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { FaithOutcome } from './faith-store';
+import { z } from 'zod';
+import {
+  evalArtifactPath,
+  readTraceEnvelopes,
+} from './artifacts';
+import { FaithOutcomeSchema } from './faith-store';
+import { readRun } from './run-store';
 
-export interface BadCaseTracking {
-  evalCaseId: string;
-  source: 'retrieval_eval' | 'faith_eval';
-  firstSeenAt: string;
-  lastSeenAt: string;
-  firstSeenRunId?: string;
-  lastSeenRunId?: string;
-  observedRunIds: string[];
-  occurrenceCount: number;
-  scope?: 'full' | 'policy' | 'smoke';
-  models?: {
-    embedding?: string;
-    rerank?: string;
-    answer?: string;
-    judge?: string;
-  };
-}
+const NonEmptyStringSchema = z
+  .string()
+  .min(1)
+  .refine((value) => /\S/.test(value), {
+    message: 'must contain a non-whitespace character',
+  });
+const IsoDateTimeSchema = z.iso.datetime({ offset: true });
 
-export interface BadCase {
-  id: string;
-  createdAt: string;
-  taskType:
-    | 'explain_field'
-    | 'explain_error'
-    | 'ask_free'
-    | 'generate'
-    | 'fix'
-    | 'refusal';
-  input: {
-    question?: string;
-    requirement?: string;
-    yaml?: string;
-    context?: {
-      kind?: string;
-      apiVersion?: string;
-      cursorPath?: string;
-      selectedText?: string;
-      validationErrors?: Array<{ path: string; message: string }>;
-    };
-  };
-  expected?: {
-    sourceIds?: string[];
-    expectedKinds?: string[];
-    mustHavePaths?: string[];
-    consistencyChecks?: Array<
-      | 'selector_label_match'
-      | 'service_target_port_match'
-      | 'ingress_service_match'
-    >;
-  };
-  actual: {
-    answer?: string;
-    yaml?: string;
-    sourceIds?: string[];
-    traceId?: string;
-    evaluation?: {
-      runId: string;
-      scope: 'full' | 'policy' | 'smoke';
-      outcome: FaithOutcome;
-      unsupportedClaims: string[];
-      judgeReason?: string;
-    };
-  };
-  failure: {
-    layer:
-      | 'retrieval'
-      | 'rerank'
-      | 'chunking'
-      | 'knowledge'
-      | 'context'
-      | 'prompt'
-      | 'generation'
-      | 'validation'
-      | 'judge'
-      | 'ui'
-      | 'unknown';
-    type:
-      | 'retrieval_miss'
-      | 'rerank_miss'
-      | 'rerank_error'
-      | 'chunk_gap'
-      | 'knowledge_missing'
-      | 'context_missing'
-      | 'prompt_error'
-      | 'hallucination'
-      | 'schema_gap'
-      | 'parse_error'
-      | 'validation_error'
-      | 'consistency_error'
-      | 'refusal_error'
-      | 'judge_error'
-      | 'ui_misleading'
-      | 'unknown';
-    note?: string;
-  };
-  severity: 'low' | 'medium' | 'high';
-  status: 'new' | 'triaged' | 'converted_to_eval' | 'fixed' | 'wont_fix';
-  tracking: BadCaseTracking;
-  relatedBadCaseIds?: string[];
-}
+const TaskTypeSchema = z.enum([
+  'explain_field',
+  'explain_error',
+  'ask_free',
+  'generate',
+  'fix',
+  'refusal',
+]);
+
+export const BadCaseFailureLayerSchema = z.enum([
+  'retrieval',
+  'rerank',
+  'chunking',
+  'knowledge',
+  'context',
+  'prompt',
+  'generation',
+  'validation',
+  'judge',
+  'ui',
+  'unknown',
+]);
+
+export const BadCaseFailureTypeSchema = z.enum([
+  'retrieval_miss',
+  'rerank_miss',
+  'rerank_error',
+  'chunk_gap',
+  'knowledge_missing',
+  'context_missing',
+  'prompt_error',
+  'hallucination',
+  'schema_gap',
+  'parse_error',
+  'validation_error',
+  'consistency_error',
+  'refusal_error',
+  'judge_error',
+  'ui_misleading',
+  'unknown',
+]);
+
+type BadCaseFailureLayer = z.infer<typeof BadCaseFailureLayerSchema>;
+type BadCaseFailureType = z.infer<typeof BadCaseFailureTypeSchema>;
+
+const FAILURE_TYPES_BY_LAYER: Record<
+  BadCaseFailureLayer,
+  readonly BadCaseFailureType[]
+> = {
+  retrieval: ['retrieval_miss'],
+  rerank: ['rerank_miss', 'rerank_error'],
+  chunking: ['chunk_gap'],
+  knowledge: ['knowledge_missing'],
+  context: ['context_missing'],
+  prompt: ['prompt_error'],
+  generation: ['hallucination', 'refusal_error'],
+  validation: [
+    'schema_gap',
+    'parse_error',
+    'validation_error',
+    'consistency_error',
+  ],
+  judge: ['judge_error'],
+  ui: ['ui_misleading'],
+  unknown: ['unknown'],
+};
+
+const ModelsSchema = z.strictObject({
+  embedding: NonEmptyStringSchema.optional(),
+  rerank: NonEmptyStringSchema.optional(),
+  answer: NonEmptyStringSchema.optional(),
+  judge: NonEmptyStringSchema.optional(),
+});
+
+export const BadCaseTrackingSchema = z
+  .strictObject({
+    evalCaseId: NonEmptyStringSchema,
+    source: z.enum(['retrieval_eval', 'faith_eval']),
+    firstSeenAt: IsoDateTimeSchema,
+    lastSeenAt: IsoDateTimeSchema,
+    firstSeenRunId: NonEmptyStringSchema.optional(),
+    lastSeenRunId: NonEmptyStringSchema.optional(),
+    observedRunIds: z.array(NonEmptyStringSchema),
+    occurrenceCount: z.int().positive(),
+    scope: z.enum(['full', 'policy', 'smoke']).optional(),
+    models: ModelsSchema.optional(),
+  })
+  .superRefine((tracking, context) => {
+    if (tracking.firstSeenAt > tracking.lastSeenAt) {
+      context.addIssue({
+        code: 'custom',
+        path: ['lastSeenAt'],
+        message: 'lastSeenAt cannot precede firstSeenAt',
+      });
+    }
+    if (new Set(tracking.observedRunIds).size !== tracking.observedRunIds.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['observedRunIds'],
+        message: 'observedRunIds must be unique',
+      });
+    }
+    if (tracking.occurrenceCount < Math.max(1, tracking.observedRunIds.length)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['occurrenceCount'],
+        message: 'occurrenceCount cannot be smaller than observed run count',
+      });
+    }
+    if (
+      tracking.firstSeenRunId !== undefined &&
+      !tracking.observedRunIds.includes(tracking.firstSeenRunId)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['firstSeenRunId'],
+        message: 'firstSeenRunId must appear in observedRunIds',
+      });
+    }
+    if (
+      tracking.lastSeenRunId !== undefined &&
+      !tracking.observedRunIds.includes(tracking.lastSeenRunId)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['lastSeenRunId'],
+        message: 'lastSeenRunId must appear in observedRunIds',
+      });
+    }
+  });
+
+export type BadCaseTracking = z.infer<typeof BadCaseTrackingSchema>;
+
+export const BadCaseEvidenceReferenceSchema = z.strictObject({
+  runId: NonEmptyStringSchema,
+  traceId: NonEmptyStringSchema,
+});
+
+export type BadCaseEvidenceReference = z.infer<
+  typeof BadCaseEvidenceReferenceSchema
+>;
+
+const InputSchema = z.strictObject({
+  question: z.string().optional(),
+  requirement: z.string().optional(),
+  yaml: z.string().optional(),
+  context: z
+    .strictObject({
+      kind: z.string().optional(),
+      apiVersion: z.string().optional(),
+      cursorPath: z.string().optional(),
+      selectedText: z.string().optional(),
+      validationErrors: z
+        .array(
+          z.strictObject({
+            path: z.string(),
+            message: z.string(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
+});
+
+const ConsistencyCheckSchema = z.enum([
+  'selector_label_match',
+  'service_target_port_match',
+  'ingress_service_match',
+]);
+
+const ExpectedSchema = z.strictObject({
+  sourceIds: z.array(z.string()).optional(),
+  expectedKinds: z.array(z.string()).optional(),
+  mustHavePaths: z.array(z.string()).optional(),
+  consistencyChecks: z.array(ConsistencyCheckSchema).optional(),
+});
+
+const ActualSchema = z.strictObject({
+  answer: z.string().optional(),
+  yaml: z.string().optional(),
+  sourceIds: z.array(z.string()).optional(),
+  evaluation: z
+    .strictObject({
+      runId: NonEmptyStringSchema,
+      scope: z.enum(['full', 'policy', 'smoke']),
+      outcome: FaithOutcomeSchema,
+      unsupportedClaims: z.array(z.string()),
+      judgeReason: z.string().optional(),
+    })
+    .optional(),
+});
+
+const FailureSchema = z
+  .strictObject({
+    layer: BadCaseFailureLayerSchema,
+    type: BadCaseFailureTypeSchema,
+    note: z.string().optional(),
+  })
+  .superRefine((failure, context) => {
+    if (!FAILURE_TYPES_BY_LAYER[failure.layer].includes(failure.type)) {
+      context.addIssue({
+        code: 'custom',
+        message: `invalid failure combination: ${failure.layer}/${failure.type}`,
+      });
+    }
+  });
+
+export const BadCaseSchema = z
+  .strictObject({
+    id: z.string().regex(/^[a-f0-9]{12}$/),
+    createdAt: IsoDateTimeSchema,
+    taskType: TaskTypeSchema,
+    input: InputSchema,
+    expected: ExpectedSchema.optional(),
+    actual: ActualSchema,
+    failure: FailureSchema,
+    severity: z.enum(['low', 'medium', 'high']),
+    status: z.enum(['new', 'triaged', 'converted_to_eval', 'fixed', 'wont_fix']),
+    tracking: BadCaseTrackingSchema,
+    relatedBadCaseIds: z
+      .array(z.string().regex(/^[a-f0-9]{12}$/))
+      .optional(),
+    latestEvidence: BadCaseEvidenceReferenceSchema.optional(),
+  })
+  .superRefine((badCase, context) => {
+    const expectedId = canonicalBadCaseId({
+      evalCaseId: badCase.tracking.evalCaseId,
+      layer: badCase.failure.layer,
+      type: badCase.failure.type,
+    });
+    if (badCase.id !== expectedId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['id'],
+        message: `id mismatch, expected canonical id ${expectedId}`,
+      });
+    }
+
+    const related = badCase.relatedBadCaseIds ?? [];
+    if (new Set(related).size !== related.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['relatedBadCaseIds'],
+        message: 'relatedBadCaseIds must be unique',
+      });
+    }
+    if (related.includes(badCase.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['relatedBadCaseIds'],
+        message: 'bad case cannot relate to itself',
+      });
+    }
+
+    const evaluationRunId = badCase.actual.evaluation?.runId;
+    if (
+      evaluationRunId !== undefined &&
+      !badCase.tracking.observedRunIds.includes(evaluationRunId)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['actual', 'evaluation', 'runId'],
+        message: 'evaluation runId must appear in observedRunIds',
+      });
+    }
+
+    const evidence = badCase.latestEvidence;
+    if (evidence === undefined) return;
+    if (!badCase.tracking.observedRunIds.includes(evidence.runId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['latestEvidence', 'runId'],
+        message: 'latest evidence runId must appear in observedRunIds',
+      });
+    }
+    if (
+      badCase.tracking.lastSeenRunId !== undefined &&
+      badCase.tracking.lastSeenRunId !== evidence.runId
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['latestEvidence', 'runId'],
+        message: 'latest evidence runId must equal lastSeenRunId',
+      });
+    }
+    if (evaluationRunId !== undefined && evaluationRunId !== evidence.runId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['latestEvidence', 'runId'],
+        message: 'latest evidence runId must equal evaluation runId',
+      });
+    }
+  });
+
+export type BadCase = z.infer<typeof BadCaseSchema>;
 
 export const BAD_CASES_PATH = join(
   process.cwd(),
@@ -113,10 +320,22 @@ export const BAD_CASES_PATH = join(
   'bad-cases.jsonl',
 );
 
+export interface BadCaseRepositoryOptions {
+  path?: string;
+}
+
+export interface BadCaseEvidenceOptions {
+  evalRoot?: string;
+}
+
+export interface BadCaseUpsertOptions
+  extends BadCaseRepositoryOptions,
+    BadCaseEvidenceOptions {}
+
 export function canonicalBadCaseId(params: {
   evalCaseId: string;
-  layer: BadCase['failure']['layer'];
-  type: BadCase['failure']['type'];
+  layer: BadCaseFailureLayer;
+  type: BadCaseFailureType;
 }): string {
   const { evalCaseId, layer, type } = params;
   if (!evalCaseId) throw new Error('canonicalBadCaseId requires evalCaseId');
@@ -126,16 +345,20 @@ export function canonicalBadCaseId(params: {
     .slice(0, 12);
 }
 
+export function decodeBadCase(value: unknown): BadCase {
+  return BadCaseSchema.parse(value);
+}
+
 function hasHumanState(badCase: BadCase): boolean {
   return badCase.status !== 'new';
 }
 
-function earlierIso(a: string, b: string): string {
-  return a <= b ? a : b;
+function earlierIso(left: string, right: string): string {
+  return left <= right ? left : right;
 }
 
-function laterIso(a: string, b: string): string {
-  return a >= b ? a : b;
+function laterIso(left: string, right: string): string {
+  return left >= right ? left : right;
 }
 
 function mergeTracking(
@@ -161,7 +384,7 @@ function mergeTracking(
     secondary.lastSeenAt >= primary.lastSeenAt
       ? (secondary.lastSeenRunId ?? primary.lastSeenRunId)
       : (primary.lastSeenRunId ?? secondary.lastSeenRunId);
-  return {
+  return BadCaseTrackingSchema.parse({
     ...primary,
     firstSeenAt: earlierIso(primary.firstSeenAt, secondary.firstSeenAt),
     lastSeenAt: laterIso(primary.lastSeenAt, secondary.lastSeenAt),
@@ -174,53 +397,57 @@ function mergeTracking(
       ...secondary.models,
       ...primary.models,
     },
-  };
-}
-
-export function mergeCanonicalObservations(a: BadCase, b: BadCase): BadCase {
-  if (a.id !== b.id) {
-    throw new Error(`cannot merge different bad cases: ${a.id} !== ${b.id}`);
-  }
-  const primary = hasHumanState(a) || !hasHumanState(b) ? a : b;
-  const secondary = primary === a ? b : a;
-  return {
-    ...primary,
-    createdAt: earlierIso(primary.createdAt, secondary.createdAt),
-    actual: secondary.actual,
-    tracking: mergeTracking(primary.tracking, secondary.tracking),
-    relatedBadCaseIds:
-      primary.relatedBadCaseIds || secondary.relatedBadCaseIds
-        ? Array.from(
-            new Set([
-              ...(primary.relatedBadCaseIds ?? []),
-              ...(secondary.relatedBadCaseIds ?? []),
-            ]),
-          )
-        : undefined,
-  };
-}
-
-export function assertCanonicalBadCase(badCase: BadCase): void {
-  const tracking = (badCase as Partial<BadCase>).tracking;
-  if (!tracking || !tracking.evalCaseId) {
-    throw new Error(`bad case ${badCase.id} missing tracking.evalCaseId`);
-  }
-  const expectedId = canonicalBadCaseId({
-    evalCaseId: tracking.evalCaseId,
-    layer: badCase.failure.layer,
-    type: badCase.failure.type,
   });
-  if (badCase.id !== expectedId) {
-    throw new Error(
-      `bad case ${badCase.id} id mismatch, expected canonical id ${expectedId}`,
-    );
-  }
 }
 
-export function normalizeCanonicalBadCases(cases: BadCase[]): BadCase[] {
+export function mergeCanonicalObservations(
+  leftValue: BadCase,
+  rightValue: BadCase,
+): BadCase {
+  const left = decodeBadCase(leftValue);
+  const right = decodeBadCase(rightValue);
+  if (left.id !== right.id) {
+    throw new Error(`cannot merge different bad cases: ${left.id} !== ${right.id}`);
+  }
+  const primary = hasHumanState(left) || !hasHumanState(right) ? left : right;
+  const secondary = primary === left ? right : left;
+  const latest =
+    left.tracking.lastSeenAt > right.tracking.lastSeenAt ? left : right;
+  const { latestEvidence: _oldEvidence, ...primaryWithoutEvidence } = primary;
+  const relatedBadCaseIds =
+    primary.relatedBadCaseIds || secondary.relatedBadCaseIds
+      ? Array.from(
+          new Set([
+            ...(primary.relatedBadCaseIds ?? []),
+            ...(secondary.relatedBadCaseIds ?? []),
+          ]),
+        )
+      : undefined;
+
+  return decodeBadCase({
+    ...primaryWithoutEvidence,
+    createdAt: earlierIso(primary.createdAt, secondary.createdAt),
+    actual: latest.actual,
+    tracking: mergeTracking(primary.tracking, secondary.tracking),
+    relatedBadCaseIds,
+    ...(latest.latestEvidence
+      ? { latestEvidence: latest.latestEvidence }
+      : {}),
+  });
+}
+
+export function assertCanonicalBadCase(
+  badCase: unknown,
+): asserts badCase is BadCase {
+  decodeBadCase(badCase);
+}
+
+export function normalizeCanonicalBadCases(
+  cases: readonly unknown[],
+): BadCase[] {
   const byId = new Map<string, BadCase>();
-  for (const badCase of cases) {
-    assertCanonicalBadCase(badCase);
+  for (const value of cases) {
+    const badCase = decodeBadCase(value);
     const existing = byId.get(badCase.id);
     byId.set(
       badCase.id,
@@ -230,36 +457,119 @@ export function normalizeCanonicalBadCases(cases: BadCase[]): BadCase[] {
   return [...byId.values()];
 }
 
-export function readBadCases(): BadCase[] {
-  if (!existsSync(BAD_CASES_PATH)) return [];
-  const cases = readFileSync(BAD_CASES_PATH, 'utf8')
+function badCasesPath(options: BadCaseRepositoryOptions): string {
+  return options.path ?? BAD_CASES_PATH;
+}
+
+export function readBadCases(
+  options: BadCaseRepositoryOptions = {},
+): BadCase[] {
+  const path = badCasesPath(options);
+  if (!existsSync(path)) return [];
+
+  const cases = readFileSync(path, 'utf8')
     .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as BadCase);
+    .flatMap((line, index) => {
+      if (!line.trim()) return [];
+      let value: unknown;
+      try {
+        value = JSON.parse(line) as unknown;
+      } catch (error) {
+        throw new Error(
+          `invalid bad case JSON at ${path}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      try {
+        return [decodeBadCase(value)];
+      } catch (error) {
+        throw new Error(
+          `invalid bad case at ${path}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    });
   return normalizeCanonicalBadCases(cases);
 }
 
-export function writeBadCases(cases: BadCase[]): void {
+export function writeBadCases(
+  cases: readonly unknown[],
+  options: BadCaseRepositoryOptions = {},
+): void {
   const merged = normalizeCanonicalBadCases(cases);
-  mkdirSync(dirname(BAD_CASES_PATH), { recursive: true });
+  const path = badCasesPath(options);
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(
-    BAD_CASES_PATH,
-    merged.map((c) => JSON.stringify(c)).join('\n') + '\n',
+    path,
+    merged.length > 0
+      ? `${merged.map((badCase) => JSON.stringify(badCase)).join('\n')}\n`
+      : '',
   );
 }
 
-/** 合并新捕获的失败用例,保留人工状态并更新最新观测。 */
-export function upsertBadCases(incoming: BadCase[]): number {
-  const existing = readBadCases();
-  const seen = new Set(existing.map((c) => c.id));
-  writeBadCases([...existing, ...incoming]);
-  return incoming.filter((c) => !seen.has(c.id)).length;
+export function verifyBadCaseLatestEvidence(
+  value: unknown,
+  options: BadCaseEvidenceOptions = {},
+): void {
+  const badCase = decodeBadCase(value);
+  const evidence = badCase.latestEvidence;
+  if (!evidence) {
+    throw new Error(`bad case ${badCase.id} missing latestEvidence`);
+  }
+
+  const run = readRun(evidence.runId, { evalRoot: options.evalRoot });
+  const expectedKind =
+    badCase.tracking.source === 'retrieval_eval' ? 'retrieval' : 'faith';
+  if (run.kind !== expectedKind) {
+    throw new Error(
+      `bad case ${badCase.id} evidence run ${run.id} has kind ${run.kind}, expected ${expectedKind}`,
+    );
+  }
+
+  const tracePath = evalArtifactPath(run.artifactPaths.trace, options.evalRoot);
+  if (!existsSync(tracePath)) {
+    throw new Error(
+      `bad case ${badCase.id} evidence trace artifact not found: ${run.artifactPaths.trace}`,
+    );
+  }
+  const envelope = readTraceEnvelopes(tracePath).find(
+    (candidate) => candidate.traceId === evidence.traceId,
+  );
+  if (!envelope) {
+    throw new Error(
+      `bad case ${badCase.id} trace ${evidence.traceId} not found in run ${run.id}`,
+    );
+  }
+  if (envelope.runId !== run.id || envelope.kind !== run.kind) {
+    throw new Error(
+      `bad case ${badCase.id} evidence envelope does not belong to run ${run.id}`,
+    );
+  }
+  if (envelope.evalCaseId !== badCase.tracking.evalCaseId) {
+    throw new Error(
+      `bad case ${badCase.id} evidence trace ${evidence.traceId} has evalCaseId ${envelope.evalCaseId}, expected ${badCase.tracking.evalCaseId}`,
+    );
+  }
 }
 
-/** 把一条检索评估未命中转成 canonical bad case。 */
+export function upsertBadCases(
+  incoming: readonly unknown[],
+  options: BadCaseUpsertOptions = {},
+): number {
+  const decodedIncoming = normalizeCanonicalBadCases(incoming);
+  for (const badCase of decodedIncoming) {
+    verifyBadCaseLatestEvidence(badCase, { evalRoot: options.evalRoot });
+  }
+
+  const repositoryOptions = { path: options.path };
+  const existing = readBadCases(repositoryOptions);
+  const seen = new Set(existing.map((badCase) => badCase.id));
+  writeBadCases([...existing, ...decodedIncoming], repositoryOptions);
+  return decodedIncoming.filter((badCase) => !seen.has(badCase.id)).length;
+}
+
 export function retrievalMiss(params: {
   evalCaseId: string;
   runId: string;
+  traceId: string;
   question: string;
   resource: string;
   expectedChunkIds: string[];
@@ -270,6 +580,7 @@ export function retrievalMiss(params: {
   const {
     evalCaseId,
     runId,
+    traceId,
     question,
     resource,
     expectedChunkIds,
@@ -279,6 +590,7 @@ export function retrievalMiss(params: {
   } = params;
   if (!evalCaseId) throw new Error('retrievalMiss requires evalCaseId');
   if (!runId) throw new Error('retrievalMiss requires runId');
+  if (!traceId) throw new Error('retrievalMiss requires traceId');
   const topHitCount = expectedChunkIds.filter((id) =>
     actualTopIds.includes(id),
   ).length;
@@ -286,21 +598,20 @@ export function retrievalMiss(params: {
     const index = rankedIds.indexOf(id);
     return { id, rank: index >= 0 ? index + 1 : 0 };
   });
-  const missingFromCandidates = ranks.filter((r) => r.rank === 0);
-  const outsideTopK = ranks.filter((r) => r.rank > k);
-  // 只要有 expected chunk 没进候选,就表示 retrieval 阶段漏召回。
-  const layer: BadCase['failure']['layer'] =
+  const missingFromCandidates = ranks.filter((rank) => rank.rank === 0);
+  const outsideTopK = ranks.filter((rank) => rank.rank > k);
+  const layer: BadCaseFailureLayer =
     missingFromCandidates.length > 0 ? 'retrieval' : 'rerank';
-  const failureType: BadCase['failure']['type'] =
+  const failureType: BadCaseFailureType =
     layer === 'retrieval' ? 'retrieval_miss' : 'rerank_miss';
   const missingNote =
     missingFromCandidates.length > 0
-      ? `未进候选: ${missingFromCandidates.map((r) => r.id).join(', ')}`
+      ? `未进候选: ${missingFromCandidates.map((rank) => rank.id).join(', ')}`
       : '';
   const rerankNote =
     outsideTopK.length > 0
       ? `候选中但排在 top-${k} 外: ${outsideTopK
-          .map((r) => `${r.id}(rank=${r.rank})`)
+          .map((rank) => `${rank.id}(rank=${rank.rank})`)
           .join(', ')}`
       : '';
   const note = [
@@ -312,22 +623,14 @@ export function retrievalMiss(params: {
     .join('; ');
   const createdAt = new Date().toISOString();
 
-  return {
-    id: canonicalBadCaseId({
-      evalCaseId,
-      layer,
-      type: failureType,
-    }),
+  return decodeBadCase({
+    id: canonicalBadCaseId({ evalCaseId, layer, type: failureType }),
     createdAt,
     taskType: 'explain_field',
     input: { question, context: { kind: resource } },
     expected: { sourceIds: expectedChunkIds },
-    actual: { sourceIds: actualTopIds, traceId: `${runId}:${evalCaseId}` },
-    failure: {
-      layer,
-      type: failureType,
-      note,
-    },
+    actual: { sourceIds: actualTopIds },
+    failure: { layer, type: failureType, note },
     severity: layer === 'retrieval' ? 'high' : 'medium',
     status: 'new',
     tracking: {
@@ -340,5 +643,6 @@ export function retrievalMiss(params: {
       observedRunIds: [runId],
       occurrenceCount: 1,
     },
-  };
+    latestEvidence: { runId, traceId },
+  });
 }

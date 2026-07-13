@@ -9,6 +9,10 @@ import type {
 import type { DefectType, FixEvalCase } from '../cases/fix-cases';
 import type { GenerateResult } from '../../server/agent';
 import { validateYamlDocuments } from '../../validation/validate';
+import {
+  metricObservation,
+  type MetricObservation,
+} from '../protocol';
 
 export type Doc = Record<string, unknown>;
 
@@ -473,59 +477,116 @@ export function computeFixEvalMetrics(
 function attemptMetricsRecord(
   prefix: string,
   stats: AttemptStats,
-): Record<string, number> {
+): Record<string, MetricObservation> {
+  const n = stats.n;
   return {
-    [`${prefix}.first_parse_ok_rate`]: stats.firstParseOk,
-    [`${prefix}.first_validation_ok_rate`]: stats.firstValidationOk,
-    [`${prefix}.repair_attempted_rate`]: stats.repairAttempted,
-    [`${prefix}.repair_success_after_fail_rate`]:
-      stats.repairSuccessAfterFail,
-    [`${prefix}.max_round_failure_rate`]: stats.maxRoundFailure,
-    [`${prefix}.avg_submits`]: stats.avgSubmits,
-    [`${prefix}.avg_rounds`]: stats.avgRounds,
+    [`${prefix}.first_parse_ok_rate`]: metricObservation(
+      n ? stats.firstParseOk : null,
+      stats.firstParseOk * n,
+      n,
+    ),
+    [`${prefix}.first_validation_ok_rate`]: metricObservation(
+      n ? stats.firstValidationOk : null,
+      stats.firstValidationOk * n,
+      n,
+    ),
+    [`${prefix}.repair_attempted_rate`]: metricObservation(
+      n ? stats.repairAttempted : null,
+      stats.repairAttempted * n,
+      n,
+    ),
+    [`${prefix}.repair_success_after_fail_rate`]: metricObservation(
+      stats.failedFirst ? stats.repairSuccessAfterFail : null,
+      stats.failedFirst ? stats.repairSuccessAfterFail * stats.failedFirst : 0,
+      stats.failedFirst,
+    ),
+    [`${prefix}.max_round_failure_rate`]: metricObservation(
+      n ? stats.maxRoundFailure : null,
+      stats.maxRoundFailure * n,
+      n,
+    ),
+    [`${prefix}.avg_submits`]: metricObservation(
+      n ? stats.avgSubmits : null,
+      stats.avgSubmits * n,
+      n,
+    ),
+    [`${prefix}.avg_rounds`]: metricObservation(
+      n ? stats.avgRounds : null,
+      stats.avgRounds * n,
+      n,
+    ),
   };
 }
 
 export function generationMetricsRecord(
   metrics: GenerationEvalMetrics,
-): Record<string, number> {
-  const record: Record<string, number> = {
-    'generation.valid_yaml_rate': metrics.caseCount
-      ? metrics.validYamlCount / metrics.caseCount
-      : 0,
-    'generation.kind_match_rate': metrics.validYamlCount
-      ? metrics.kindMatchCount / metrics.validYamlCount
-      : 0,
-    'generation.required_path_coverage': metrics.requiredPathCoverageAvg,
+): Record<string, MetricObservation> {
+  const record: Record<string, MetricObservation> = {
+    'generation.valid_yaml_rate': metricObservation(
+      metrics.caseCount ? metrics.validYamlCount / metrics.caseCount : null,
+      metrics.validYamlCount,
+      metrics.caseCount,
+    ),
+    'generation.kind_match_rate': metricObservation(
+      metrics.validYamlCount
+        ? metrics.kindMatchCount / metrics.validYamlCount
+        : null,
+      metrics.kindMatchCount,
+      metrics.validYamlCount,
+    ),
+    'generation.required_path_coverage': metricObservation(
+      metrics.validYamlCount ? metrics.requiredPathCoverageAvg : null,
+      metrics.requiredPathCoverageAvg * metrics.validYamlCount,
+      metrics.validYamlCount,
+    ),
+    'generation.consistency_pass_rate': metricObservation(
+      metrics.consistencyCaseCount
+        ? metrics.consistencyPassCount / metrics.consistencyCaseCount
+        : null,
+      metrics.consistencyPassCount,
+      metrics.consistencyCaseCount,
+    ),
     ...attemptMetricsRecord('generation', metrics.attemptStats),
   };
-  if (metrics.consistencyCaseCount) {
-    record['generation.consistency_pass_rate'] =
-      metrics.consistencyPassCount / metrics.consistencyCaseCount;
-  }
   return record;
 }
 
 export function fixMetricsRecord(
   metrics: FixEvalMetrics,
-): Record<string, number> {
-  const record: Record<string, number> = {
-    'fix.success_rate': metrics.caseCount
-      ? metrics.validYamlCount / metrics.caseCount
-      : 0,
-    'fix.kind_kept_rate': metrics.validYamlCount
-      ? metrics.kindKeptCount / metrics.validYamlCount
-      : 0,
-    'fix.intent_preserved_rate': metrics.validYamlCount
-      ? metrics.intentPreservedCount / metrics.validYamlCount
-      : 0,
-    'fix.preserve_coverage': metrics.preserveCoverageAvg,
+): Record<string, MetricObservation> {
+  const record: Record<string, MetricObservation> = {
+    'fix.success_rate': metricObservation(
+      metrics.caseCount ? metrics.validYamlCount / metrics.caseCount : null,
+      metrics.validYamlCount,
+      metrics.caseCount,
+    ),
+    'fix.kind_kept_rate': metricObservation(
+      metrics.validYamlCount
+        ? metrics.kindKeptCount / metrics.validYamlCount
+        : null,
+      metrics.kindKeptCount,
+      metrics.validYamlCount,
+    ),
+    'fix.intent_preserved_rate': metricObservation(
+      metrics.validYamlCount
+        ? metrics.intentPreservedCount / metrics.validYamlCount
+        : null,
+      metrics.intentPreservedCount,
+      metrics.validYamlCount,
+    ),
+    'fix.preserve_coverage': metricObservation(
+      metrics.validYamlCount ? metrics.preserveCoverageAvg : null,
+      metrics.preserveCoverageAvg * metrics.validYamlCount,
+      metrics.validYamlCount,
+    ),
     ...attemptMetricsRecord('fix', metrics.attemptStats),
   };
   for (const [type, value] of Object.entries(metrics.byDefectType)) {
-    record[`fix.defect.${type}.success_rate`] = value.total
-      ? value.fixed / value.total
-      : 0;
+    record[`fix.defect.${type}.success_rate`] = metricObservation(
+      value.total ? value.fixed / value.total : null,
+      value.fixed,
+      value.total,
+    );
   }
   return record;
 }

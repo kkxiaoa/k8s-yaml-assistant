@@ -1,7 +1,7 @@
 // 持久化向量索引读入内存后执行余弦检索;索引不匹配时才全量重建。
 
 import { performance } from 'node:perf_hooks';
-import { embed, EMBEDDING_MODEL } from './embeddings';
+import { embed, resolveEmbeddingModel } from './embeddings';
 import { CORPUS, type Chunk } from '../knowledge/corpus';
 import { chunkPaths, chunkResources } from '../knowledge/chunk';
 import { RESOURCE_BOOST } from './router';
@@ -111,9 +111,10 @@ let corpusIndexSource: 'persisted' | 'rebuilt' | null = null;
 async function loadOrBuildCorpusIndex(): Promise<IndexedChunk[]> {
   const persisted = readIndex();
   if (persisted) {
+    const embeddingModel = resolveEmbeddingModel();
     const wantHash = computeIndexHash(
       computeCorpusHash(CORPUS),
-      EMBEDDING_MODEL,
+      embeddingModel,
     );
     if (persisted.manifest.indexHash === wantHash) {
       corpusIndexSource = 'persisted';

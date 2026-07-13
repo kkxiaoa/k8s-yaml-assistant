@@ -14,12 +14,12 @@
 
 2026-07-10 的 eval harness 计划已完成 Task 1-8 的结构重构，但 correctness review 未通过，旧计划的 Task 9/10 不再执行。以下四组 spec/plan 已完成交叉自审，按顺序逐 Task 实施：
 
-1. `superpowers/specs/2026-07-12-eval-artifact-protocol-design.md` / `superpowers/plans/2026-07-12-eval-artifact-protocol.md`：run、trace、artifact 与 bad case 证据协议。
+1. `superpowers/specs/2026-07-12-eval-artifact-protocol-design.md` / `superpowers/plans/2026-07-12-eval-artifact-protocol.md`：run、trace、artifact 与 bad case 证据协议。已实施并完成 review。
 2. `superpowers/specs/2026-07-12-knowledge-provenance-corpus-identity-design.md` / `superpowers/plans/2026-07-12-knowledge-provenance-corpus-identity.md`：知识来源、目标资源、corpus 指纹与索引一致性。
 3. `superpowers/specs/2026-07-12-evaluator-validity-design.md` / `superpowers/plans/2026-07-12-evaluator-validity.md`：retrieval 分层、grounded answer、judge、generation/fix 的判定有效性。
 4. `superpowers/specs/2026-07-12-eval-metric-semantics-design.md` / `superpowers/plans/2026-07-12-eval-metric-semantics.md`：指标方向、分母、可比较性与 baseline 晋升门禁。
 
-当前下一步是执行第 1 份 Artifact Protocol plan。四份 plan 不合并成巨型 plan；每个 Task 完成后停止并等待 review，未经明确要求不 commit。
+当前执行第 2 份 Knowledge Provenance / Corpus Identity plan。四份 plan 不合并成巨型 plan；每个 Task 完成后停止并等待 review，未经明确要求不 commit。
 
 纠偏完成后的恢复顺序统一维护在 `AI应用开发能力训练实现方案.md` 的“唯一执行顺序”中。Stage 6/7、Claim-level Grounding、检索遗留项和工程 cleanup 不在本文件重复维护，避免多份 roadmap 漂移。
 

@@ -1,6 +1,7 @@
 import {
   BAD_CASES_PATH,
   readBadCases,
+  verifyBadCaseLatestEvidence,
   writeBadCases,
 } from '../src/eval/bad-cases';
 import {
@@ -115,7 +116,7 @@ function main(): void {
     candidates: [],
   });
   const candidates = buildFaithBadCaseCandidates({
-    traces: input.traces,
+    observations: input.observations,
     existingBadCases: canonicalExisting.cases,
     run: input.run,
     scope: input.scope,
@@ -128,13 +129,21 @@ function main(): void {
     : null;
 
   if (writeResult) {
+    for (const candidate of candidates) {
+      if (
+        (candidate.action === 'create' || candidate.action === 'recur') &&
+        candidate.issue
+      ) {
+        verifyBadCaseLatestEvidence(candidate.issue);
+      }
+    }
     writeBadCases(writeResult.cases);
   }
 
   printPreview({
     runId,
     scope: input.scope,
-    caseCount: input.traces.length,
+    caseCount: input.observations.length,
     warnings: [
       ...input.warnings,
       ...(writeResult?.warnings ?? canonicalExisting.warnings),

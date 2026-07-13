@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CORPUS } from '../knowledge/corpus';
@@ -28,10 +28,6 @@ async function check(
     );
     process.exitCode = 1;
   }
-}
-
-function sizeOf(path: string): number {
-  return existsSync(path) ? statSync(path).size : 0;
 }
 
 function chunk(id: string) {
@@ -85,16 +81,8 @@ const exactCases = [
 console.log('pipeline retrieval:');
 
 await check(
-  '未传 trace sink 时返回 trace,但不写旧 data/eval/traces.jsonl',
+  '未传 trace sink 时只返回 trace',
   async () => {
-    const oldEvalTracePath = join(
-      process.cwd(),
-      'data',
-      'eval',
-      'traces.jsonl',
-    );
-    const before = sizeOf(oldEvalTracePath);
-
     const result = await retrieveContext(
       '解释当前字段',
       3,
@@ -111,7 +99,6 @@ await check(
         'policy.deployment.image.tag.no-latest',
       ],
     );
-    assert.equal(sizeOf(oldEvalTracePath), before);
   },
 );
 

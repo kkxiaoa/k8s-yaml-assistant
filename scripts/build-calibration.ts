@@ -1,13 +1,22 @@
 // 从人工 judge labels 和最新 faith trace 生成可执行 calibration snapshot。
 // 用法: npm run build:calibration
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CORPUS } from '../src/knowledge/corpus';
-import type { FaithTrace } from '../src/eval/faith-store';
+import { buildJudgeCalibrationCaseFromFaith } from '../src/eval/calibration-snapshot';
+import {
+  decodeFaithTrace,
+  type FaithTrace,
+} from '../src/eval/faith-store';
 import type { JudgeCalibrationCase } from '../src/eval/metrics/judge-metrics';
-import { RUNS_DIR, runKind, type EvalRun } from '../src/eval/run-store';
-import { formatSources } from '../src/retrieval/sources';
+import { listRuns } from '../src/eval/run-store';
+import type { EvalRun } from '../src/eval/protocol';
+import {
+  evalArtifactPath,
+  readTraceEnvelopes,
+} from '../src/eval/artifacts';
+
+type FaithEvalRun = Extract<EvalRun, { kind: 'faith' }>;
 
 interface JudgeCalibrationLabel {
   id: string;
@@ -61,49 +70,40 @@ function readExistingCalibration(): Map<string, JudgeCalibrationCase> {
   return new Map(rows.map((row) => [row.id, row]));
 }
 
-function faithRunsNewestFirst(): EvalRun[] {
-  if (!existsSync(RUNS_DIR)) return [];
-  return readdirSync(RUNS_DIR)
-    .filter((f) => f.endsWith('.json'))
-    .sort()
-    .reverse()
-    .map(
-      (file) =>
-        JSON.parse(readFileSync(join(RUNS_DIR, file), 'utf8')) as EvalRun,
-    )
+function faithRunsNewestFirst(): FaithEvalRun[] {
+  return listRuns({ kind: 'faith' })
     .filter(
-      (run) =>
-        runKind(run) === 'faith' &&
-        run.faithSelection?.scope !== 'smoke' &&
-        !!run.artifactPaths?.tracePath,
-    );
+      (run): run is FaithEvalRun =>
+        run.kind === 'faith' &&
+        run.status === 'completed' &&
+        run.scope !== 'smoke',
+    )
+    .reverse()
 }
 
-function readTraceFile(path: string): FaithTrace[] {
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as FaithTrace);
+function readTraceFile(run: FaithEvalRun): FaithTrace[] {
+  return readTraceEnvelopes(evalArtifactPath(run.artifactPaths.trace)).map(
+    (envelope) => {
+      if (envelope.runId !== run.id || envelope.kind !== 'faith') {
+        throw new Error(`faith trace envelope mismatch: ${envelope.traceId}`);
+      }
+      const trace = decodeFaithTrace(envelope.payload);
+      if (trace.id !== envelope.evalCaseId) {
+        throw new Error(`faith trace payload mismatch: ${envelope.traceId}`);
+      }
+      return trace;
+    },
+  );
 }
 
 function latestTraceById(
   id: string,
-): { trace: FaithTrace; run: EvalRun } | null {
+): { trace: FaithTrace; run: FaithEvalRun } | null {
   for (const run of faithRunsNewestFirst()) {
-    const found = readTraceFile(run.artifactPaths!.tracePath!).find(
-      (t) => t.id === id,
-    );
+    const found = readTraceFile(run).find((trace) => trace.id === id);
     if (found) return { trace: found, run };
   }
   return null;
-}
-
-/** 由 topIds 重建喂给生成的 context 文本(与 faithfulness-eval.ts 同格式)。 */
-function rebuildContext(topIds: string[]): string {
-  const chunks = topIds
-    .map((id) => CORPUS.find((cc) => cc.id === id))
-    .filter((x): x is (typeof CORPUS)[number] => x !== undefined);
-  return formatSources(chunks).context;
 }
 
 function main(): void {
@@ -130,15 +130,11 @@ function main(): void {
     }
     const { trace: t, run } = found;
     refreshed++;
-    return {
-      id: l.id,
-      category: l.category,
-      question: t.question,
-      context: rebuildContext(t.retrieval.topIds),
-      answer: t.answer,
-      human: l.human,
+    return buildJudgeCalibrationCaseFromFaith({
+      label: l,
+      trace: t,
       sourceFaithRunId: run.id,
-    };
+    });
   });
   writeFileSync(CALIBRATION_PATH, out.map((o) => JSON.stringify(o)).join('\n') + '\n');
   console.error(`已写 ${out.length} 条 → ${CALIBRATION_PATH}`);
