@@ -1,15 +1,16 @@
-// baseline 晋升入口。legacy-v1 以及结构不完整的 run 不允许晋升。
-// 用法:npm run eval:promote -- <runId>
+// 显式将一个通过完整门禁的 run 晋升为 baseline。
+// 用法: npm run eval:promote -- <runId>
 
 import { baselinePath } from '../src/eval/artifacts';
 import { promoteRun } from '../src/eval/run-store';
 
 function main(): void {
-  const runId = process.argv[2];
-  if (!runId) {
-    console.error('用法:npm run eval:promote -- <runId>');
+  const args = process.argv.slice(2);
+  if (args.length !== 1) {
+    console.error('用法: npm run eval:promote -- <runId>');
     process.exit(1);
   }
+  const runId = args[0]!;
 
   const baseline = promoteRun(runId);
   console.log(`已晋升 baseline → ${baselinePath(baseline.kind)}`);

@@ -80,12 +80,15 @@ export interface GenerationCaseContract extends GenerationAssertionContract {
   rationale?: string[];
 }
 
-export type DefectType =
-  | 'type_error'
-  | 'missing_required'
-  | 'unknown_field'
-  | 'enum_error'
-  | 'parse_error';
+export const DEFECT_TYPES = [
+  'type_error',
+  'missing_required',
+  'unknown_field',
+  'enum_error',
+  'parse_error',
+] as const;
+
+export type DefectType = (typeof DEFECT_TYPES)[number];
 
 export interface FixCase {
   id: string;

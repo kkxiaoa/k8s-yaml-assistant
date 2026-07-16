@@ -17,16 +17,16 @@
 | 生成资源 YAML | Web `/api/generate`;CLI `npm run gen` | ✅ |
 | 上下文化问答 | Web `/api/ask` | ✅ |
 | 答案依据展示 | SSE `sources` + 前端“答案依据” | ✅ |
-| 检索评估 | `npm run eval` | correctness 纠偏中 |
-| Grounded Answer / Judge 评估 | `npm run eval:faith`、`npm run eval:judge` | correctness 纠偏中 |
-| Generation / Fix 评估 | `npm run eval:gen`、`npm run eval:fix` | evaluator 纠偏中 |
+| 检索评估 | `npm run eval` | 契约已纠偏，待重跑 full baseline |
+| Grounded Answer / Judge 评估 | `npm run eval:faith`、`npm run eval:judge` | 契约已纠偏，待重跑 calibration/baseline |
+| Generation / Fix 评估 | `npm run eval:gen`、`npm run eval:fix` | evaluator 已纠偏，待重跑 full baseline |
 | schema ingestion 骨架 | `npm run ingest:schemas` | ✅ |
 
 ## Web 使用
 
 ```bash
 npm install
-cp .env.example .env   # 填入 DEEPSEEK_API_KEY 和 VOYAGE_API_KEY
+# 创建 .env，填入 DEEPSEEK_API_KEY 和 VOYAGE_API_KEY
 npm run dev
 ```
 
@@ -144,29 +144,62 @@ interface SchemaDoc {
 
 ## 评估与验证
 
+### 本地质量门禁
+
 ```bash
-# TypeScript
-npx tsc --noEmit
-
-# 构建
-npm run build
-
-# 纯函数校验单测
+npx tsc --noEmit -p tsconfig.json
 npm test
-
-# 检索评估
-npm run eval
-
-# 生成忠实度评估
-npm run eval:faith
-
-# Judge / Generation / Fix 评估
-npm run eval:judge
-npm run eval:gen
-npm run eval:fix
+npm run eval:check
+npm run build
 ```
 
-当前 eval harness 正在进行 correctness 纠偏,旧 baseline 不作为继续调优的依据。
+这些命令不调用模型、embedding 或 rerank。`npm run build` 使用 `next/font`，首次构建可能访问 Google Fonts。
+
+### Eval 调用与成本边界
+
+| 命令 | 外部调用 | 用途与边界 |
+|---|---|---|
+| `npm run eval` | Voyage embedding、rerank；index miss 时会重建全量 corpus embedding | full semantic retrieval eval |
+| `npm run eval:faith` | Voyage embedding/rerank；DeepSeek 回答与 judge | full Grounded Answer eval |
+| `npm run eval:faith -- <N>` / `--policy` | 同上 | smoke/policy 子集，只用于诊断，不可晋升 baseline |
+| `npm run build:calibration` | 无 | 从已完成的非 smoke faith run/trace 与人工标签生成 judge calibration snapshot |
+| `npm run eval:judge` | DeepSeek judge，默认每个 case 计划 5 票 | 完整 calibration eval；先执行 `build:calibration` |
+| `npm run eval:gen` | DeepSeek generation/repair 请求 | full Generation eval；repair 会增加请求轮次 |
+| `npm run eval:fix` | DeepSeek fix/repair 请求 | full Fix eval；repair 会增加请求轮次 |
+| `npm run eval:compare -- <runId>` | 无 | 本地读取 run 与同 kind baseline，不修改 artifact |
+| `npm run eval:promote -- <runId>` | 无 | 人工审核后显式晋升；不会由 eval 或 compare 自动执行 |
+
+调用外部服务的命令会产生实际 API 请求和费用。runner 会在执行前打印 case 数，judge/repair 的实际尝试次数保存在 trace；当前尚未贯通统一 usage/cost 统计，因此执行真实 eval 前应按 case 数、票数和最大 repair 轮次估算调用量。
+
+### Run、Trace、Compare 与 Promote
+
+每次 eval 使用独立 runId，并写入：
+
+```text
+data/eval/runs/<runId>.json
+data/eval/traces/<runId>.<kind>.jsonl
+```
+
+run 记录 dataset、模型/corpus/index/prompt/config identity、metric definition version、状态和 trace 相对路径；trace 保存逐 case 输入、结果、outcome 和结构化错误阶段。baseline 只在显式 promote 后写入：
+
+```text
+data/eval/baselines/<kind>.json
+```
+
+compare 只有在 kind、dataset id/hash/caseCount、metric definition version 兼容，且 retrieval 的 `k` 相同时才输出 improved/regressed。模型、corpus、index、prompt 等配置变化作为实验变量展示；required metric 缺失属于阻断性 harness gap，`null` observation 显示为 N/A，不生成方向结论。
+
+promote 只接受 completed、完整 scope、当前 metric registry、required metric 非 null、trace selection 完整且 harness error 为 0 的 run。retrieval/faith/generation/fix 必须是 full；judge 必须匹配当前完整 calibration snapshot。baseline 是可移植 snapshot，不保存 run/trace 路径或工作区绝对路径。
+
+模型或基础设施出错时，先保留并检查本次证据：
+
+```bash
+cat data/eval/runs/<runId>.json
+less data/eval/traces/<runId>.<kind>.jsonl
+```
+
+先查看 run 的 `status/failure`，再按 trace 的 `outcome/error.stage/error.message` 定位 case。不要删除或复用原 runId；修复后重新执行会生成新 runId，不会覆盖原 run/trace。
+
+当前契约纠偏已完成结构实现，正式 baseline 尚待新版本 full run 和逐项人工审核；旧 baseline 与当前 identity/metric registry 不可直接比较。
 
 评估数据与运行产物的边界:
 
@@ -174,7 +207,7 @@ npm run eval:fix
 data/eval/
   bad-cases.jsonl                 # 可提交的问题台账
   judge-calibration-labels.jsonl  # 可提交的人工 calibration 标签
-  judge-calibration.jsonl         # 可提交的 calibration case snapshot
+  judge-calibration.jsonl         # build:calibration 生成的 judge 输入快照
   baselines/<kind>.json           # 人工晋升后提交的可移植 baseline snapshot
   runs/<runId>.json               # 本地 EvalRun,不提交
   traces/<runId>.<kind>.jsonl     # 本地逐 case TraceEnvelope,不提交

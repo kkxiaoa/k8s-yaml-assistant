@@ -9,15 +9,16 @@ import { searchCorpusTraced } from '../retrieval/retrieve';
 import { toTraceHit, type RetrievalTrace } from '../retrieval/trace';
 import { retrievalMiss, upsertBadCases, type BadCase } from './bad-cases';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
-import { metricObservation, type TraceEnvelope } from './protocol';
+import type { TraceEnvelope } from './protocol';
+import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
 import {
-  LEGACY_METRIC_DEFINITION_VERSION,
   buildRetrievalEvalTracePayload,
   harnessErrorMetrics,
   isDirectExecution,
   retrievalDatasetIdentity,
   retrievalExecutionError,
   retrievalEvalConfig,
+  retrievalMetricsRecord,
   selectRetrievalCases,
   toPersistedPayload,
 } from './runner-protocol';
@@ -33,8 +34,6 @@ import {
 } from './run-session';
 
 interface Result {
-  recall: number | null;
-  mrr: number | null;
   recallNumerator: number;
   mrrNumerator: number;
   caseCount: number;
@@ -42,8 +41,6 @@ interface Result {
 
 function result(recallNumerator: number, mrrNumerator: number, n: number): Result {
   return {
-    recall: n ? recallNumerator / n : null,
-    mrr: n ? mrrNumerator / n : null,
     recallNumerator,
     mrrNumerator,
     caseCount: n,
@@ -197,7 +194,7 @@ async function main(): Promise<void> {
       kind: 'retrieval',
       scope: 'full',
       dataset: setup.dataset,
-      metricDefinitionVersion: LEGACY_METRIC_DEFINITION_VERSION,
+      metricDefinitionVersion: METRIC_DEFINITION_VERSION,
       config: setup.config,
     }),
   );
@@ -210,10 +207,24 @@ async function main(): Promise<void> {
       `评估(k=${k},语料 ${CORPUS.length} 段,语义检索标注 ${cases.length} 条)\n`,
     );
     semantic = await evaluateSemanticSearch({ cases, k, runId, session });
+    const metrics = await executeEvalRunStage('metric_aggregation', () => ({
+      ...retrievalMetricsRecord({
+        recallNumerator: semantic.recallNumerator,
+        mrrNumerator: semantic.mrrNumerator,
+        caseCount: semantic.caseCount,
+        retrievalMissCount: semantic.misses.filter(
+          (miss) => miss.failure.type === 'retrieval_miss',
+        ).length,
+        rerankMissCount: semantic.misses.filter(
+          (miss) => miss.failure.type === 'rerank_miss',
+        ).length,
+      }),
+      ...harnessErrorMetrics('retrieval', semantic.harnessErrorCount),
+    }));
 
     console.error('━━━━━━ 语义检索汇总 ━━━━━━');
     console.error(
-      `Recall@${k}=${formatRate(semantic.recall)}  MRR@${k}=${formatMrr(semantic.mrr)}`,
+      `Recall@${k}=${formatRate(metrics['retrieval.semantic.recall'].value)}  MRR@${k}=${formatMrr(metrics['retrieval.semantic.mrr'].value)}`,
     );
     console.error(
       `quality fail=${semantic.misses.length} 条；skipped=0 条；harness error=${semantic.harnessErrorCount} 条；质量分母=${semantic.caseCount}/${cases.length}`,
@@ -222,19 +233,6 @@ async function main(): Promise<void> {
       'EditorContext exact-field 分流由独立确定性测试覆盖。',
     );
 
-    const metrics = await executeEvalRunStage('metric_aggregation', () => ({
-      'retrieval.semantic.recall': metricObservation(
-        semantic.recall,
-        semantic.recallNumerator,
-        semantic.caseCount,
-      ),
-      'retrieval.semantic.mrr': metricObservation(
-        semantic.mrr,
-        semantic.mrrNumerator,
-        semantic.caseCount,
-      ),
-      ...harnessErrorMetrics('retrieval', semantic.harnessErrorCount),
-    }));
     added = await executeEvalRunStage('artifact_write', () =>
       upsertBadCases(semantic.misses),
     );
@@ -250,7 +248,7 @@ async function main(): Promise<void> {
     `\n逐条 trace → ${tracePath}` +
       `\n运行结果 → ${runPath(runId)}` +
       `\n语义检索未命中 ${semantic.misses.length} 条,新沉淀 bad-cases ${added} 条` +
-      '\n指标仍使用 legacy-v1 定义,当前 run 不可晋升 baseline。',
+      `\n指标定义版本 → ${METRIC_DEFINITION_VERSION}`,
   );
 }
 

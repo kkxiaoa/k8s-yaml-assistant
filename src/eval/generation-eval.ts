@@ -11,8 +11,9 @@ import {
   generationMetricsRecord,
   type GenerationCaseResult,
 } from './metrics/generation-metrics';
+import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
+import { ratioObservation } from './protocol';
 import {
-  LEGACY_METRIC_DEFINITION_VERSION,
   generationDatasetIdentity,
   generationEnvelopeOutcome,
   generationEvalConfig,
@@ -31,14 +32,14 @@ import {
   startEvalRun,
 } from './run-session';
 
-function percentage(value: number, measured: boolean): string {
-  return measured ? `${(value * 100).toFixed(1)}%` : 'N/A';
+function countRate(value: number, denominator: number): string {
+  const rate = ratioObservation(value, denominator).value;
+  return rate === null ? 'N/A' : `${(rate * 100).toFixed(1)}%`;
 }
 
-function countRate(value: number, denominator: number): string {
-  return denominator
-    ? `${((value / denominator) * 100).toFixed(1)}%`
-    : 'N/A';
+function average(value: number, denominator: number): string {
+  const result = ratioObservation(value, denominator).value;
+  return result === null ? 'N/A' : result.toFixed(2);
 }
 
 function reportGenerationCase(result: GenerationCaseResult): void {
@@ -69,7 +70,7 @@ async function main(): Promise<void> {
       kind: 'generation',
       scope: 'full',
       dataset: setup.dataset,
-      metricDefinitionVersion: LEGACY_METRIC_DEFINITION_VERSION,
+      metricDefinitionVersion: METRIC_DEFINITION_VERSION,
       config: setup.config,
     }),
   );
@@ -142,26 +143,25 @@ async function main(): Promise<void> {
       computeGenerationEvalMetrics(batch.results),
     );
     const stats = metrics.attemptStats;
-    const hasCases = metrics.caseCount > 0;
 
     console.error('\n━━━━━━ 多轮行为(基于 attempts)━━━━━━');
     console.error(
-      `首轮 parse 成功率          : ${percentage(stats.firstParseOk, hasCases)}`,
+      `首轮 parse 成功率          : ${countRate(stats.firstParseOkCount, stats.caseCount)}`,
     );
     console.error(
-      `首轮 validation 通过率     : ${percentage(stats.firstValidationOk, hasCases)}`,
+      `首轮 validation 通过率     : ${countRate(stats.firstValidationOkCount, stats.caseCount)}`,
     );
     console.error(
-      `触发修复率(首轮失败)      : ${percentage(stats.repairAttempted, hasCases)}`,
+      `触发修复率(首轮失败)      : ${countRate(stats.repairAttemptedCount, stats.caseCount)}`,
     );
     console.error(
-      `失败后修复成功率           : ${stats.failedFirst ? percentage(stats.repairSuccessAfterFail, true) : 'N/A'}  (${stats.failedFirst} 例首轮失败)`,
+      `失败后修复成功率           : ${countRate(stats.repairSuccessAfterFailCount, stats.failedFirstCount)}  (${stats.failedFirstCount} 例首轮失败)`,
     );
     console.error(
-      `达上限仍失败率             : ${percentage(stats.maxRoundFailure, hasCases)}`,
+      `达上限仍失败率             : ${countRate(stats.maxRoundFailureCount, stats.caseCount)}`,
     );
     console.error(
-      `平均提交次数 / 平均轮数    : ${hasCases ? `${stats.avgSubmits.toFixed(2)} / ${stats.avgRounds.toFixed(2)}` : 'N/A / N/A'}`,
+      `平均提交次数 / 平均轮数    : ${average(stats.submitCount, stats.caseCount)} / ${average(stats.roundCount, stats.caseCount)}`,
     );
 
     console.error('\n━━━━━━ 内容正确性 汇总 ━━━━━━');

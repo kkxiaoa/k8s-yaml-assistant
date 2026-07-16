@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { ratioObservation } from './protocol';
 import {
   formatMetricDelta,
+  formatMetricObservation,
   formatMetricValue,
-  isPercentMetric,
 } from './metric-format';
 
 let passed = 0;
@@ -11,9 +12,9 @@ function check(name: string, fn: () => void): void {
     fn();
     passed++;
     console.log(`  ✓ ${name}`);
-  } catch (e) {
+  } catch (error) {
     console.error(
-      `  ✗ ${name}\n    ${e instanceof Error ? e.message : String(e)}`,
+      `  ✗ ${name}\n    ${error instanceof Error ? error.message : String(error)}`,
     );
     process.exitCode = 1;
   }
@@ -21,21 +22,29 @@ function check(name: string, fn: () => void): void {
 
 console.log('metric-format:');
 
-check('rate/coverage/recall/mrr 按百分比显示', () => {
-  assert.equal(isPercentMetric('generation.valid_yaml_rate'), true);
-  assert.equal(isPercentMetric('fix.preserve_coverage'), true);
-  assert.equal(isPercentMetric('retrieval.semantic.recall'), true);
-  assert.equal(isPercentMetric('retrieval.semantic.mrr'), true);
-  assert.equal(formatMetricValue('generation.valid_yaml_rate', 0.875), '87.5%');
-  assert.equal(formatMetricDelta('retrieval.semantic.recall', -0.012), '-1.2%');
+check('ratio formatting uses registry unit and includes sample counts', () => {
+  assert.equal(formatMetricValue('ratio', 0.875), '87.5%');
+  assert.equal(formatMetricDelta('ratio', -0.012), '-1.2%');
+  assert.equal(
+    formatMetricObservation('ratio', ratioObservation(7, 8)),
+    '87.5% (7/8)',
+  );
+  assert.equal(
+    formatMetricObservation('ratio', ratioObservation(0, 0)),
+    'N/A (0/0)',
+  );
 });
 
-check('avg/count 按普通数值显示', () => {
-  assert.equal(isPercentMetric('generation.avg_rounds'), false);
-  assert.equal(isPercentMetric('judge.judged'), false);
-  assert.equal(formatMetricValue('generation.avg_rounds', 1.25), '1.250');
-  assert.equal(formatMetricValue('judge.judged', 20), '20');
-  assert.equal(formatMetricDelta('generation.avg_rounds', 0.5), '+0.500');
+check('number and count formatting no longer infer unit from metric key', () => {
+  assert.equal(formatMetricValue('number', 1.25), '1.250');
+  assert.equal(formatMetricValue('count', 20), '20');
+  assert.equal(formatMetricDelta('number', 0.5), '+0.500');
+});
+
+check('declared latency, token, and cost units retain their units', () => {
+  assert.equal(formatMetricValue('milliseconds', 12.5), '12.500 ms');
+  assert.equal(formatMetricValue('tokens', 128), '128 tokens');
+  assert.equal(formatMetricValue('usd', 0.012345), '$0.012345');
 });
 
 console.log(`\n通过 ${passed} 项`);

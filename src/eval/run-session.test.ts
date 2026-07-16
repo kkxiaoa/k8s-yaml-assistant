@@ -23,6 +23,7 @@ import {
   type EvalRun,
   type TraceEnvelope,
 } from './protocol';
+import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
 import {
   EvalCaseExecutionError,
   EvalRunExecutionError,
@@ -83,7 +84,7 @@ function definition(
       caseIds,
       caseCount: caseIds.length,
     },
-    metricDefinitionVersion: 'legacy-v1',
+    metricDefinitionVersion: METRIC_DEFINITION_VERSION,
     config: {
       corpusContentHash: 'b'.repeat(64),
       corpusManifestHash: 'e'.repeat(64),
@@ -97,6 +98,25 @@ function definition(
       },
       k: 3,
     },
+  };
+}
+
+function retrievalMetrics(
+  caseCount: number,
+  harnessErrorCount = 0,
+): Record<string, ReturnType<typeof metricObservation>> {
+  return {
+    'retrieval.semantic.recall': metricObservation(
+      caseCount === 0 ? null : 1,
+      caseCount,
+      caseCount,
+    ),
+    'retrieval.semantic.mrr': metricObservation(
+      caseCount === 0 ? null : 1,
+      caseCount,
+      caseCount,
+    ),
+    'retrieval.harness_error_count': metricObservation(harnessErrorCount),
   };
 }
 
@@ -252,9 +272,7 @@ check('complete accepts success, skipped, and error outcomes', () => {
     }),
   );
 
-  const metrics = {
-    'cases.completed': metricObservation(1, 3, 3),
-  };
+  const metrics = retrievalMetrics(2, 1);
   session.complete(metrics);
 
   const run = readRun('run-1', root);
@@ -279,6 +297,52 @@ check('complete accepts success, skipped, and error outcomes', () => {
     () => session.fail('artifact_write', new Error('late')),
     /completed/,
   );
+});
+
+check('complete enforces the current registered metric contract', () => {
+  const staleRoot = evalRoot();
+  const staleSession = startEvalRun(
+    {
+      ...definition(['case-1'], 'stale-run'),
+      metricDefinitionVersion: 'legacy-v1',
+    },
+    { evalRoot: staleRoot },
+  );
+  staleSession.appendCase(
+    trace('case-1', { runId: 'stale-run' }),
+  );
+  assert.throws(
+    () => staleSession.complete(retrievalMetrics(1)),
+    (error: unknown) => {
+      assert.ok(error instanceof EvalRunExecutionError);
+      assert.equal(error.stage, 'metric_aggregation');
+      assert.match(error.message, /metric definition version.*current/i);
+      return true;
+    },
+  );
+  assert.equal(readRun('stale-run', staleRoot).status, 'running');
+
+  const root = evalRoot();
+  const session = startEvalRun(definition(['case-1']), { evalRoot: root });
+  session.appendCase(trace('case-1'));
+  assert.throws(
+    () =>
+      session.complete({
+        ...retrievalMetrics(1),
+        'retrieval.unregistered': metricObservation(0),
+      }),
+    /unregistered metric key.*retrieval\.unregistered/i,
+  );
+
+  const missingRequired = retrievalMetrics(1);
+  delete missingRequired['retrieval.semantic.recall'];
+  assert.throws(
+    () => session.complete(missingRequired),
+    /missing required metric.*retrieval\.semantic\.recall/i,
+  );
+
+  session.complete(retrievalMetrics(1));
+  assert.equal(readRun('run-1', root).status, 'completed');
 });
 
 check('complete rejects missing or tampered trace coverage', () => {
@@ -404,9 +468,7 @@ await checkAsync(
       assert.deepEqual(summary.harnessErrors, [
         { evalCaseId: 'case-error', stage },
       ]);
-      session.complete({
-        'retrieval.harness_error_count': metricObservation(1),
-      });
+      session.complete(retrievalMetrics(2, 1));
       const envelopes = readTraceEnvelopes(
         evalArtifactPath(traceRelativePath(runId, 'retrieval'), root),
       );
@@ -461,7 +523,7 @@ await checkAsync('artifact append failure aborts the batch', async () => {
 check('an empty dataset completes without a fabricated trace file', () => {
   const root = evalRoot();
   const session = startEvalRun(definition([]), { evalRoot: root });
-  session.complete({ 'cases.completed': metricObservation(null, 0, 0) });
+  session.complete(retrievalMetrics(0));
 
   assert.equal(readRun('run-1', root).status, 'completed');
   assert.equal(

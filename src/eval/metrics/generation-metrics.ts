@@ -4,6 +4,7 @@ import type { GenerationEvalCase } from '../cases/generation-cases';
 import type { GenerateResult } from '../../server/agent';
 import { validateYamlDocuments } from '../../validation/validate';
 import {
+  DEFECT_TYPES,
   evaluateExpectedResource,
   evaluateFixResourceSet,
   evaluateGenerationAssertions,
@@ -24,24 +25,24 @@ import {
 } from '../assertions';
 import {
   metricObservation,
+  ratioObservation,
   type MetricObservation,
 } from '../protocol';
 
 /** 从每次 submit 的结构化 attempts 汇总多轮行为(gen/fix 共用)。 */
 export interface AttemptStats {
-  n: number;
-  firstParseOk: number; // 首轮 parse 成功率
-  firstValidationOk: number; // 首轮校验通过率
-  repairAttempted: number; // 首轮失败 → 尝试修复 的比例
-  failedFirst: number; // 首轮失败的用例数(下面比率的分母)
-  repairSuccessAfterFail: number; // 首轮失败者中最终修成的比例
-  maxRoundFailure: number; // 达上限仍失败(yaml=null)的比例
-  avgSubmits: number;
-  avgRounds: number;
+  caseCount: number;
+  firstParseOkCount: number;
+  firstValidationOkCount: number;
+  repairAttemptedCount: number;
+  failedFirstCount: number;
+  repairSuccessAfterFailCount: number;
+  maxRoundFailureCount: number;
+  submitCount: number;
+  roundCount: number;
 }
 
 export function attemptStats(results: GenerateResult[]): AttemptStats {
-  const n = results.length || 1;
   let firstParse = 0;
   let firstVal = 0;
   let repairAtt = 0;
@@ -65,15 +66,15 @@ export function attemptStats(results: GenerateResult[]): AttemptStats {
     roundsSum += r.rounds;
   }
   return {
-    n: results.length,
-    firstParseOk: firstParse / n,
-    firstValidationOk: firstVal / n,
-    repairAttempted: repairAtt / n,
-    failedFirst,
-    repairSuccessAfterFail: failedFirst ? repairedFromFail / failedFirst : 1,
-    maxRoundFailure: capFail / n,
-    avgSubmits: submitsSum / n,
-    avgRounds: roundsSum / n,
+    caseCount: results.length,
+    firstParseOkCount: firstParse,
+    firstValidationOkCount: firstVal,
+    repairAttemptedCount: repairAtt,
+    failedFirstCount: failedFirst,
+    repairSuccessAfterFailCount: repairedFromFail,
+    maxRoundFailureCount: capFail,
+    submitCount: submitsSum,
+    roundCount: roundsSum,
   };
 }
 
@@ -352,7 +353,12 @@ export function computeGenerationEvalMetrics(
 export function computeFixEvalMetrics(
   results: FixCaseResult[],
 ): FixEvalMetrics {
-  const byDefectType = {} as FixEvalMetrics['byDefectType'];
+  const byDefectType = Object.fromEntries(
+    DEFECT_TYPES.map((defectType) => [
+      defectType,
+      { total: 0, fixed: 0 },
+    ]),
+  ) as FixEvalMetrics['byDefectType'];
   for (const result of results) {
     const current = byDefectType[result.defectType] ?? { total: 0, fixed: 0 };
     current.total++;
@@ -385,42 +391,34 @@ function attemptMetricsRecord(
   prefix: string,
   stats: AttemptStats,
 ): Record<string, MetricObservation> {
-  const n = stats.n;
   return {
-    [`${prefix}.first_parse_ok_rate`]: metricObservation(
-      n ? stats.firstParseOk : null,
-      stats.firstParseOk * n,
-      n,
+    [`${prefix}.first_parse_ok_rate`]: ratioObservation(
+      stats.firstParseOkCount,
+      stats.caseCount,
     ),
-    [`${prefix}.first_validation_ok_rate`]: metricObservation(
-      n ? stats.firstValidationOk : null,
-      stats.firstValidationOk * n,
-      n,
+    [`${prefix}.first_validation_ok_rate`]: ratioObservation(
+      stats.firstValidationOkCount,
+      stats.caseCount,
     ),
-    [`${prefix}.repair_attempted_rate`]: metricObservation(
-      n ? stats.repairAttempted : null,
-      stats.repairAttempted * n,
-      n,
+    [`${prefix}.repair_attempted_rate`]: ratioObservation(
+      stats.repairAttemptedCount,
+      stats.caseCount,
     ),
-    [`${prefix}.repair_success_after_fail_rate`]: metricObservation(
-      stats.failedFirst ? stats.repairSuccessAfterFail : null,
-      stats.failedFirst ? stats.repairSuccessAfterFail * stats.failedFirst : 0,
-      stats.failedFirst,
+    [`${prefix}.repair_success_after_fail_rate`]: ratioObservation(
+      stats.repairSuccessAfterFailCount,
+      stats.failedFirstCount,
     ),
-    [`${prefix}.max_round_failure_rate`]: metricObservation(
-      n ? stats.maxRoundFailure : null,
-      stats.maxRoundFailure * n,
-      n,
+    [`${prefix}.max_round_failure_rate`]: ratioObservation(
+      stats.maxRoundFailureCount,
+      stats.caseCount,
     ),
-    [`${prefix}.avg_submits`]: metricObservation(
-      n ? stats.avgSubmits : null,
-      stats.avgSubmits * n,
-      n,
+    [`${prefix}.avg_submits`]: ratioObservation(
+      stats.submitCount,
+      stats.caseCount,
     ),
-    [`${prefix}.avg_rounds`]: metricObservation(
-      n ? stats.avgRounds : null,
-      stats.avgRounds * n,
-      n,
+    [`${prefix}.avg_rounds`]: ratioObservation(
+      stats.roundCount,
+      stats.caseCount,
     ),
   };
 }
@@ -429,30 +427,23 @@ export function generationMetricsRecord(
   metrics: GenerationEvalMetrics,
 ): Record<string, MetricObservation> {
   const record: Record<string, MetricObservation> = {
-    'generation.valid_yaml_rate': metricObservation(
-      metrics.caseCount ? metrics.validYamlCount / metrics.caseCount : null,
+    'generation.valid_yaml_rate': ratioObservation(
       metrics.validYamlCount,
       metrics.caseCount,
     ),
-    'generation.resource_assertion_pass_rate': metricObservation(
-      metrics.resourceAssertionCount
-        ? metrics.resourceAssertionPassCount / metrics.resourceAssertionCount
-        : null,
+    'generation.resource_assertion_pass_rate': ratioObservation(
       metrics.resourceAssertionPassCount,
       metrics.resourceAssertionCount,
     ),
-    'generation.relation_pass_rate': metricObservation(
-      metrics.relationCount
-        ? metrics.relationPassCount / metrics.relationCount
-        : null,
+    'generation.relation_pass_rate': ratioObservation(
       metrics.relationPassCount,
       metrics.relationCount,
     ),
-    'generation.content_pass_rate': metricObservation(
-      metrics.caseCount ? metrics.contentPassCount / metrics.caseCount : null,
+    'generation.content_pass_rate': ratioObservation(
       metrics.contentPassCount,
       metrics.caseCount,
     ),
+    'generation.case_count': metricObservation(metrics.caseCount),
     ...attemptMetricsRecord('generation', metrics.attemptStats),
   };
   return record;
@@ -462,40 +453,31 @@ export function fixMetricsRecord(
   metrics: FixEvalMetrics,
 ): Record<string, MetricObservation> {
   const record: Record<string, MetricObservation> = {
-    'fix.valid_yaml_rate': metricObservation(
-      metrics.caseCount ? metrics.validYamlCount / metrics.caseCount : null,
+    'fix.valid_yaml_rate': ratioObservation(
       metrics.validYamlCount,
       metrics.caseCount,
     ),
-    'fix.expected_correction_pass_rate': metricObservation(
-      metrics.caseCount
-        ? metrics.correctionPassCount / metrics.caseCount
-        : null,
+    'fix.expected_correction_pass_rate': ratioObservation(
       metrics.correctionPassCount,
       metrics.caseCount,
     ),
-    'fix.preserve_pass_rate': metricObservation(
-      metrics.caseCount ? metrics.preservePassCount / metrics.caseCount : null,
+    'fix.preserve_pass_rate': ratioObservation(
       metrics.preservePassCount,
       metrics.caseCount,
     ),
-    'fix.side_effect_free_pass_rate': metricObservation(
-      metrics.caseCount
-        ? metrics.sideEffectFreePassCount / metrics.caseCount
-        : null,
+    'fix.side_effect_free_pass_rate': ratioObservation(
       metrics.sideEffectFreePassCount,
       metrics.caseCount,
     ),
-    'fix.success_rate': metricObservation(
-      metrics.caseCount ? metrics.contentPassCount / metrics.caseCount : null,
+    'fix.success_rate': ratioObservation(
       metrics.contentPassCount,
       metrics.caseCount,
     ),
+    'fix.case_count': metricObservation(metrics.caseCount),
     ...attemptMetricsRecord('fix', metrics.attemptStats),
   };
   for (const [type, value] of Object.entries(metrics.byDefectType)) {
-    record[`fix.defect.${type}.success_rate`] = metricObservation(
-      value.total ? value.fixed / value.total : null,
+    record[`fix.defect.${type}.success_rate`] = ratioObservation(
       value.fixed,
       value.total,
     );

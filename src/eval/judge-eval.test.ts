@@ -195,6 +195,7 @@ check('trace records planned, valid, invalid, error attempts and lineage', () =>
 });
 
 check('1/5, 2/5, and a 2:2 tie remain indeterminate', () => {
+  const traces = [];
   for (const [id, attempts, reason] of [
     [
       'one-valid',
@@ -220,7 +221,17 @@ check('1/5, 2/5, and a 2:2 tie remain indeterminate', () => {
     assert.equal(trace.majority.faithful, null);
     assert.equal(trace.majority.agree, null);
     assert.equal(trace.majority.indeterminateReason, reason);
+    traces.push(trace);
   }
+
+  const record = judgeMetricsRecord(computeJudgeCalibrationMetrics(traces));
+  assert.deepEqual(
+    record['judge.agreement_rate'],
+    metricObservation(null, 0, 0),
+  );
+  assert.deepEqual(record['judge.indeterminate'], metricObservation(3));
+  assert.deepEqual(record['judge.attempt.invalid'], metricObservation(4));
+  assert.deepEqual(record['judge.attempt.error'], metricObservation(4));
 });
 
 check('each explicitly labeled policy dimension reaches quorum independently', () => {
@@ -386,7 +397,7 @@ check('metrics exclude indeterminate cases and retain attempt diagnostics', () =
 
   const record = judgeMetricsRecord(metrics);
   assert.deepEqual(record['judge.agreement_rate'], metricObservation(2 / 3, 2, 3));
-  assert.deepEqual(record['judge.failed'], metricObservation(2));
+  assert.deepEqual(record['judge.indeterminate'], metricObservation(2));
   assert.deepEqual(record['judge.attempt.planned'], metricObservation(25));
   assert.deepEqual(record['judge.attempt.valid'], metricObservation(19));
   assert.deepEqual(record['judge.attempt.invalid'], metricObservation(3));

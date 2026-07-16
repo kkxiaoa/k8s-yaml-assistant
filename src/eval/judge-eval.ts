@@ -17,9 +17,9 @@ import {
   type JudgeCalibrationTrace,
 } from './metrics/judge-metrics';
 import { JudgeAttemptSchema, type JudgeAttempt } from './judge-votes';
+import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
 import {
   JUDGE_CALIBRATION_VOTES,
-  LEGACY_METRIC_DEFINITION_VERSION,
   harnessErrorMetrics,
   isDirectExecution,
   judgeDatasetIdentity,
@@ -171,7 +171,7 @@ async function main(): Promise<void> {
       kind: 'judge',
       scope: 'calibration',
       dataset: setup.dataset,
-      metricDefinitionVersion: LEGACY_METRIC_DEFINITION_VERSION,
+      metricDefinitionVersion: METRIC_DEFINITION_VERSION,
       config: runConfig,
     }),
   );
@@ -247,7 +247,7 @@ async function main(): Promise<void> {
       `quality fail/disagreement=${metrics.judged - metrics.agree} 条`,
     );
     console.error(
-      `judge indeterminate/skipped=${metrics.judgeFailed} 条  | attempts planned=${metrics.attempts.planned}, valid=${metrics.attempts.valid}, invalid=${metrics.attempts.invalid}, error=${metrics.attempts.error} | 裁判=${JUDGE_MODEL}`,
+      `judge indeterminate=${metrics.judgeFailed} 条  | attempts planned=${metrics.attempts.planned}, valid=${metrics.attempts.valid}, invalid=${metrics.attempts.invalid}, error=${metrics.attempts.error} | 裁判=${JUDGE_MODEL}`,
     );
     console.error(
       `harness error=${batch.harnessErrors.length} 条；质量分母=${metrics.judged}；已完成 case=${batch.results.length}/${cases.length}`,
@@ -285,9 +285,11 @@ async function main(): Promise<void> {
       `\n逐条 trace → ${tracePath}\n汇总 run → ${runPath(runId)}`,
     );
     console.error(
-      metrics.agreementRate !== null && metrics.agreementRate >= ACCEPTABLE
-        ? `\n裁判一致率 ≥ ${ACCEPTABLE * 100}%,可接受,方可扩大 grounding eval(§7.2)。`
-        : `\n一致率 < ${ACCEPTABLE * 100}%,先复盘/修裁判再用。`,
+      metrics.agreementRate === null
+        ? '\n裁判一致率为 N/A,没有可用于阈值判断的有效 case。'
+        : metrics.agreementRate >= ACCEPTABLE
+          ? `\n裁判一致率 ≥ ${ACCEPTABLE * 100}%,可接受,方可扩大 grounding eval(§7.2)。`
+          : `\n一致率 < ${ACCEPTABLE * 100}%,先复盘/修裁判再用。`,
     );
   } catch (error) {
     if (!completed) failEvalRunSession(session, error);

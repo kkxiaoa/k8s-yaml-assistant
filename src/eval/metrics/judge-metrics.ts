@@ -12,6 +12,7 @@ import {
 } from '../judge-votes';
 import {
   metricObservation,
+  ratioObservation,
   type MetricObservation,
 } from '../protocol';
 
@@ -554,7 +555,7 @@ export function computeJudgeCalibrationMetrics(
 
   for (const dimension of POLICY_DIMENSIONS) {
     const stat = policy[dimension];
-    stat.agreementRate = stat.judged ? stat.agree / stat.judged : null;
+    stat.agreementRate = ratioObservation(stat.agree, stat.judged).value;
   }
 
   return {
@@ -562,7 +563,7 @@ export function computeJudgeCalibrationMetrics(
     judged,
     judgeFailed,
     unstableCount,
-    agreementRate: judged ? agree / judged : null,
+    agreementRate: ratioObservation(agree, judged).value,
     attempts,
     policy,
   };
@@ -572,14 +573,13 @@ export function judgeMetricsRecord(
   metrics: JudgeCalibrationMetrics,
 ): Record<string, MetricObservation> {
   const record: Record<string, MetricObservation> = {
-    'judge.agreement_rate': metricObservation(
-      metrics.agreementRate,
+    'judge.agreement_rate': ratioObservation(
       metrics.agree,
       metrics.judged,
     ),
     'judge.agree': metricObservation(metrics.agree),
     'judge.judged': metricObservation(metrics.judged),
-    'judge.failed': metricObservation(metrics.judgeFailed),
+    'judge.indeterminate': metricObservation(metrics.judgeFailed),
     'judge.unstable': metricObservation(metrics.unstableCount),
     'judge.attempt.planned': metricObservation(metrics.attempts.planned),
     'judge.attempt.executed': metricObservation(metrics.attempts.executed),
@@ -589,8 +589,7 @@ export function judgeMetricsRecord(
   };
   for (const dimension of POLICY_DIMENSIONS) {
     const stat = metrics.policy[dimension];
-    record[`judge.policy.${dimension}.agreement_rate`] = metricObservation(
-      stat.agreementRate,
+    record[`judge.policy.${dimension}.agreement_rate`] = ratioObservation(
       stat.agree,
       stat.judged,
     );

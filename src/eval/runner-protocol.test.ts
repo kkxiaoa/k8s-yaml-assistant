@@ -22,9 +22,14 @@ import {
   JUDGE_SYSTEM,
 } from './judge';
 import { TEXT_MAX_TOKENS } from './llm';
-import { computeCanonicalHash, metricObservation } from './protocol';
+import {
+  computeCanonicalHash,
+  metricObservation,
+  type MetricObservation,
+} from './protocol';
 import {
   buildRetrievalEvalTracePayload,
+  faithMetricsRecord,
   faithDatasetIdentity,
   faithEvalConfig,
   fixDatasetIdentity,
@@ -39,6 +44,7 @@ import {
   retrievalDatasetIdentity,
   retrievalExecutionError,
   retrievalEvalConfig,
+  retrievalMetricsRecord,
   selectFaithCases,
   selectRetrievalCases,
   toPersistedPayload,
@@ -443,6 +449,70 @@ check('every evaluator records harness errors as a count observation', () => {
     });
   }
   assert.throws(() => harnessErrorMetrics('retrieval', -1), /non-negative/);
+});
+
+check('faith refusal rate is N/A without a conclusive refusal case', () => {
+  const record = faithMetricsRecord({
+    faithfulCount: 2,
+    judgedCount: 2,
+    refusedCorrectlyCount: 0,
+    refusalJudgedCount: 0,
+    hallucinationCount: 0,
+    dualCauseCount: 0,
+    judgeIndeterminateCount: 0,
+    judgeInvalidAttemptCount: 0,
+    judgeErrorAttemptCount: 0,
+    caseCount: 2,
+  });
+  assert.deepEqual(
+    record['faith.refusal_correct_rate'],
+    metricObservation(null, 0, 0),
+  );
+});
+
+check('all retrieval and faith case errors leave quality N/A', () => {
+  const retrieval: Record<string, MetricObservation> = {
+    ...retrievalMetricsRecord({
+      recallNumerator: 0,
+      mrrNumerator: 0,
+      caseCount: 0,
+      retrievalMissCount: 0,
+      rerankMissCount: 0,
+    }),
+    ...harnessErrorMetrics('retrieval', 3),
+  };
+  const faith: Record<string, MetricObservation> = {
+    ...faithMetricsRecord({
+      faithfulCount: 0,
+      judgedCount: 0,
+      refusedCorrectlyCount: 0,
+      refusalJudgedCount: 0,
+      hallucinationCount: 0,
+      dualCauseCount: 0,
+      judgeIndeterminateCount: 0,
+      judgeInvalidAttemptCount: 0,
+      judgeErrorAttemptCount: 0,
+      caseCount: 0,
+    }),
+    ...harnessErrorMetrics('faith', 3),
+  };
+
+  assert.deepEqual(
+    retrieval['retrieval.semantic.recall'],
+    metricObservation(null, 0, 0),
+  );
+  assert.deepEqual(
+    faith['faith.faithful_rate'],
+    metricObservation(null, 0, 0),
+  );
+  assert.deepEqual(
+    retrieval['retrieval.harness_error_count'],
+    metricObservation(3),
+  );
+  assert.deepEqual(
+    faith['faith.harness_error_count'],
+    metricObservation(3),
+  );
 });
 
 check('generated result exceptions use the last parser boundary', () => {
