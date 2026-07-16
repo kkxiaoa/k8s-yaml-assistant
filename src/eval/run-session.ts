@@ -13,6 +13,9 @@ import {
   decodeEvalRun,
   decodeTraceEnvelope,
   type EvalKind,
+  type EvalCaseErrorStage,
+  type EvalErrorStage,
+  type EvalRunFatalStage,
   type EvalRun,
   type JsonValue,
   type MetricObservation,
@@ -51,7 +54,7 @@ export type ErrorTraceEnvelopeDefinition<
   TKind extends EvalKind = EvalKind,
   TPayload = JsonValue,
 > = Omit<TraceEnvelopeDefinition<TKind, TPayload>, 'outcome' | 'error'> & {
-  stage: string;
+  stage: EvalCaseErrorStage;
   error: unknown;
 };
 
@@ -62,7 +65,7 @@ export interface EvalRunSession {
     envelope: TraceEnvelope<TKind, TPayload>,
   ): void;
   complete(metrics: Record<string, MetricObservation>): void;
-  fail(stage: string, error: unknown): void;
+  fail(stage: EvalErrorStage, error: unknown): void;
 }
 
 export interface StartEvalRunOptions {
@@ -90,10 +93,10 @@ function errorMessage(error: unknown): string {
     : `${redacted.slice(0, MAX_ERROR_MESSAGE_LENGTH)}…`;
 }
 
-export function evalErrorDetails(
-  stage: string,
+export function evalErrorDetails<TStage extends EvalErrorStage>(
+  stage: TStage,
   error: unknown,
-): { stage: string; message: string } {
+): { stage: TStage; message: string } {
   return { stage, message: errorMessage(error) };
 }
 
@@ -118,6 +121,138 @@ export function createErrorTraceEnvelope<TKind extends EvalKind, TPayload>(
     outcome: 'error',
     error: evalErrorDetails(stage, error),
   });
+}
+
+export class EvalCaseExecutionError<TPayload = unknown> extends Error {
+  readonly stage: EvalCaseErrorStage;
+  readonly originalError: unknown;
+  readonly payload: TPayload | undefined;
+
+  constructor(stage: EvalCaseErrorStage, error: unknown, payload?: TPayload) {
+    super(
+      error instanceof Error ? error.message : `eval case failed at ${stage}`,
+      {
+        cause: error,
+      },
+    );
+    this.name = 'EvalCaseExecutionError';
+    this.stage = stage;
+    this.originalError = error;
+    this.payload = payload;
+  }
+}
+
+export class EvalRunExecutionError extends Error {
+  readonly stage: EvalRunFatalStage;
+  readonly originalError: unknown;
+
+  constructor(stage: EvalRunFatalStage, error: unknown) {
+    super(
+      error instanceof Error ? error.message : `eval run failed at ${stage}`,
+      {
+        cause: error,
+      },
+    );
+    this.name = 'EvalRunExecutionError';
+    this.stage = stage;
+    this.originalError = error;
+  }
+}
+
+export interface EvalHarnessError {
+  evalCaseId: string;
+  stage: EvalCaseErrorStage;
+}
+
+export interface EvalCaseBatchResult<TResult> {
+  results: TResult[];
+  harnessErrors: EvalHarnessError[];
+}
+
+export async function executeEvalRunStage<T>(
+  stage: EvalRunFatalStage,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof EvalRunExecutionError) throw error;
+    throw new EvalRunExecutionError(stage, error);
+  }
+}
+
+export async function executeEvalCaseStage<T, TPayload = unknown>(
+  stage: EvalCaseErrorStage,
+  operation: () => T | Promise<T>,
+  payload?: TPayload,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (
+      error instanceof EvalCaseExecutionError ||
+      error instanceof EvalRunExecutionError
+    ) {
+      throw error;
+    }
+    throw new EvalCaseExecutionError(stage, error, payload);
+  }
+}
+
+export async function executeEvalCases<
+  TCase extends { id: string },
+  TResult,
+>(params: {
+  cases: readonly TCase[];
+  evaluate: (evalCase: TCase) => Promise<TResult>;
+  appendSuccess: (evalCase: TCase, result: TResult) => void;
+  appendError: (evalCase: TCase, failure: EvalCaseExecutionError) => void;
+}): Promise<EvalCaseBatchResult<TResult>> {
+  const results: TResult[] = [];
+  const harnessErrors: EvalHarnessError[] = [];
+
+  for (const evalCase of params.cases) {
+    let result: TResult;
+    try {
+      result = await params.evaluate(evalCase);
+    } catch (error) {
+      if (error instanceof EvalRunExecutionError) throw error;
+      if (!(error instanceof EvalCaseExecutionError)) {
+        throw new EvalRunExecutionError('case_execution', error);
+      }
+      try {
+        params.appendError(evalCase, error);
+      } catch (artifactError) {
+        throw new EvalRunExecutionError('artifact_write', artifactError);
+      }
+      harnessErrors.push({ evalCaseId: evalCase.id, stage: error.stage });
+      continue;
+    }
+
+    try {
+      params.appendSuccess(evalCase, result);
+    } catch (error) {
+      throw new EvalRunExecutionError('artifact_write', error);
+    }
+    results.push(result);
+  }
+
+  return { results, harnessErrors };
+}
+
+export function failEvalRunSession(
+  session: EvalRunSession,
+  error: unknown,
+): void {
+  if (error instanceof EvalRunExecutionError) {
+    session.fail(error.stage, error.originalError);
+    return;
+  }
+  if (error instanceof EvalCaseExecutionError) {
+    session.fail(error.stage, error.originalError);
+    return;
+  }
+  session.fail('case_execution', error);
 }
 
 function traceCoverageError(detail: string): Error {
@@ -160,9 +295,7 @@ export function startEvalRun(
     }
   }
 
-  function appendCase(
-    envelopeValue: TraceEnvelope<EvalKind, unknown>,
-  ): void {
+  function appendCase(envelopeValue: TraceEnvelope<EvalKind, unknown>): void {
     ensureRunning('append case');
     const envelope = decodeTraceEnvelope(envelopeValue);
     if (envelope.runId !== currentRun.id) {
@@ -241,7 +374,7 @@ export function startEvalRun(
     currentRun = completedRun;
   }
 
-  function fail(stage: string, error: unknown): void {
+  function fail(stage: EvalErrorStage, error: unknown): void {
     ensureRunning('fail');
     const failedRun = decodeEvalRun({
       ...currentRun,

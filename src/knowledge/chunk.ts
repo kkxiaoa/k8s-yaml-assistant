@@ -1,65 +1,97 @@
-export type SourceType = 'schema' | 'policy' | 'docs' | 'example';
+import { z } from 'zod';
+import {
+  canonicalTargets,
+  type KnowledgeTarget,
+} from './identity';
 
-export type TrustLevel =
-  | 'k8s-official'
-  | 'org-policy'
-  | 'k8s-docs'
-  | 'example';
+export type { KnowledgeTarget } from './identity';
 
-export interface ChunkAppliesTo {
-  resource: string;
-  field?: string;
-}
+const NonEmptyTrimmedStringSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim() === value, 'must be trimmed');
 
-export interface KnowledgeChunk {
-  id: string;
-  title: string;
-  text: string;
-  sourceType: SourceType;
-  sourceUri?: string;
-  version?: string;
-  trustLevel?: TrustLevel;
-  resource?: string;
-  path?: string;
-  resources?: string[];
-  paths?: string[];
-  appliesTo?: ChunkAppliesTo | ChunkAppliesTo[];
-}
+export const SourceTypeSchema = z.enum([
+  'schema',
+  'policy',
+  'docs',
+  'example',
+]);
 
+export const SourceAuthoritySchema = z.enum([
+  'kubernetes_official',
+  'cluster_api',
+  'extension_provider',
+  'organization',
+  'curated',
+]);
+
+export const ProvenanceSchema = z.strictObject({
+  authority: SourceAuthoritySchema,
+  sourceUri: NonEmptyTrimmedStringSchema.optional(),
+  version: NonEmptyTrimmedStringSchema.optional(),
+});
+
+export const KnowledgeTargetSchema = z.unknown().transform(
+  (value, context): KnowledgeTarget => {
+    try {
+      const [target] = canonicalTargets([value as KnowledgeTarget]);
+      if (!target) throw new TypeError('knowledge target is missing');
+      return target;
+    } catch (error) {
+      context.addIssue({
+        code: 'custom',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return z.NEVER;
+    }
+  },
+);
+
+export const KnowledgeChunkSchema = z
+  .strictObject({
+    id: NonEmptyTrimmedStringSchema,
+    title: NonEmptyTrimmedStringSchema,
+    text: z.string().min(1),
+    sourceType: SourceTypeSchema,
+    provenance: ProvenanceSchema,
+    targets: z.array(KnowledgeTargetSchema),
+  })
+  .transform((chunk) => ({
+    ...chunk,
+    targets: canonicalTargets(chunk.targets),
+  }));
+
+export type SourceType = z.infer<typeof SourceTypeSchema>;
+export type SourceAuthority = z.infer<typeof SourceAuthoritySchema>;
+export type Provenance = z.infer<typeof ProvenanceSchema>;
+export type KnowledgeChunk = z.infer<typeof KnowledgeChunkSchema>;
 export type Chunk = KnowledgeChunk;
 
-export type ChunkLocator = Pick<
-  KnowledgeChunk,
-  'resource' | 'path' | 'resources' | 'paths' | 'appliesTo'
->;
+export type ChunkLocator = Pick<KnowledgeChunk, 'targets'>;
 
-function compact(values: Array<string | undefined>): string[] {
-  return values.filter((v): v is string => Boolean(v));
+export function decodeKnowledgeChunk(value: unknown): KnowledgeChunk {
+  return KnowledgeChunkSchema.parse(value);
 }
 
-function appliesToList(chunk: ChunkLocator): ChunkAppliesTo[] {
-  if (!chunk.appliesTo) return [];
-  return Array.isArray(chunk.appliesTo) ? chunk.appliesTo : [chunk.appliesTo];
+function unique(values: Array<string | undefined>): string[] {
+  return [
+    ...new Set(values.filter((value): value is string => value !== undefined)),
+  ];
 }
 
 export function chunkResources(chunk: ChunkLocator): string[] {
-  if (chunk.resources?.length) return chunk.resources;
-  const fromAppliesTo = compact(appliesToList(chunk).map((item) => item.resource));
-  if (fromAppliesTo.length) return fromAppliesTo;
-  return compact([chunk.resource]);
+  return unique(chunk.targets.map((target) => target.kind));
 }
 
 export function chunkPaths(chunk: ChunkLocator): string[] {
-  if (chunk.paths?.length) return chunk.paths;
-  const fromAppliesTo = compact(appliesToList(chunk).map((item) => item.field));
-  if (fromAppliesTo.length) return fromAppliesTo;
-  return compact([chunk.path]);
+  return unique(chunk.targets.map((target) => target.path));
 }
 
 export function primaryResource(chunk: ChunkLocator): string | undefined {
-  return chunkResources(chunk)[0];
+  return chunk.targets[0]?.kind;
 }
 
 export function primaryPath(chunk: ChunkLocator): string | undefined {
-  return chunkPaths(chunk)[0];
+  return chunk.targets[0]?.path;
 }

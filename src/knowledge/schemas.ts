@@ -24,6 +24,8 @@ export interface SchemaNode {
   [key: string]: unknown;
 }
 
+export type SchemaSource = 'builtin' | 'cluster' | 'crd';
+
 export interface SchemaDoc {
   resource: string;
   apiVersion: string;
@@ -31,7 +33,7 @@ export interface SchemaDoc {
   version?: string;
   kind?: string;
   schema: SchemaNode;
-  source?: 'builtin' | 'cluster' | 'crd';
+  source: SchemaSource;
   definitionName?: string;
 }
 
@@ -45,11 +47,20 @@ const RESOURCES_DIR = join(GENERATED_DIR, 'resources');
 const DEFINITIONS_DIR = join(GENERATED_DIR, 'definitions');
 
 function normalizeSchemaDoc(doc: SchemaDoc): SchemaDoc {
+  const kind = doc.kind ?? doc.resource;
+  const resource = doc.resource ?? doc.kind;
+  if (!kind || !resource || !doc.apiVersion || !doc.schema) {
+    throw new Error('generated schema doc 缺少 kind/resource/apiVersion/schema');
+  }
+  if (!['builtin', 'cluster', 'crd'].includes(doc.source)) {
+    throw new Error(
+      `${doc.apiVersion}/${kind} 缺少有效 schema source`,
+    );
+  }
   return {
     ...doc,
-    kind: doc.kind ?? doc.resource,
-    resource: doc.resource ?? doc.kind,
-    source: doc.source ?? 'cluster',
+    kind,
+    resource,
   };
 }
 

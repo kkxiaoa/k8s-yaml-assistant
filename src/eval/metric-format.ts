@@ -2,8 +2,8 @@ export function isPercentMetric(key: string): boolean {
   return (
     key.endsWith('_rate') ||
     key.endsWith('_coverage') ||
-    key.includes('.recall@') ||
-    key.includes('.mrr@')
+    key.endsWith('.recall') ||
+    key.endsWith('.mrr')
   );
 }
 

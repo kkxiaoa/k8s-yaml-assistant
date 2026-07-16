@@ -30,11 +30,14 @@ console.log('=== 语料规模 ===');
 console.log(`chunks(CORPUS.length)        : ${CORPUS.length}`);
 console.log(`resources(unique resource)   : ${perResource.size}`);
 console.log(`schema docs(loaded)          : ${SCHEMA_DOCS.length}`);
-console.log(`corpus hash                  : ${manifest.hash}`);
+console.log(`corpus content hash          : ${manifest.contentHash}`);
+console.log(`corpus manifest hash         : ${manifest.manifestHash}`);
 
-console.log('\n=== 来源 manifest ===');
-for (const source of manifest.sources)
-  console.log(`${source.sourceType.padEnd(8)} count=${source.count} hash=${source.hash}`);
+console.log('\n=== Provider manifest ===');
+for (const provider of manifest.providers)
+  console.log(
+    `${provider.providerId.padEnd(24)} source=${provider.sourceType.padEnd(8)} count=${provider.count} contentHash=${provider.contentHash} manifestHash=${provider.manifestHash}`,
+  );
 
 console.log('\n=== 每资源 chunk 数(降序) ===');
 for (const [res, n] of [...perResource.entries()].sort((a, b) => b[1] - a[1])) {

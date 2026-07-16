@@ -5,7 +5,6 @@ import {
   CORPUS,
   DEFAULT_CORPUS_SOURCES,
   getCorpusProviders,
-  hashCorpusChunks,
 } from './corpus';
 
 let passed = 0;
@@ -25,8 +24,7 @@ console.log('corpus builder:');
 check('默认构建 schema + policy,与兼容 CORPUS 常量一致', () => {
   assert.deepEqual([...DEFAULT_CORPUS_SOURCES], ['schema', 'policy']);
   const built = buildCorpus();
-  assert.equal(built.length, CORPUS.length);
-  assert.equal(hashCorpusChunks(built), hashCorpusChunks(CORPUS));
+  assert.deepEqual(built, CORPUS);
 });
 
 check('source 选择可控', () => {
@@ -40,18 +38,26 @@ check('source 选择可控', () => {
   assert.equal(buildCorpus().length, schemaOnly.length + policyOnly.length);
 });
 
-check('provider manifest 包含 sourceType、count、hash', () => {
+check('真实 provider manifest 使用稳定 providerId 和双重 identity', () => {
   const manifest = buildCorpusManifest();
   assert.equal(manifest.count, CORPUS.length);
-  assert.equal(manifest.hash, hashCorpusChunks(CORPUS));
   assert.deepEqual(
-    manifest.sources.map((source) => source.sourceType),
-    ['schema', 'policy'],
+    manifest.providers.map(({ providerId, sourceType }) => ({
+      providerId,
+      sourceType,
+    })),
+    [
+      { providerId: 'policy.organization', sourceType: 'policy' },
+      { providerId: 'schema.curated-openapi', sourceType: 'schema' },
+    ],
   );
+  assert.match(manifest.contentHash, /^[a-f0-9]{64}$/);
+  assert.match(manifest.manifestHash, /^[a-f0-9]{64}$/);
 
-  for (const source of manifest.sources) {
-    assert.ok(source.count > 0, `${source.sourceType} count`);
-    assert.match(source.hash, /^[a-f0-9]{64}$/, `${source.sourceType} hash`);
+  for (const provider of manifest.providers) {
+    assert.ok(provider.count > 0, `${provider.providerId} count`);
+    assert.match(provider.contentHash, /^[a-f0-9]{64}$/);
+    assert.match(provider.manifestHash, /^[a-f0-9]{64}$/);
   }
 });
 
@@ -62,9 +68,11 @@ check('未注册 sourceType 明确失败', () => {
   );
 });
 
-check('corpus hash 对输入顺序稳定', () => {
-  const chunks = buildCorpus();
-  assert.equal(hashCorpusChunks(chunks), hashCorpusChunks([...chunks].reverse()));
+check('source 子集使用同一 manifest contract', () => {
+  const schema = buildCorpusManifest({ sources: ['schema'] });
+  assert.equal(schema.providers.length, 1);
+  assert.equal(schema.providers[0]!.providerId, 'schema.curated-openapi');
+  assert.equal(schema.count, buildCorpus({ sources: ['schema'] }).length);
 });
 
 console.log(`\n通过 ${passed} 项`);

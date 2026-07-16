@@ -13,30 +13,18 @@ import {
   type Source,
 } from '../retrieval/sources';
 import { CORPUS } from '../knowledge/corpus';
-import {
-  chunkPaths,
-  chunkResources,
-  primaryPath,
-  primaryResource,
-  type SourceType,
-  type TrustLevel,
-} from '../knowledge/chunk';
+import { type KnowledgeChunk } from '../knowledge/chunk';
 import { inferResource } from '../retrieval/router';
 import {
   validateYamlDocuments,
   type ValidationError,
 } from '../validation/validate';
-import {
-  toTraceHit,
-  type RetrievalTrace,
-} from '../retrieval/trace';
+import { toTraceHit, type RetrievalTrace } from '../retrieval/trace';
 import { findExactFieldChunks } from '../retrieval/exact-field';
 import {
   resolveQueryExpansionEnabled,
   skippedExactQueryExpansionTrace,
 } from '../retrieval/query-expansion-runtime';
-import { ANSWER_MODEL } from './agent-contract';
-
 export { ANSWER_MODEL } from './agent-contract';
 
 export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,服务于一个容器云平台控制台。
@@ -58,17 +46,7 @@ export function getClient(): Anthropic {
   });
 }
 
-export interface Hit {
-  id: string;
-  title: string;
-  resource?: string;
-  path?: string;
-  resources?: string[];
-  paths?: string[];
-  text: string;
-  sourceType: SourceType;
-  sourceUri?: string;
-  trustLevel?: TrustLevel;
+export interface Hit extends KnowledgeChunk {
   score?: number;
 }
 
@@ -94,6 +72,7 @@ export interface RetrieveContextOptions {
 export interface RetrievalQuery {
   userQuestion: string;
   resourceHint?: string;
+  apiVersionHint?: string;
   fieldPathHint?: string;
   selectedText?: string;
   errorMessages?: string[];
@@ -114,6 +93,7 @@ function toRetrievalQuery(
   return {
     userQuestion: question,
     resourceHint: editorContext?.kind ?? undefined,
+    apiVersionHint: editorContext?.apiVersion ?? undefined,
     fieldPathHint,
     selectedText: editorContext?.selectedText,
     errorMessages:
@@ -127,6 +107,7 @@ function retrievalText(query: RetrievalQuery): string {
   return [
     query.userQuestion,
     query.resourceHint ? `资源:${query.resourceHint}` : '',
+    query.apiVersionHint ? `apiVersion:${query.apiVersionHint}` : '',
     query.fieldPathHint ? `字段:${query.fieldPathHint}` : '',
     query.selectedText ? `选中内容:${query.selectedText}` : '',
     ...(query.errorMessages ?? []).map((e) => `错误:${e}`),
@@ -137,16 +118,7 @@ function retrievalText(query: RetrievalQuery): string {
 
 function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
   return {
-    id: chunk.id,
-    title: chunk.title,
-    resource: primaryResource(chunk),
-    path: primaryPath(chunk),
-    resources: chunkResources(chunk),
-    paths: chunkPaths(chunk),
-    text: chunk.text,
-    sourceType: chunk.sourceType,
-    sourceUri: chunk.sourceUri,
-    trustLevel: chunk.trustLevel,
+    ...chunk,
     score,
   };
 }
@@ -154,10 +126,11 @@ function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
 function exactFieldHits(
   resource: string | undefined,
   fieldPath: string | undefined,
-  k: number,
+  apiVersion: string | undefined,
 ): Hit[] {
-  return findExactFieldChunks(CORPUS, resource, fieldPath, k)
-    .map((chunk) => toHit(chunk, 1));
+  return findExactFieldChunks(CORPUS, resource, fieldPath, apiVersion).map(
+    (chunk) => toHit(chunk, 1),
+  );
 }
 
 export function formatEditorContext(editorContext?: EditorContext): string {
@@ -199,6 +172,7 @@ export async function retrieveContext(
     question,
     mode,
     resourceHint: routed ?? undefined,
+    apiVersionHint: query.apiVersionHint,
     fieldPathHint: query.fieldPathHint,
     createdAt: new Date().toISOString(),
   };
@@ -209,7 +183,11 @@ export async function retrieveContext(
 
   // 完整字段路径命中时短路;模糊叶子字段交给统一检索处理。
   const exactHits = selectContextHits(
-    exactFieldHits(routed ?? undefined, query.fieldPathHint, k),
+    exactFieldHits(
+      routed ?? undefined,
+      query.fieldPathHint,
+      query.apiVersionHint,
+    ),
     { k, taskType: 'ask' },
   );
   if (exactHits.length > 0) {
@@ -226,7 +204,7 @@ export async function retrieveContext(
       rerankHits: [],
       finalHits: exactHits.map((h) => toTraceHit(h, h.score)),
       latencyMs: { total: performance.now() - t0 },
-      cache: { indexHit: undefined, embeddingHit: false },
+      cache: { index: { status: 'not_used' }, embeddingHit: false },
     });
     const { context, sources } = formatSources(exactHits);
     return { context, hits: exactHits, sources, trace };
@@ -237,6 +215,7 @@ export async function retrieveContext(
   const { hits: ranked, trace: searchTrace } = await search(text, {
     boostResource: routed ?? undefined,
     boostPath: query.fieldPathHint,
+    boostApiVersion: query.apiVersionHint,
     queryExpansion: options.queryExpansion,
   });
   const hits = selectContextHits(ranked, { k, taskType: 'ask' });

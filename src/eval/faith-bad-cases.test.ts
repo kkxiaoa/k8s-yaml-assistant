@@ -21,8 +21,16 @@ import {
   type BadCase,
   type BadCaseTracking,
 } from './bad-cases';
-import type { RetrievalEvalCase } from './cases/retrieval-cases';
-import type { FaithOutcome, FaithTrace } from './faith-store';
+import {
+  resolveGroundedAnswerCase,
+  type GroundedAnswerCase,
+} from './cases/grounded-answer-cases';
+import type { SemanticRetrievalCase } from './cases/retrieval-cases';
+import {
+  decodeFaithTrace,
+  type FaithOutcome,
+  type FaithTrace,
+} from './faith-store';
 import {
   EVAL_SCHEMA_VERSION,
   type EvalRun,
@@ -41,30 +49,96 @@ type FaithEvalRun = Extract<EvalRun, { kind: 'faith' }>;
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 
-const MINI_RETRIEVAL_CASES: RetrievalEvalCase[] = [
+function contextChunk(id: string) {
+  return {
+    id,
+    title: `title ${id}`,
+    text: `text ${id}`,
+    sourceType: 'schema' as const,
+    provenance: { authority: 'cluster_api' as const, version: 'v1' },
+    targets: [{ apiVersion: 'v1', kind: 'Pod', path: 'spec.field' }],
+  };
+}
+
+function contextSnapshot(id: string) {
+  const chunk = contextChunk(id);
+  return {
+    text: `[S1][schema] ${chunk.title}\n${chunk.text}`,
+    chunks: [chunk],
+    sources: [
+      {
+        n: 1,
+        id: chunk.id,
+        title: chunk.title,
+        sourceType: chunk.sourceType,
+        provenance: chunk.provenance,
+        targets: chunk.targets,
+      },
+    ],
+  };
+}
+
+function searchTrace(question: string, chunkId: string) {
+  const chunk = contextChunk(chunkId);
+  const hit = {
+    id: chunk.id,
+    title: chunk.title,
+    sourceType: chunk.sourceType,
+    provenance: chunk.provenance,
+    targets: chunk.targets,
+    score: 0.9,
+  };
+  return {
+    queryText: question,
+    queryExpansion: {
+      enabled: false,
+      status: 'disabled' as const,
+      originalQueryText: question,
+      expandedQueryText: question,
+      matchedAliases: [],
+      expansionTerms: [],
+    },
+    coarseHits: [hit],
+    rerankHits: [hit],
+    latencyMs: { total: 1 },
+    cache: { index: { status: 'hit' as const }, embeddingHit: false },
+  };
+}
+
+const QUERY_EXPANSION_CONFIG = {
+  enabled: false,
+  registryHash: null,
+  reviewedAliasCount: 0,
+};
+
+const MINI_RETRIEVAL_CASES: SemanticRetrievalCase[] = [
   {
     id: 'case-a',
-    taskType: 'ask_free',
     question: '问题 A',
     expectedChunkIds: ['Chunk::a'],
-    resource: 'Pod',
-    answerable: true,
+    target: { kind: 'Pod' },
     source: 'human',
   },
   {
     id: 'case-b',
-    taskType: 'ask_free',
     question: '问题 B',
     expectedChunkIds: ['Chunk::b'],
-    resource: 'Deployment',
-    answerable: true,
+    target: { kind: 'Deployment' },
     source: 'human',
   },
 ];
 
+const MINI_GROUNDED_CASES: GroundedAnswerCase[] = MINI_RETRIEVAL_CASES.map(
+  (evalCase) => ({
+    id: evalCase.id,
+    input: { kind: 'retrieval_case', retrievalCaseId: evalCase.id },
+    expectedBehavior: 'answer_with_sources',
+  }),
+);
+
 function faithRun(params: {
   id: string;
-  cases: RetrievalEvalCase[];
+  cases: GroundedAnswerCase[];
   scope?: FaithEvalRun['scope'];
 }): FaithEvalRun {
   return {
@@ -75,11 +149,12 @@ function faithRun(params: {
     scope: params.scope ?? 'full',
     createdAt: '2026-07-10T00:00:00.000Z',
     completedAt: '2026-07-10T00:01:00.000Z',
-    dataset: faithDatasetIdentity(params.cases),
+    dataset: faithDatasetIdentity(params.cases, MINI_RETRIEVAL_CASES),
     artifactPaths: { trace: traceRelativePath(params.id, 'faith') },
     metricDefinitionVersion: 'legacy-v1',
     config: {
-      corpusHash: HASH_A,
+      corpusContentHash: HASH_A,
+      corpusManifestHash: HASH_B,
       indexHash: HASH_B,
       embeddingModel: 'voyage-3',
       rerankModel: 'rerank-2.5',
@@ -93,7 +168,8 @@ function faithRun(params: {
       judgeModel: 'claude-opus-4-8',
       answerPromptHash: HASH_A,
       judgePromptHash: HASH_B,
-      judgeParserSchemaIdentity: 'judge-verdict-parser-v1',
+      judgeParserSchemaIdentity: 'judge-vote-parser-v2',
+      judgeAttemptLimit: 2,
     },
     metrics: {},
   };
@@ -101,7 +177,7 @@ function faithRun(params: {
 
 const RUN = faithRun({
   id: 'faith-run-1',
-  cases: [MINI_RETRIEVAL_CASES[0]!],
+  cases: [MINI_GROUNDED_CASES[0]!],
 });
 
 function verdict(faithful: boolean) {
@@ -113,19 +189,28 @@ function verdict(faithful: boolean) {
 }
 
 function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
-  const evalCase = MINI_RETRIEVAL_CASES.find((item) => item.id === id)!;
+  const evalCase = MINI_GROUNDED_CASES.find((item) => item.id === id)!;
+  const resolved = resolveGroundedAnswerCase(evalCase, MINI_RETRIEVAL_CASES);
   return {
     id: evalCase.id,
-    question: evalCase.question,
-    answerable: true,
-    resource: evalCase.resource,
+    input: evalCase.input,
+    question: resolved.question,
+    expectedBehavior: evalCase.expectedBehavior,
+    target: resolved.target,
+    context: contextSnapshot(resolved.expectedChunkIds[0]!),
     retrieval: {
-      expectedChunkIds: evalCase.expectedChunkIds,
-      topIds: evalCase.expectedChunkIds,
-      foundCount: evalCase.expectedChunkIds.length,
+      expectedChunkIds: resolved.expectedChunkIds,
+      topIds: resolved.expectedChunkIds,
+      foundCount: resolved.expectedChunkIds.length,
       fullRecall: true,
+      queryExpansionConfig: QUERY_EXPANSION_CONFIG,
+      searchTrace: searchTrace(
+        resolved.question,
+        resolved.expectedChunkIds[0]!,
+      ),
     },
     answer: 'answer',
+    judgeAttempts: [{ status: 'valid', vote: verdict(true) }],
     verdict: verdict(true),
     outcome: 'faithful_hit',
   };
@@ -147,14 +232,14 @@ function writeInput(params: {
   scope?: FaithEvalRun['scope'];
 }): { run: FaithEvalRun; traceIds: Map<string, string> } {
   const selectedCases = params.traces.map((trace) =>
-    MINI_RETRIEVAL_CASES.find((evalCase) => evalCase.id === trace.id),
+    MINI_GROUNDED_CASES.find((evalCase) => evalCase.id === trace.id),
   );
   if (selectedCases.some((evalCase) => evalCase === undefined)) {
     throw new Error('test trace has no matching eval case');
   }
   const run = faithRun({
     id: params.runId,
-    cases: selectedCases as RetrievalEvalCase[],
+    cases: selectedCases as GroundedAnswerCase[],
     scope: params.scope,
   });
   writeJsonAtomic(runPath(run.id, params.evalRoot), run);
@@ -169,7 +254,7 @@ function writeInput(params: {
             evalCaseId: trace.id,
             kind: 'faith',
             payload: trace,
-            stage: 'case',
+            stage: 'answer_model',
             error: new Error('case failed'),
           })
         : createTraceEnvelope({
@@ -189,27 +274,61 @@ function trace(
   outcome: FaithOutcome,
   overrides: Partial<FaithTrace> = {},
 ): FaithTrace {
+  const isRefusal =
+    outcome === 'refused_correctly' || outcome === 'refused_wrong';
+  const judgedVerdict =
+    outcome === 'judge_failed' || outcome === 'error'
+      ? null
+      : verdict(
+          outcome === 'faithful_hit' ||
+            outcome === 'faithful_miss' ||
+            outcome === 'refused_correctly',
+        );
   return {
     id: 'case-1',
+    input: isRefusal
+      ? { kind: 'standalone_question', question: '这个字段怎么用?' }
+      : { kind: 'retrieval_case', retrievalCaseId: 'case-1' },
     question: '这个字段怎么用?',
-    answerable: true,
-    resource: 'Pod',
+    expectedBehavior: isRefusal
+      ? 'refuse_insufficient_context'
+      : 'answer_with_sources',
+    ...(isRefusal ? {} : { target: { kind: 'Pod' } }),
+    context: contextSnapshot('schema::v1::Pod::spec.containers.name'),
     retrieval: {
-      expectedChunkIds: ['Pod::spec.containers.image'],
-      topIds: ['Pod::spec.containers.name'],
+      expectedChunkIds: isRefusal
+        ? []
+        : ['schema::v1::Pod::spec.containers.image'],
+      topIds: ['schema::v1::Pod::spec.containers.name'],
       foundCount: 0,
       fullRecall: false,
+      queryExpansionConfig: QUERY_EXPANSION_CONFIG,
+      searchTrace: searchTrace(
+        '这个字段怎么用?',
+        'schema::v1::Pod::spec.containers.name',
+      ),
     },
     answer: 'answer',
-    verdict:
-      outcome === 'judge_failed' || outcome === 'error'
-        ? null
-        : verdict(
-            outcome === 'faithful_hit' ||
-              outcome === 'faithful_miss' ||
-              outcome === 'refused_correctly',
-          ),
+    judgeAttempts:
+      judgedVerdict !== null
+        ? [{ status: 'valid', vote: judgedVerdict }]
+        : outcome === 'judge_failed'
+          ? [
+              {
+                status: 'invalid',
+                code: 'invalid_json',
+                reason: 'invalid judge output',
+              },
+              {
+                status: 'error',
+                stage: 'judge_request',
+                message: 'judge request failed',
+              },
+            ]
+          : [],
+    verdict: judgedVerdict,
     outcome,
+    ...(outcome === 'error' ? { errorPhase: 'answer_model' } : {}),
     ...overrides,
   };
 }
@@ -301,7 +420,6 @@ check('reads a decoded faith run and envelope payloads from the eval root', () =
     const input = readFaithBadCaseInput({
       runId: 'run-1',
       evalRoot,
-      evalSet: MINI_RETRIEVAL_CASES,
     });
 
     assert.equal(input.run.kind, 'faith');
@@ -344,10 +462,10 @@ check('rejects a failed faith run as bad-case input', () => {
     const failedRun = {
       ...faithRun({
         id: 'failed-run',
-        cases: [MINI_RETRIEVAL_CASES[0]!],
+        cases: [MINI_GROUNDED_CASES[0]!],
       }),
       status: 'failed' as const,
-      failure: { stage: 'judge', message: 'failed' },
+      failure: { stage: 'judge_quorum', message: 'failed' },
     };
     writeJsonAtomic(runPath(failedRun.id, evalRoot), failedRun);
 
@@ -356,7 +474,6 @@ check('rejects a failed faith run as bad-case input', () => {
         readFaithBadCaseInput({
           runId: failedRun.id,
           evalRoot,
-          evalSet: MINI_RETRIEVAL_CASES,
         }),
       /failed-run.*failed.*completed/i,
     );
@@ -367,7 +484,7 @@ check('rejects payload/envelope identity mismatch', () => {
   withEvalRoot((evalRoot) => {
     const run = faithRun({
       id: 'run-1',
-      cases: [MINI_RETRIEVAL_CASES[0]!],
+      cases: [MINI_GROUNDED_CASES[0]!],
     });
     writeJsonAtomic(runPath(run.id, evalRoot), run);
     appendTraceEnvelope(
@@ -386,35 +503,135 @@ check('rejects payload/envelope identity mismatch', () => {
         readFaithBadCaseInput({
           runId: run.id,
           evalRoot,
-          evalSet: MINI_RETRIEVAL_CASES,
         }),
       /faith payload id mismatch/,
     );
   });
 });
 
-check('rejects current dataset semantic drift', () => {
+check('rejects run dataset identity that disagrees with trace snapshots', () => {
   withEvalRoot((evalRoot) => {
-    writeInput({
+    const written = writeInput({
       evalRoot,
       runId: 'run-1',
       traces: [inputTrace('case-a')],
     });
-    const changedCases = [
-      { ...MINI_RETRIEVAL_CASES[0]!, question: '漂移的问题' },
-      MINI_RETRIEVAL_CASES[1]!,
-    ];
+    writeJsonAtomic(runPath(written.run.id, evalRoot), {
+      ...written.run,
+      dataset: { ...written.run.dataset, hash: 'c'.repeat(64) },
+    });
 
     assert.throws(
       () =>
         readFaithBadCaseInput({
           runId: 'run-1',
           evalRoot,
-          evalSet: changedCases,
         }),
-      /trace case drift/,
+      /dataset hash mismatch/,
     );
   });
+});
+
+check('rejects legacy faith payloads without captured context/search snapshots', () => {
+  withEvalRoot((evalRoot) => {
+    const run = faithRun({
+      id: 'legacy-payload',
+      cases: [MINI_GROUNDED_CASES[0]!],
+    });
+    writeJsonAtomic(runPath(run.id, evalRoot), run);
+    const current = inputTrace('case-a');
+    const { context: _context, retrieval, ...rest } = current;
+    const {
+      queryExpansionConfig: _queryExpansionConfig,
+      searchTrace: _searchTrace,
+      ...legacyRetrieval
+    } = retrieval;
+    appendTraceEnvelope(
+      evalArtifactPath(run.artifactPaths.trace, evalRoot),
+      createTraceEnvelope({
+        runId: run.id,
+        evalCaseId: current.id,
+        kind: 'faith',
+        outcome: 'success',
+        payload: { ...rest, retrieval: legacyRetrieval },
+      }),
+    );
+
+    assert.throws(
+      () => readFaithBadCaseInput({ runId: run.id, evalRoot }),
+      /context|queryExpansionConfig|searchTrace/i,
+    );
+  });
+});
+
+check('rejects inconsistent context, source, query, and judge snapshots', () => {
+  const current = inputTrace('case-a');
+  assert.throws(
+    () =>
+      decodeFaithTrace({
+        ...current,
+        context: contextSnapshot('Chunk::different'),
+      }),
+    /context chunk ids.*retrieval topIds/i,
+  );
+  assert.throws(
+    () =>
+      decodeFaithTrace({
+        ...current,
+        sourceExpectation: { mode: 'required', types: ['schema'] },
+        sourceCoverage: {
+          mode: 'required',
+          expectedTypes: ['schema'],
+          presentTypes: [],
+          missingTypes: ['schema'],
+          status: 'missing_required',
+        },
+      }),
+    /source coverage.*context snapshot/i,
+  );
+  assert.throws(
+    () =>
+      decodeFaithTrace({
+        ...current,
+        retrieval: {
+          ...current.retrieval,
+          queryExpansionConfig: {
+            enabled: true,
+            registryHash: null,
+            reviewedAliasCount: 0,
+          },
+        },
+      }),
+    /query expansion config.*search trace/i,
+  );
+  const { judgeAttempts: _judgeAttempts, ...withoutJudgeAttempts } = current;
+  assert.throws(
+    () => decodeFaithTrace(withoutJudgeAttempts),
+    /judgeAttempts/i,
+  );
+  assert.throws(
+    () =>
+      decodeFaithTrace({
+        ...current,
+        judgeAttempts: [{ status: 'valid', vote: verdict(false) }],
+      }),
+    /verdict.*valid judge attempt/i,
+  );
+  assert.throws(
+    () =>
+      decodeFaithTrace({
+        ...current,
+        judgeAttempts: [
+          { status: 'valid', vote: verdict(true) },
+          {
+            status: 'invalid',
+            code: 'invalid_json',
+            reason: 'late invalid output',
+          },
+        ],
+      }),
+    /stop after the first valid vote/i,
+  );
 });
 
 check('maps faithful, hallucination, refusal, judge, and runtime outcomes', () => {
@@ -429,13 +646,7 @@ check('maps faithful, hallucination, refusal, judge, and runtime outcomes', () =
   for (const [outcome, action] of expected) {
     const candidate = onlyCandidate(
       buildFaithBadCaseCandidates({
-        observations: [
-          observation(
-            trace(outcome, {
-              answerable: outcome === 'refused_wrong' ? false : true,
-            }),
-          ),
-        ],
+        observations: [observation(trace(outcome))],
         existingBadCases: [],
         run: RUN,
         scope: 'full',

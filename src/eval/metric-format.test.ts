@@ -24,10 +24,10 @@ console.log('metric-format:');
 check('rate/coverage/recall/mrr 按百分比显示', () => {
   assert.equal(isPercentMetric('generation.valid_yaml_rate'), true);
   assert.equal(isPercentMetric('fix.preserve_coverage'), true);
-  assert.equal(isPercentMetric('serving.recall@3'), true);
-  assert.equal(isPercentMetric('serving.mrr@3'), true);
+  assert.equal(isPercentMetric('retrieval.semantic.recall'), true);
+  assert.equal(isPercentMetric('retrieval.semantic.mrr'), true);
   assert.equal(formatMetricValue('generation.valid_yaml_rate', 0.875), '87.5%');
-  assert.equal(formatMetricDelta('serving.recall@3', -0.012), '-1.2%');
+  assert.equal(formatMetricDelta('retrieval.semantic.recall', -0.012), '-1.2%');
 });
 
 check('avg/count 按普通数值显示', () => {

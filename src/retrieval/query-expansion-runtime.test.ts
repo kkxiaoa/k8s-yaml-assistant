@@ -27,7 +27,7 @@ const reviewedAlias = {
   id: 'pvc-volume-mode',
   resource: 'PersistentVolumeClaim',
   path: 'spec.volumeMode',
-  chunkId: 'PersistentVolumeClaim::spec.volumeMode',
+  chunkId: 'schema::v1::PersistentVolumeClaim::spec.volumeMode',
   fieldTerms: ['volumeMode', 'Block', 'Filesystem'],
   weakZhAliases: ['卷模式'],
   strongZhAliases: ['裸块设备'],

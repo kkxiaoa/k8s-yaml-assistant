@@ -5,6 +5,7 @@ config({ override: true });
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CORPUS } from '../src/knowledge/corpus';
+import { primaryPath, primaryResource } from '../src/knowledge/chunk';
 import { getClient } from '../src/server/pipeline';
 import { textOf } from '../src/eval/llm';
 
@@ -65,7 +66,7 @@ function readTargets(): AliasTarget[] {
   return parsed.map((row) => row as AliasTarget);
 }
 
-function parseJson(text: string): ModelAliasDraft {
+function parseModelAliasDraft(text: string): ModelAliasDraft {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error(`模型未返回 JSON: ${text}`);
   const parsed = JSON.parse(match[0]) as Partial<ModelAliasDraft>;
@@ -96,7 +97,10 @@ async function generateAlias(target: AliasTarget): Promise<SchemaFieldAlias> {
   const chunk = CORPUS.find((c) => c.id === target.chunkId);
   if (!chunk) throw new Error(`chunk 不存在: ${target.chunkId}`);
   if (chunk.sourceType !== 'schema') throw new Error(`非 schema chunk: ${target.chunkId}`);
-  if (chunk.resource !== target.resource || chunk.path !== target.path) {
+  if (
+    primaryResource(chunk) !== target.resource ||
+    primaryPath(chunk) !== target.path
+  ) {
     throw new Error(`target 与 chunk 不一致: ${target.id}`);
   }
 
@@ -109,7 +113,7 @@ ${chunk.text}`;
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      draft = parseJson(await textOf(getClient(), MODEL, SYSTEM, user));
+      draft = parseModelAliasDraft(await textOf(getClient(), MODEL, SYSTEM, user));
       break;
     } catch (e) {
       lastError = e;

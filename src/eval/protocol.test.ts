@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {
+  EVAL_CASE_ERROR_STAGES,
+  EVAL_RUN_FATAL_STAGES,
   EVAL_SCHEMA_VERSION,
   computeDatasetHash,
   decodeEvalBaseline,
@@ -40,7 +42,8 @@ const HASH_C = 'c'.repeat(64);
 const HASH_D = 'd'.repeat(64);
 
 const RETRIEVAL_CONFIG = {
-  corpusHash: HASH_A,
+  corpusContentHash: HASH_A,
+  corpusManifestHash: HASH_D,
   indexHash: HASH_B,
   embeddingModel: 'voyage-4',
   rerankModel: 'rerank-2.5',
@@ -59,6 +62,7 @@ const FAITH_CONFIG = {
   answerPromptHash: HASH_C,
   judgePromptHash: HASH_D,
   judgeParserSchemaIdentity: 'judge-parser-v1',
+  judgeAttemptLimit: 2,
 };
 
 const JUDGE_CONFIG = {
@@ -263,7 +267,8 @@ check('dataset hash preserves JSON keys that overlap object prototypes', () => {
 
 check('retrieval config requires the complete retrieval identity', () => {
   for (const field of [
-    'corpusHash',
+    'corpusContentHash',
+    'corpusManifestHash',
     'indexHash',
     'embeddingModel',
     'rerankModel',
@@ -279,14 +284,16 @@ check('retrieval config requires the complete retrieval identity', () => {
   }
 });
 
-check('faith config requires answer, judge, prompt, and parser identities', () => {
+check('faith config requires model, prompt, parser, and attempt identities', () => {
   for (const field of [
-    'corpusHash',
+    'corpusContentHash',
+    'corpusManifestHash',
     'answerModel',
     'judgeModel',
     'answerPromptHash',
     'judgePromptHash',
     'judgeParserSchemaIdentity',
+    'judgeAttemptLimit',
   ]) {
     assert.throws(() =>
       decodeEvalRun({
@@ -391,7 +398,7 @@ check('running run has neither completion nor failure state', () => {
   assert.throws(() =>
     decodeEvalRun({
       ...running,
-      failure: { stage: 'dataset', message: 'failed' },
+      failure: { stage: 'dataset_preflight', message: 'failed' },
     }),
   );
   assert.throws(() => decodeEvalRun({ ...running, failure: undefined }));
@@ -402,7 +409,7 @@ check('completed run requires completedAt and forbids failure', () => {
   assert.throws(() =>
     decodeEvalRun({
       ...runFixture(),
-      failure: { stage: 'metrics', message: 'failed' },
+      failure: { stage: 'metric_aggregation', message: 'failed' },
     }),
   );
   assert.throws(() =>
@@ -414,7 +421,7 @@ check('failed run requires completedAt and a structured failure', () => {
   const failed = {
     ...runFixture(),
     status: 'failed',
-    failure: { stage: 'retrieval', message: 'index unavailable' },
+    failure: { stage: 'index', message: 'index unavailable' },
   };
   assert.equal(decodeEvalRun(failed).status, 'failed');
   assert.throws(() => decodeEvalRun(omit(failed, 'failure')));
@@ -513,6 +520,28 @@ check('error trace requires error details and other outcomes forbid them', () =>
   }
   assert.throws(() =>
     decodeTraceEnvelope({ ...traceFixture(), error: undefined }),
+  );
+});
+
+check('run and case errors accept only the stable stage taxonomy', () => {
+  assert.ok(EVAL_CASE_ERROR_STAGES.includes('judge_parse'));
+  assert.ok(EVAL_CASE_ERROR_STAGES.includes('schema_validation'));
+  assert.ok(EVAL_RUN_FATAL_STAGES.includes('dataset_preflight'));
+  assert.ok(EVAL_RUN_FATAL_STAGES.includes('artifact_write'));
+
+  assert.throws(() =>
+    decodeTraceEnvelope({
+      ...traceFixture(),
+      outcome: 'error',
+      error: { stage: 'case:pod-image:retrieval', message: 'failed' },
+    }),
+  );
+  assert.throws(() =>
+    decodeEvalRun({
+      ...runFixture(),
+      status: 'failed',
+      failure: { stage: 'runner', message: 'failed' },
+    }),
   );
 });
 

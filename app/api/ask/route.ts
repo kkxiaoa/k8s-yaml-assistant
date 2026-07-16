@@ -41,11 +41,11 @@ export async function POST(req: Request): Promise<Response> {
     mode,
     { traceSink: appendServingTrace },
   );
-  // 把引用编号 [S{n}] + sourceUri 并到 hits,供前端"答案依据"卡片对应与溯源
+  // 合并引用编号和 formatSources 规范化后的 provenance。
   const cited = hits.map((h, i) => ({
     ...h,
     n: sources[i]?.n ?? i + 1,
-    sourceUri: sources[i]?.sourceUri,
+    provenance: sources[i]?.provenance ?? h.provenance,
   }));
   const client = getClient();
 

@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Chunk } from './chunk';
+import { canonicalTargets } from './identity';
 
 interface PolicyRule {
   id: string;
@@ -25,19 +26,24 @@ function policyText(p: PolicyRule): string {
   return `[平台规范] ${p.rule}。级别:${p.severity}。适用:${scope}。理由:${p.rationale}。(组织策略/平台规范,非 K8s 官方强制)`;
 }
 
-/** data/policies.json → policy chunk[]。id=policy.id,resource/path 取 appliesTo 以吃软加权。 */
+/** data/policies.json → canonical policy chunk[]。 */
 export function buildPolicyCorpus(): Chunk[] {
   return loadPolicies().map((p) => ({
     id: p.id,
-    resource: p.appliesTo.resource,
-    path: p.appliesTo.field ?? '',
-    resources: [p.appliesTo.resource],
-    paths: p.appliesTo.field ? [p.appliesTo.field] : [],
-    appliesTo: p.appliesTo,
     title: `平台规范 · ${p.appliesTo.resource} · ${p.appliesTo.field ?? '(资源级)'}`,
     text: policyText(p),
     sourceType: 'policy',
-    version: p.version,
-    trustLevel: 'org-policy',
+    provenance: {
+      authority: 'organization',
+      ...(p.version === undefined ? {} : { version: p.version }),
+    },
+    targets: canonicalTargets([
+      {
+        kind: p.appliesTo.resource,
+        ...(p.appliesTo.field === undefined
+          ? {}
+          : { path: p.appliesTo.field }),
+      },
+    ]),
   }));
 }

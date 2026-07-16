@@ -1,18 +1,84 @@
 import assert from 'node:assert/strict';
-import { buildJudgeCalibrationCaseFromFaith } from './calibration-snapshot';
+import {
+  buildJudgeCalibrationCaseFromFaith,
+  type JudgeCalibrationLabel,
+} from './calibration-snapshot';
 import type { FaithTrace } from './faith-store';
+
+const SNAPSHOT_CHUNK = {
+  id: 'Chunk::actual',
+  title: 'actual chunk',
+  text: 'snapshot text',
+  sourceType: 'schema' as const,
+  provenance: { authority: 'cluster_api' as const, version: 'v1' },
+  targets: [{ apiVersion: 'v1', kind: 'Pod', path: 'spec.field' }],
+};
+const SNAPSHOT_SOURCE = {
+  n: 1,
+  id: SNAPSHOT_CHUNK.id,
+  title: SNAPSHOT_CHUNK.title,
+  sourceType: SNAPSHOT_CHUNK.sourceType,
+  provenance: SNAPSHOT_CHUNK.provenance,
+  targets: SNAPSHOT_CHUNK.targets,
+};
+const SNAPSHOT_HIT = {
+  id: SNAPSHOT_CHUNK.id,
+  title: SNAPSHOT_CHUNK.title,
+  sourceType: SNAPSHOT_CHUNK.sourceType,
+  provenance: SNAPSHOT_CHUNK.provenance,
+  targets: SNAPSHOT_CHUNK.targets,
+  score: 0.9,
+};
+const SNAPSHOT_CONTEXT = {
+  text: '[S1] snapshot captured during the faith run',
+  chunks: [SNAPSHOT_CHUNK],
+  sources: [SNAPSHOT_SOURCE],
+};
 
 const BASE_TRACE: FaithTrace = {
   id: 'case-1',
+  input: { kind: 'retrieval_case', retrievalCaseId: 'case-1' },
   question: 'question',
-  answerable: true,
+  expectedBehavior: 'answer_with_sources',
+  target: { kind: 'Pod' },
+  context: SNAPSHOT_CONTEXT,
   retrieval: {
     expectedChunkIds: ['Chunk::expected'],
     topIds: ['Chunk::actual'],
     foundCount: 0,
     fullRecall: false,
+    queryExpansionConfig: {
+      enabled: false,
+      registryHash: null,
+      reviewedAliasCount: 0,
+    },
+    searchTrace: {
+      queryText: 'question',
+      queryExpansion: {
+        enabled: false,
+        status: 'disabled',
+        originalQueryText: 'question',
+        expandedQueryText: 'question',
+        matchedAliases: [],
+        expansionTerms: [],
+      },
+      coarseHits: [SNAPSHOT_HIT],
+      rerankHits: [SNAPSHOT_HIT],
+      latencyMs: { total: 1 },
+      cache: { index: { status: 'hit' }, embeddingHit: false },
+    },
   },
   answer: 'answer',
+  judgeAttempts: [
+    {
+      status: 'valid',
+      vote: {
+        faithful: false,
+        unsupported: ['claim'],
+        reason: 'unsupported',
+      },
+    },
+  ],
   verdict: {
     faithful: false,
     unsupported: ['claim'],
@@ -21,11 +87,54 @@ const BASE_TRACE: FaithTrace = {
   outcome: 'dual_cause',
 };
 
+const { context: _context, ...TRACE_WITHOUT_CONTEXT } = BASE_TRACE;
+
 const LABEL = {
   id: 'case-1',
   category: 'hallucinated',
   human: { faithful: false, note: 'human label' },
-};
+} satisfies JudgeCalibrationLabel;
+
+assert.throws(
+  () =>
+    buildJudgeCalibrationCaseFromFaith({
+      label: LABEL,
+      trace: TRACE_WITHOUT_CONTEXT as FaithTrace,
+      sourceFaithRunId: 'faith-run-1',
+      sourceFaithTraceId: 'faith-run-1:case-1',
+    }),
+  /case-1.*context snapshot|context snapshot.*case-1/i,
+);
+
+const calibrationCase = buildJudgeCalibrationCaseFromFaith({
+  label: LABEL,
+  trace: BASE_TRACE,
+  sourceFaithRunId: 'faith-run-1',
+  sourceFaithTraceId: 'faith-run-1:case-1',
+});
+
+assert.deepEqual(calibrationCase, {
+  id: LABEL.id,
+  category: LABEL.category,
+  question: BASE_TRACE.question,
+  context: SNAPSHOT_CONTEXT.text,
+  sources: SNAPSHOT_CONTEXT.sources,
+  answer: BASE_TRACE.answer,
+  human: LABEL.human,
+  sourceFaithRunId: 'faith-run-1',
+  sourceFaithTraceId: 'faith-run-1:case-1',
+});
+
+assert.throws(
+  () =>
+    buildJudgeCalibrationCaseFromFaith({
+      label: { ...LABEL, id: 'other-case' },
+      trace: BASE_TRACE,
+      sourceFaithRunId: 'faith-run-1',
+      sourceFaithTraceId: 'faith-run-1:case-1',
+    }),
+  /label.*other-case.*trace.*case-1|identity mismatch/i,
+);
 
 assert.throws(
   () =>
@@ -33,35 +142,20 @@ assert.throws(
       label: LABEL,
       trace: BASE_TRACE,
       sourceFaithRunId: 'faith-run-1',
+      sourceFaithTraceId: '',
     }),
-  /case-1.*context snapshot|context snapshot.*case-1/i,
+  /source faith trace id/i,
 );
-
-const snapshotContext = '[S1] snapshot captured during the faith run';
-const calibrationCase = buildJudgeCalibrationCaseFromFaith({
-  label: LABEL,
-  trace: { ...BASE_TRACE, context: snapshotContext },
-  sourceFaithRunId: 'faith-run-1',
-});
-
-assert.deepEqual(calibrationCase, {
-  id: LABEL.id,
-  category: LABEL.category,
-  question: BASE_TRACE.question,
-  context: snapshotContext,
-  answer: BASE_TRACE.answer,
-  human: LABEL.human,
-  sourceFaithRunId: 'faith-run-1',
-});
 
 assert.throws(
   () =>
     buildJudgeCalibrationCaseFromFaith({
-      label: { ...LABEL, id: 'other-case' },
-      trace: { ...BASE_TRACE, context: snapshotContext },
+      label: LABEL,
+      trace: { ...BASE_TRACE, answer: '' },
       sourceFaithRunId: 'faith-run-1',
+      sourceFaithTraceId: 'faith-run-1:case-1',
     }),
-  /label.*other-case.*trace.*case-1|identity mismatch/i,
+  /missing answer snapshot/i,
 );
 
-console.log('calibration-snapshot: 3 checks passed');
+console.log('calibration-snapshot: 5 checks passed');

@@ -1,20 +1,31 @@
-// 生成评估的纯度量函数(无副作用、无网络):路径存在性 + 跨资源一致性检查。
-// 独立成模块,便于单测/复用,且 import 不会触发 eval:gen 跑批(runner 的 main 在 generation-eval.ts)。
+// 生成和修复评估的纯度量函数；import 不触发 runner 或模型调用。
 
-import { loadAll } from 'js-yaml';
-import type {
-  ConsistencyCheck,
-  GenerationEvalCase,
-} from '../cases/generation-cases';
-import type { DefectType, FixEvalCase } from '../cases/fix-cases';
+import type { GenerationEvalCase } from '../cases/generation-cases';
 import type { GenerateResult } from '../../server/agent';
 import { validateYamlDocuments } from '../../validation/validate';
+import {
+  evaluateExpectedResource,
+  evaluateFixResourceSet,
+  evaluateGenerationAssertions,
+  parseKubernetesDocuments,
+  type DefectType,
+  type ExpectedResource,
+  type ExpectedResourceResult,
+  type FieldAssertion,
+  type FieldAssertionResult,
+  type FixCase,
+  type FixFixturePreflight,
+  type FixResourceSetResult,
+  type KubernetesDocument,
+  type ResourceIdentity,
+  type ResourceMatchResult,
+  type ResourceRelation,
+  type ResourceRelationResult,
+} from '../assertions';
 import {
   metricObservation,
   type MetricObservation,
 } from '../protocol';
-
-export type Doc = Record<string, unknown>;
 
 /** 从每次 submit 的结构化 attempts 汇总多轮行为(gen/fix 共用)。 */
 export interface AttemptStats {
@@ -73,17 +84,12 @@ export interface AttemptSummary {
   errorCount: number;
 }
 
-export interface ConsistencyResult {
-  check: ConsistencyCheck;
-  pass: boolean;
-}
-
 export interface GenerationCaseResult {
   id: string;
   requirement: string;
-  expectedKinds: string[];
-  mustHavePaths: string[];
-  consistencyChecks: ConsistencyCheck[];
+  expectedResources: ExpectedResource[];
+  relations: ResourceRelation[];
+  rationale: string[];
   finalYaml: string | null;
   attempts: GenerateResult['attempts'];
   attemptSummary: AttemptSummary[];
@@ -92,22 +98,27 @@ export interface GenerationCaseResult {
   submitCount: number;
   validYaml: boolean;
   finalKinds: string[];
-  kindMatch: boolean;
-  requiredPathHits: string[];
-  requiredPathTotal: number;
-  requiredPathCoverage: number;
-  consistencyResults: ConsistencyResult[];
-  consistencyPass: boolean | null;
+  resourceResults: ExpectedResourceResult[];
+  relationResults: ResourceRelationResult[];
+  expectedResourceCount: number;
+  matchedResourceCount: number;
+  resourceMatchPass: boolean;
+  resourceAssertionPassCount: number;
+  resourceAssertionTotal: number;
+  resourceAssertionPass: boolean;
+  relationPassCount: number;
+  relationTotal: number;
+  relationPass: boolean | null;
   contentPass: boolean;
   validationErrorSummary: string[];
 }
 
 export interface FixCaseResult {
   id: string;
-  defect: string;
   defectType: DefectType;
-  expectedKind: string;
-  mustPreserve: FixEvalCase['mustPreserve'];
+  target: ResourceIdentity;
+  preserve: FieldAssertion[];
+  expectedCorrections: FieldAssertion[];
   finalYaml: string | null;
   attempts: GenerateResult['attempts'];
   attemptSummary: AttemptSummary[];
@@ -116,30 +127,39 @@ export interface FixCaseResult {
   submitCount: number;
   validYaml: boolean;
   finalKinds: string[];
-  kindKept: boolean;
-  preserved: FixEvalCase['mustPreserve'];
+  targetMatch: ResourceMatchResult;
+  preserveResults: FieldAssertionResult[];
+  preservePassCount: number;
   preserveTotal: number;
-  preserveCoverage: number;
-  intentPreserved: boolean;
+  preservePass: boolean;
+  correctionResults: FieldAssertionResult[];
+  correctionPassCount: number;
+  correctionTotal: number;
+  correctionPass: boolean;
+  resourceSet: FixResourceSetResult;
+  sideEffectFree: boolean;
+  contentPass: boolean;
   validationErrorSummary: string[];
 }
 
 export interface GenerationEvalMetrics {
   caseCount: number;
   validYamlCount: number;
-  kindMatchCount: number;
-  requiredPathCoverageAvg: number;
-  consistencyCaseCount: number;
-  consistencyPassCount: number;
+  resourceAssertionCount: number;
+  resourceAssertionPassCount: number;
+  relationCount: number;
+  relationPassCount: number;
+  contentPassCount: number;
   attemptStats: AttemptStats;
 }
 
 export interface FixEvalMetrics {
   caseCount: number;
   validYamlCount: number;
-  kindKeptCount: number;
-  intentPreservedCount: number;
-  preserveCoverageAvg: number;
+  correctionPassCount: number;
+  preservePassCount: number;
+  sideEffectFreePassCount: number;
+  contentPassCount: number;
   attemptStats: AttemptStats;
   byDefectType: Record<DefectType, { total: number; fixed: number }>;
 }
@@ -158,151 +178,6 @@ function validationErrorSummary(result: GenerateResult): string[] {
   return lastErrors.map((error) => `${error.path || '(根)'}: ${error.message}`);
 }
 
-const WORKLOAD_KINDS = new Set([
-  'Deployment',
-  'StatefulSet',
-  'DaemonSet',
-  'ReplicaSet',
-  'Job',
-]);
-
-function asObj(v: unknown): Doc | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Doc) : null;
-}
-function asArr(v: unknown): unknown[] {
-  return Array.isArray(v) ? v : [];
-}
-function subsetMatch(sub: Doc, sup: Doc): boolean {
-  const keys = Object.keys(sub);
-  return keys.length > 0 && keys.every((k) => sup[k] === sub[k]);
-}
-
-/** path 存在性:数组段自动对元素展开(spec…containers.image 命中任一 container 即算有)。 */
-export function hasPath(node: unknown, segs: string[]): boolean {
-  if (segs.length === 0) return node !== undefined && node !== null;
-  if (node == null) return false;
-  if (Array.isArray(node)) return node.some((el) => hasPath(el, segs));
-  if (typeof node === 'object') {
-    const key = segs[0]!;
-    if (!(key in (node as Doc))) return false;
-    return hasPath((node as Doc)[key], segs.slice(1));
-  }
-  return false;
-}
-
-/** 收集 path 上的所有值(数组段展开)。供 fix 的"意图保留"检查。 */
-export function pathValues(node: unknown, segs: string[]): unknown[] {
-  if (segs.length === 0) return node === undefined ? [] : [node];
-  if (node == null) return [];
-  if (Array.isArray(node)) return node.flatMap((el) => pathValues(el, segs));
-  if (typeof node === 'object') {
-    const key = segs[0]!;
-    if (!(key in (node as Doc))) return [];
-    return pathValues((node as Doc)[key], segs.slice(1));
-  }
-  return [];
-}
-
-/** 某 path 上是否存在等于 value 的值(修复后关键字段/值是否被保留)。 */
-export function valuePreserved(
-  docs: Doc[],
-  path: string,
-  value: unknown,
-): boolean {
-  return docs.some((d) =>
-    pathValues(d, path.split('.')).some((v) => v === value),
-  );
-}
-
-export function docsOf(yaml: string): Doc[] {
-  try {
-    return (loadAll(yaml) as unknown[]).filter(
-      (d): d is Doc => d != null && typeof d === 'object',
-    );
-  } catch {
-    return [];
-  }
-}
-
-function templateLabels(doc: Doc): Doc {
-  const t = asObj(asObj(doc.spec)?.template);
-  return asObj(asObj(t?.metadata)?.labels) ?? {};
-}
-
-function selectorLabelMatch(docs: Doc[]): boolean {
-  const workloads = docs.filter(
-    (d) => WORKLOAD_KINDS.has(d.kind as string) && asObj(d.spec)?.template,
-  );
-  for (const w of workloads) {
-    const sel = asObj(asObj(asObj(w.spec)?.selector)?.matchLabels);
-    if (sel && !subsetMatch(sel, templateLabels(w))) return false;
-  }
-  for (const s of docs.filter((d) => d.kind === 'Service')) {
-    const sel = asObj(asObj(s.spec)?.selector);
-    if (!sel || Object.keys(sel).length === 0) continue; // headless 无 selector
-    if (!workloads.some((w) => subsetMatch(sel, templateLabels(w)))) return false;
-  }
-  return true;
-}
-
-function containerPorts(docs: Doc[]): Set<number | string> {
-  const ports = new Set<number | string>();
-  for (const w of docs.filter((d) => WORKLOAD_KINDS.has(d.kind as string))) {
-    const containers = asArr(
-      asObj(asObj(asObj(w.spec)?.template)?.spec)?.containers,
-    );
-    for (const c of containers) {
-      for (const p of asArr(asObj(c)?.ports)) {
-        const cp = asObj(p);
-        if (cp?.containerPort != null) ports.add(cp.containerPort as number);
-        if (typeof cp?.name === 'string') ports.add(cp.name);
-      }
-    }
-  }
-  return ports;
-}
-
-function serviceTargetPortMatch(docs: Doc[]): boolean {
-  const cports = containerPorts(docs);
-  for (const s of docs.filter((d) => d.kind === 'Service')) {
-    for (const p of asArr(asObj(s.spec)?.ports)) {
-      const po = asObj(p);
-      if (!po) continue;
-      const target = po.targetPort ?? po.port; // 缺省 targetPort = port
-      if (target != null && !cports.has(target as number | string)) return false;
-    }
-  }
-  return true;
-}
-
-function ingressServiceMatch(docs: Doc[]): boolean {
-  const svcNames = new Set(
-    docs
-      .filter((d) => d.kind === 'Service')
-      .map((d) => asObj(d.metadata)?.name)
-      .filter((n): n is string => typeof n === 'string'),
-  );
-  const refs: string[] = [];
-  for (const ing of docs.filter((d) => d.kind === 'Ingress')) {
-    const spec = asObj(ing.spec);
-    const db = asObj(asObj(spec?.defaultBackend)?.service)?.name;
-    if (typeof db === 'string') refs.push(db);
-    for (const rule of asArr(spec?.rules)) {
-      for (const p of asArr(asObj(asObj(rule)?.http)?.paths)) {
-        const name = asObj(asObj(asObj(p)?.backend)?.service)?.name;
-        if (typeof name === 'string') refs.push(name);
-      }
-    }
-  }
-  return refs.every((n) => svcNames.has(n));
-}
-
-export const CHECKS: Record<ConsistencyCheck, (docs: Doc[]) => boolean> = {
-  selector_label_match: selectorLabelMatch,
-  service_target_port_match: serviceTargetPortMatch,
-  ingress_service_match: ingressServiceMatch,
-};
-
 export function buildGenerationCaseResult(
   evalCase: GenerationEvalCase,
   result: GenerateResult,
@@ -311,36 +186,27 @@ export function buildGenerationCaseResult(
     ? validateYamlDocuments(result.yaml)
     : { errors: [], parseFailed: true };
   const validYaml = result.yaml !== null && validation.errors.length === 0;
-  const docs = result.yaml ? docsOf(result.yaml) : [];
+  const docs = result.yaml ? parseKubernetesDocuments(result.yaml) : [];
   const finalKinds = docs
     .map((doc) => doc.kind)
     .filter((kind): kind is string => typeof kind === 'string');
-  const kindMatch = evalCase.expectedKinds.every((kind) =>
-    finalKinds.includes(kind),
+  const assertionResult = evaluateGenerationAssertions(evalCase, docs);
+  const fieldResults = assertionResult.resources.flatMap(
+    (resource) => resource.assertions,
   );
-  const requiredPathHits = evalCase.mustHavePaths.filter((path) =>
-    docs.some((doc) => hasPath(doc, path.split('.'))),
-  );
-  const requiredPathCoverage = evalCase.mustHavePaths.length
-    ? requiredPathHits.length / evalCase.mustHavePaths.length
-    : 1;
-  const consistencyResults = (evalCase.consistencyChecks ?? []).map(
-    (check) => ({
-      check,
-      pass: validYaml && CHECKS[check](docs),
-    }),
-  );
-  const consistencyPass =
-    consistencyResults.length === 0
-      ? null
-      : consistencyResults.every((item) => item.pass);
+  const resourceAssertionPassCount = fieldResults.filter(
+    (assertion) => assertion.pass,
+  ).length;
+  const relationPassCount = assertionResult.relations.filter(
+    (relation) => relation.pass,
+  ).length;
 
   return {
     id: evalCase.id,
     requirement: evalCase.requirement,
-    expectedKinds: evalCase.expectedKinds,
-    mustHavePaths: evalCase.mustHavePaths,
-    consistencyChecks: evalCase.consistencyChecks ?? [],
+    expectedResources: evalCase.expectedResources,
+    relations: evalCase.relations ?? [],
+    rationale: evalCase.rationale ?? [],
     finalYaml: result.yaml,
     attempts: result.attempts,
     attemptSummary: attemptSummary(result),
@@ -349,49 +215,82 @@ export function buildGenerationCaseResult(
     submitCount: result.attempts.length,
     validYaml,
     finalKinds,
-    kindMatch: validYaml && kindMatch,
-    requiredPathHits,
-    requiredPathTotal: evalCase.mustHavePaths.length,
-    requiredPathCoverage,
-    consistencyResults,
-    consistencyPass,
-    contentPass:
-      validYaml &&
-      kindMatch &&
-      requiredPathCoverage === 1 &&
-      consistencyPass !== false,
+    resourceResults: assertionResult.resources,
+    relationResults: assertionResult.relations,
+    expectedResourceCount: assertionResult.resources.length,
+    matchedResourceCount: assertionResult.resources.filter(
+      (resource) => resource.match.status === 'matched',
+    ).length,
+    resourceMatchPass: assertionResult.resourceMatchPass,
+    resourceAssertionPassCount,
+    resourceAssertionTotal: fieldResults.length,
+    resourceAssertionPass: assertionResult.resourceAssertionPass,
+    relationPassCount,
+    relationTotal: assertionResult.relations.length,
+    relationPass: assertionResult.relationPass,
+    contentPass: validYaml && assertionResult.pass,
     validationErrorSummary: validationErrorSummary(result),
   };
 }
 
 export function buildFixCaseResult(
-  evalCase: FixEvalCase,
+  evalCase: FixCase,
   result: GenerateResult,
+  fixture: FixFixturePreflight,
 ): FixCaseResult {
+  if (fixture.caseId !== evalCase.id) {
+    throw new Error(
+      `fix fixture ${fixture.caseId} does not match case ${evalCase.id}`,
+    );
+  }
   const validation = result.yaml
     ? validateYamlDocuments(result.yaml)
     : { errors: [], parseFailed: true };
   const validYaml = result.yaml !== null && validation.errors.length === 0;
-  const docs = result.yaml ? docsOf(result.yaml) : [];
+  const docs = result.yaml ? parseKubernetesDocuments(result.yaml) : [];
   const finalKinds = docs
     .map((doc) => doc.kind)
     .filter((kind): kind is string => typeof kind === 'string');
-  const kindKept = validYaml && finalKinds.includes(evalCase.expectedKind);
-  const preserved = evalCase.mustPreserve.filter((item) =>
-    valuePreserved(docs, item.path, item.value),
+  const preserveResult = evaluateExpectedResource(
+    {
+      ref: 'fix-target',
+      identity: evalCase.target,
+      assertions: evalCase.preserve,
+    },
+    docs,
   );
-  const preserveCoverage = evalCase.mustPreserve.length
-    ? preserved.length / evalCase.mustPreserve.length
-    : 1;
-  const intentPreserved =
-    validYaml && preserved.length === evalCase.mustPreserve.length;
+  const correctionResult = evaluateExpectedResource(
+    {
+      ref: 'fix-target',
+      identity: evalCase.target,
+      assertions: evalCase.expectedCorrections,
+    },
+    docs,
+  );
+  const preservePassCount = preserveResult.assertions.filter(
+    (assertion) => assertion.pass,
+  ).length;
+  const correctionPassCount = correctionResult.assertions.filter(
+    (assertion) => assertion.pass,
+  ).length;
+  const resourceSet = evaluateFixResourceSet(fixture, docs);
+  const targetMatch = correctionResult.match;
+  const preservePass = preserveResult.pass;
+  const correctionPass = correctionResult.pass;
+  const sideEffectFree = resourceSet.pass;
+  const contentPass =
+    validYaml &&
+    targetMatch.status === 'matched' &&
+    preservePass &&
+    correctionPass &&
+    sideEffectFree;
 
   return {
     id: evalCase.id,
-    defect: evalCase.defect,
     defectType: evalCase.defectType,
-    expectedKind: evalCase.expectedKind,
-    mustPreserve: evalCase.mustPreserve,
+    target: evalCase.target,
+    preserve: evalCase.preserve,
+    expectedCorrections: evalCase.expectedCorrections,
     finalYaml: result.yaml,
     attempts: result.attempts,
     attemptSummary: attemptSummary(result),
@@ -400,11 +299,18 @@ export function buildFixCaseResult(
     submitCount: result.attempts.length,
     validYaml,
     finalKinds,
-    kindKept,
-    preserved,
-    preserveTotal: evalCase.mustPreserve.length,
-    preserveCoverage,
-    intentPreserved,
+    targetMatch,
+    preserveResults: preserveResult.assertions,
+    preservePassCount,
+    preserveTotal: preserveResult.assertions.length,
+    preservePass,
+    correctionResults: correctionResult.assertions,
+    correctionPassCount,
+    correctionTotal: correctionResult.assertions.length,
+    correctionPass,
+    resourceSet,
+    sideEffectFree,
+    contentPass,
     validationErrorSummary: validationErrorSummary(result),
   };
 }
@@ -412,24 +318,26 @@ export function buildFixCaseResult(
 export function computeGenerationEvalMetrics(
   results: GenerationCaseResult[],
 ): GenerationEvalMetrics {
-  const validResults = results.filter((result) => result.validYaml);
-  const consistencyResults = results.filter(
-    (result) => result.consistencyPass !== null,
-  );
   return {
     caseCount: results.length,
-    validYamlCount: validResults.length,
-    kindMatchCount: results.filter((result) => result.kindMatch).length,
-    requiredPathCoverageAvg: validResults.length
-      ? validResults.reduce(
-          (sum, result) => sum + result.requiredPathCoverage,
-          0,
-        ) / validResults.length
-      : 0,
-    consistencyCaseCount: consistencyResults.length,
-    consistencyPassCount: consistencyResults.filter(
-      (result) => result.consistencyPass === true,
-    ).length,
+    validYamlCount: results.filter((result) => result.validYaml).length,
+    resourceAssertionCount: results.reduce(
+      (sum, result) => sum + result.resourceAssertionTotal,
+      0,
+    ),
+    resourceAssertionPassCount: results.reduce(
+      (sum, result) => sum + result.resourceAssertionPassCount,
+      0,
+    ),
+    relationCount: results.reduce(
+      (sum, result) => sum + result.relationTotal,
+      0,
+    ),
+    relationPassCount: results.reduce(
+      (sum, result) => sum + result.relationPassCount,
+      0,
+    ),
+    contentPassCount: results.filter((result) => result.contentPass).length,
     attemptStats: attemptStats(
       results.map((result) => ({
         yaml: result.finalYaml,
@@ -444,24 +352,23 @@ export function computeGenerationEvalMetrics(
 export function computeFixEvalMetrics(
   results: FixCaseResult[],
 ): FixEvalMetrics {
-  const validResults = results.filter((result) => result.validYaml);
   const byDefectType = {} as FixEvalMetrics['byDefectType'];
   for (const result of results) {
     const current = byDefectType[result.defectType] ?? { total: 0, fixed: 0 };
     current.total++;
-    if (result.validYaml) current.fixed++;
+    if (result.contentPass) current.fixed++;
     byDefectType[result.defectType] = current;
   }
   return {
     caseCount: results.length,
-    validYamlCount: validResults.length,
-    kindKeptCount: results.filter((result) => result.kindKept).length,
-    intentPreservedCount: results.filter((result) => result.intentPreserved)
+    validYamlCount: results.filter((result) => result.validYaml).length,
+    correctionPassCount: results.filter((result) => result.correctionPass)
       .length,
-    preserveCoverageAvg: validResults.length
-      ? validResults.reduce((sum, result) => sum + result.preserveCoverage, 0) /
-        validResults.length
-      : 0,
+    preservePassCount: results.filter((result) => result.preservePass).length,
+    sideEffectFreePassCount: results.filter(
+      (result) => result.sideEffectFree,
+    ).length,
+    contentPassCount: results.filter((result) => result.contentPass).length,
     attemptStats: attemptStats(
       results.map((result) => ({
         yaml: result.finalYaml,
@@ -527,24 +434,24 @@ export function generationMetricsRecord(
       metrics.validYamlCount,
       metrics.caseCount,
     ),
-    'generation.kind_match_rate': metricObservation(
-      metrics.validYamlCount
-        ? metrics.kindMatchCount / metrics.validYamlCount
+    'generation.resource_assertion_pass_rate': metricObservation(
+      metrics.resourceAssertionCount
+        ? metrics.resourceAssertionPassCount / metrics.resourceAssertionCount
         : null,
-      metrics.kindMatchCount,
-      metrics.validYamlCount,
+      metrics.resourceAssertionPassCount,
+      metrics.resourceAssertionCount,
     ),
-    'generation.required_path_coverage': metricObservation(
-      metrics.validYamlCount ? metrics.requiredPathCoverageAvg : null,
-      metrics.requiredPathCoverageAvg * metrics.validYamlCount,
-      metrics.validYamlCount,
-    ),
-    'generation.consistency_pass_rate': metricObservation(
-      metrics.consistencyCaseCount
-        ? metrics.consistencyPassCount / metrics.consistencyCaseCount
+    'generation.relation_pass_rate': metricObservation(
+      metrics.relationCount
+        ? metrics.relationPassCount / metrics.relationCount
         : null,
-      metrics.consistencyPassCount,
-      metrics.consistencyCaseCount,
+      metrics.relationPassCount,
+      metrics.relationCount,
+    ),
+    'generation.content_pass_rate': metricObservation(
+      metrics.caseCount ? metrics.contentPassCount / metrics.caseCount : null,
+      metrics.contentPassCount,
+      metrics.caseCount,
     ),
     ...attemptMetricsRecord('generation', metrics.attemptStats),
   };
@@ -555,29 +462,34 @@ export function fixMetricsRecord(
   metrics: FixEvalMetrics,
 ): Record<string, MetricObservation> {
   const record: Record<string, MetricObservation> = {
-    'fix.success_rate': metricObservation(
+    'fix.valid_yaml_rate': metricObservation(
       metrics.caseCount ? metrics.validYamlCount / metrics.caseCount : null,
       metrics.validYamlCount,
       metrics.caseCount,
     ),
-    'fix.kind_kept_rate': metricObservation(
-      metrics.validYamlCount
-        ? metrics.kindKeptCount / metrics.validYamlCount
+    'fix.expected_correction_pass_rate': metricObservation(
+      metrics.caseCount
+        ? metrics.correctionPassCount / metrics.caseCount
         : null,
-      metrics.kindKeptCount,
-      metrics.validYamlCount,
+      metrics.correctionPassCount,
+      metrics.caseCount,
     ),
-    'fix.intent_preserved_rate': metricObservation(
-      metrics.validYamlCount
-        ? metrics.intentPreservedCount / metrics.validYamlCount
+    'fix.preserve_pass_rate': metricObservation(
+      metrics.caseCount ? metrics.preservePassCount / metrics.caseCount : null,
+      metrics.preservePassCount,
+      metrics.caseCount,
+    ),
+    'fix.side_effect_free_pass_rate': metricObservation(
+      metrics.caseCount
+        ? metrics.sideEffectFreePassCount / metrics.caseCount
         : null,
-      metrics.intentPreservedCount,
-      metrics.validYamlCount,
+      metrics.sideEffectFreePassCount,
+      metrics.caseCount,
     ),
-    'fix.preserve_coverage': metricObservation(
-      metrics.validYamlCount ? metrics.preserveCoverageAvg : null,
-      metrics.preserveCoverageAvg * metrics.validYamlCount,
-      metrics.validYamlCount,
+    'fix.success_rate': metricObservation(
+      metrics.caseCount ? metrics.contentPassCount / metrics.caseCount : null,
+      metrics.contentPassCount,
+      metrics.caseCount,
     ),
     ...attemptMetricsRecord('fix', metrics.attemptStats),
   };

@@ -2,6 +2,10 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LABEL, PRIMARY_BTN } from './styles';
 import type { AskMode, SourceHit } from '../lib/api';
+import {
+  sourceAuthorityLabel,
+  sourceLabel,
+} from '@/retrieval/source-policy';
 
 const markdownComponents: Components = {
   p: ({ children }) => (
@@ -163,8 +167,9 @@ export function AskPanel({
             <div className={LABEL}>答案依据</div>
             <ul className="mt-2 space-y-2">
               {cited.map((source, i) => {
-                const resource = source.resource ?? source.resources?.[0] ?? '通用来源';
-                const path = source.path ?? source.paths?.[0];
+                const target = source.targets[0];
+                const resource = target?.kind ?? '通用来源';
+                const path = target?.path;
                 return (
                 <li key={source.id} className="rounded border border-line bg-ink/50 px-3 py-2">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -177,16 +182,16 @@ export function AskPanel({
                       </span>
                     </span>
                     <span className="shrink-0 font-mono text-[10px] uppercase text-muted">
-                      {source.sourceType}
+                      {sourceLabel(source.sourceType)} ·{' '}
+                      {sourceAuthorityLabel(source.provenance.authority)}
                     </span>
                   </div>
                   <p className="mt-1 break-words text-xs leading-relaxed text-fg/80">
                     {source.text}
                   </p>
-                  {/* sourceUri 目前只有 schema 来源有(http);此判断是防未来非 URL 来源渲染成坏链接 */}
-                  {source.sourceUri?.startsWith('http') && (
+                  {source.provenance.sourceUri?.startsWith('http') && (
                     <a
-                      href={source.sourceUri}
+                      href={source.provenance.sourceUri}
                       target="_blank"
                       rel="noreferrer"
                       className="mt-1.5 inline-block break-all font-mono text-[10px] text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"

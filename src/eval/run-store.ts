@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
+import { readJsonFile } from '../shared/json';
 import {
   baselinePath,
   evalArtifactPath,
@@ -23,16 +24,6 @@ export interface ListRunsOptions extends EvalRepositoryOptions {
   kind?: EvalKind;
 }
 
-function parseJson(path: string, artifact: string): unknown {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as unknown;
-  } catch (error) {
-    throw new Error(
-      `invalid ${artifact} JSON at ${path}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
 export function readRun(
   runId: string,
   options: EvalRepositoryOptions = {},
@@ -40,7 +31,7 @@ export function readRun(
   const path = runPath(runId, options.evalRoot);
   let run: EvalRun;
   try {
-    run = decodeEvalRun(parseJson(path, 'eval run'));
+    run = decodeEvalRun(readJsonFile(path, 'eval run'));
   } catch (error) {
     throw new Error(
       `invalid eval run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
@@ -80,7 +71,7 @@ export function readBaseline(
   const path = baselinePath(kind, options.evalRoot);
   if (!existsSync(path)) return null;
   try {
-    const baseline = decodeEvalBaseline(parseJson(path, 'eval baseline'));
+    const baseline = decodeEvalBaseline(readJsonFile(path, 'eval baseline'));
     if (baseline.kind !== kind) {
       throw new Error(
         `baseline kind mismatch: requested ${kind}, artifact contains ${baseline.kind}`,

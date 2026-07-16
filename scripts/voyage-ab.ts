@@ -7,6 +7,7 @@ config({ override: true });
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RETRIEVAL_CASES } from '../src/eval/cases/retrieval-cases';
+import { buildCorpusManifest, CORPUS } from '../src/knowledge/corpus';
 import { embed } from '../src/retrieval/embeddings';
 import { readIndex } from '../src/retrieval/index-store';
 import { COARSE_N, rerank } from '../src/retrieval/rerank';
@@ -84,12 +85,16 @@ async function evaluateModel(
   indexDir: string,
   cases: ABCase[],
 ): Promise<ModelResult> {
-  const index = readIndex(indexDir);
-  if (!index) throw new Error(`索引缺失:${indexDir}`);
-  if (index.manifest.embeddingModel !== model) {
-    throw new Error(
-      `${label} 索引模型不匹配: manifest=${index.manifest.embeddingModel}, expected=${model}`,
-    );
+  const index = readIndex(
+    {
+      corpusManifest: buildCorpusManifest(),
+      corpusChunks: CORPUS,
+      embeddingModel: model,
+    },
+    indexDir,
+  );
+  if (index.status === 'miss') {
+    throw new Error(`${label} 索引不可用(${index.reason}):${indexDir}`);
   }
 
   const queryEmbeddings = await embed(

@@ -105,7 +105,7 @@ function retrievalRun(id: string, evalCaseId: string): EvalRun {
     createdAt: '2026-07-12T00:00:00.000Z',
     completedAt: '2026-07-12T00:01:00.000Z',
     dataset: {
-      id: 'retrieval/answerable',
+      id: 'retrieval/semantic',
       hash: HASH_A,
       caseIds: [evalCaseId],
       caseCount: 1,
@@ -113,7 +113,8 @@ function retrievalRun(id: string, evalCaseId: string): EvalRun {
     artifactPaths: { trace: traceRelativePath(id, 'retrieval') },
     metricDefinitionVersion: 'legacy-v1',
     config: {
-      corpusHash: HASH_A,
+      corpusContentHash: HASH_A,
+      corpusManifestHash: HASH_B,
       indexHash: HASH_B,
       embeddingModel: 'embedding-model',
       rerankModel: 'rerank-model',
@@ -124,7 +125,7 @@ function retrievalRun(id: string, evalCaseId: string): EvalRun {
       },
       k: 3,
     },
-    metrics: { 'serving.recall@3': metricObservation(0, 0, 1) },
+    metrics: { 'retrieval.semantic.recall': metricObservation(0, 0, 1) },
   };
 }
 
@@ -166,9 +167,9 @@ function withTempDir(fn: (directory: string) => void): void {
     traceId: 'trace-a',
     question: 'Pod 用哪个字段挂载卷来源?',
     resource: 'Pod',
-    expectedChunkIds: ['Pod::spec.volumes'],
-    actualTopIds: ['Pod::spec.volumes.projected.sources'],
-    rankedIds: ['Pod::spec.volumes.projected.sources'],
+    expectedChunkIds: ['schema::v1::Pod::spec.volumes'],
+    actualTopIds: ['schema::v1::Pod::spec.volumes.projected.sources'],
+    rankedIds: ['schema::v1::Pod::spec.volumes.projected.sources'],
     k: 3,
   });
 
@@ -202,7 +203,7 @@ function withTempDir(fn: (directory: string) => void): void {
         traceId: 'trace-a',
         question: 'Pod 用哪个字段挂载卷来源?',
         resource: 'Pod',
-        expectedChunkIds: ['Pod::spec.volumes'],
+        expectedChunkIds: ['schema::v1::Pod::spec.volumes'],
         actualTopIds: [],
         rankedIds: [],
         k: 3,
@@ -220,7 +221,7 @@ function withTempDir(fn: (directory: string) => void): void {
         traceId: 'trace-a',
         question: 'Pod 用哪个字段挂载卷来源?',
         resource: 'Pod',
-        expectedChunkIds: ['Pod::spec.volumes'],
+        expectedChunkIds: ['schema::v1::Pod::spec.volumes'],
         actualTopIds: [],
         rankedIds: [],
         k: 3,
@@ -237,18 +238,18 @@ function withTempDir(fn: (directory: string) => void): void {
     question: 'Endpoints 用哪个字段声明后端地址和端口?',
     resource: 'Endpoints',
     expectedChunkIds: [
-      'Endpoints::subsets.addresses',
-      'Endpoints::subsets.ports',
+      'schema::v1::Endpoints::subsets.addresses',
+      'schema::v1::Endpoints::subsets.ports',
     ],
-    actualTopIds: ['Endpoints::subsets.ports', 'Endpoints::subsets.ports.port'],
-    rankedIds: ['Endpoints::subsets.ports', 'Endpoints::subsets.ports.port'],
+    actualTopIds: ['schema::v1::Endpoints::subsets.ports', 'schema::v1::Endpoints::subsets.ports.port'],
+    rankedIds: ['schema::v1::Endpoints::subsets.ports', 'schema::v1::Endpoints::subsets.ports.port'],
     k: 3,
   });
 
   assert.equal(miss.failure.layer, 'retrieval');
   assert.match(
     miss.failure.note ?? '',
-    /未进候选: Endpoints::subsets.addresses/,
+    /未进候选: schema::v1::Endpoints::subsets.addresses/,
   );
   assert.match(miss.failure.note ?? '', /top-3 命中 1\/2/);
 }
@@ -260,13 +261,13 @@ function withTempDir(fn: (directory: string) => void): void {
     traceId: 'trace-a',
     question: 'PVC 怎么申请存储大小?',
     resource: 'PersistentVolumeClaim',
-    expectedChunkIds: ['PersistentVolumeClaim::spec.resources.requests'],
-    actualTopIds: ['PersistentVolumeClaim::status.allocatedResources'],
+    expectedChunkIds: ['schema::v1::PersistentVolumeClaim::spec.resources.requests'],
+    actualTopIds: ['schema::v1::PersistentVolumeClaim::status.allocatedResources'],
     rankedIds: [
-      'PersistentVolumeClaim::status.allocatedResources',
-      'PersistentVolumeClaim::status.allocatedResourceStatuses',
-      'PersistentVolume::spec.capacity',
-      'PersistentVolumeClaim::spec.resources.requests',
+      'schema::v1::PersistentVolumeClaim::status.allocatedResources',
+      'schema::v1::PersistentVolumeClaim::status.allocatedResourceStatuses',
+      'schema::v1::PersistentVolume::spec.capacity',
+      'schema::v1::PersistentVolumeClaim::spec.resources.requests',
     ],
     k: 3,
   });
@@ -275,7 +276,7 @@ function withTempDir(fn: (directory: string) => void): void {
   assert.equal(miss.failure.type, 'rerank_miss');
   assert.match(
     miss.failure.note ?? '',
-    /候选中但排在 top-3 外: PersistentVolumeClaim::spec.resources.requests\(rank=4\)/,
+    /候选中但排在 top-3 外: schema::v1::PersistentVolumeClaim::spec.resources.requests\(rank=4\)/,
   );
 }
 

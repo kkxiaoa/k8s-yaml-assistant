@@ -28,10 +28,16 @@ function metricText(key: string, observation: MetricObservation): string {
 
 function retrievalIdentity(
   artifact: EvalRun | EvalBaseline,
-): { corpusHash: string; indexHash: string; k: number } | null {
+): {
+  corpusContentHash: string;
+  corpusManifestHash: string;
+  indexHash: string;
+  k: number;
+} | null {
   return artifact.kind === 'retrieval' || artifact.kind === 'faith'
     ? {
-        corpusHash: artifact.config.corpusHash,
+        corpusContentHash: artifact.config.corpusContentHash,
+        corpusManifestHash: artifact.config.corpusManifestHash,
         indexHash: artifact.config.indexHash,
         k: artifact.config.k,
       }
@@ -70,7 +76,10 @@ function main(): void {
   if (
     currentRetrieval &&
     baselineRetrieval &&
-    (currentRetrieval.corpusHash !== baselineRetrieval.corpusHash ||
+    (currentRetrieval.corpusContentHash !==
+      baselineRetrieval.corpusContentHash ||
+      currentRetrieval.corpusManifestHash !==
+        baselineRetrieval.corpusManifestHash ||
       currentRetrieval.indexHash !== baselineRetrieval.indexHash)
   ) {
     console.log(
