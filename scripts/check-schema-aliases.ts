@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CORPUS } from '../src/knowledge/corpus';
+import { primaryPath, primaryResource } from '../src/knowledge/chunk';
 import { RETRIEVAL_CASES } from '../src/eval/cases/retrieval-cases';
 import {
   DEFAULT_ALIASES_PATH,
@@ -89,10 +90,10 @@ function main(): void {
     if (!chunk) fail(`target ${target.id}: chunk 不存在 ${target.chunkId}`);
     if (chunk.sourceType !== 'schema')
       fail(`target ${target.id}: chunk 不是 schema source ${target.chunkId}`);
-    if (chunk.resource !== target.resource)
-      fail(`target ${target.id}: resource 不一致 target=${target.resource}, chunk=${chunk.resource}`);
-    if (chunk.path !== target.path)
-      fail(`target ${target.id}: path 不一致 target=${target.path}, chunk=${chunk.path}`);
+    if (primaryResource(chunk) !== target.resource)
+      fail(`target ${target.id}: resource 不一致 target=${target.resource}, chunk=${primaryResource(chunk)}`);
+    if (primaryPath(chunk) !== target.path)
+      fail(`target ${target.id}: path 不一致 target=${target.path}, chunk=${primaryPath(chunk)}`);
 
     for (const evalCaseId of target.evalCaseIds) {
       if (!evalIds.has(evalCaseId))

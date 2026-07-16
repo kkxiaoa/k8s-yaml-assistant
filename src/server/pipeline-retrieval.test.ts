@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CORPUS } from '../knowledge/corpus';
@@ -42,7 +42,7 @@ const exactCases = [
     kind: 'Deployment',
     cursorPath: 'spec.template.spec.containers.image',
     expectedIds: [
-      'Deployment::spec.template.spec.containers.image',
+      'schema::apps/v1::Deployment::spec.template.spec.containers.image',
       'policy.deployment.image.tag.no-latest',
     ],
   },
@@ -51,7 +51,7 @@ const exactCases = [
     kind: 'Pod',
     cursorPath: 'spec.containers.securityContext.privileged',
     expectedIds: [
-      'Pod::spec.containers.securityContext.privileged',
+      'schema::v1::Pod::spec.containers.securityContext.privileged',
       'policy.pod.security.privileged.forbidden',
     ],
   },
@@ -60,7 +60,7 @@ const exactCases = [
     kind: 'Service',
     cursorPath: 'spec.type',
     expectedIds: [
-      'Service::spec.type',
+      'schema::v1::Service::spec.type',
       'policy.service.type.nodeport.forbidden',
     ],
   },
@@ -68,13 +68,13 @@ const exactCases = [
     name: 'Ingress TLS',
     kind: 'Ingress',
     cursorPath: 'spec.tls',
-    expectedIds: ['Ingress::spec.tls', 'policy.ingress.tls.required'],
+    expectedIds: ['schema::networking.k8s.io/v1::Ingress::spec.tls', 'policy.ingress.tls.required'],
   },
   {
     name: 'PVC resource requests',
     kind: 'PersistentVolumeClaim',
     cursorPath: 'spec.resources.requests',
-    expectedIds: ['PersistentVolumeClaim::spec.resources.requests'],
+    expectedIds: ['schema::v1::PersistentVolumeClaim::spec.resources.requests'],
   },
 ];
 
@@ -91,14 +91,27 @@ await check(
     );
 
     assert.equal(result.trace.path, 'exact');
+    assert.deepEqual(result.trace.cache?.index, { status: 'not_used' });
     assert.equal(result.trace.queryExpansion?.status, 'skipped_exact');
     assert.deepEqual(
       result.trace.finalHits.map((hit) => hit.id),
       [
-        'Deployment::spec.template.spec.containers.image',
+        'schema::apps/v1::Deployment::spec.template.spec.containers.image',
         'policy.deployment.image.tag.no-latest',
       ],
     );
+    const [schemaHit, policyHit] = result.trace.finalHits;
+    assert.deepEqual(schemaHit?.targets, [
+      {
+        apiVersion: 'apps/v1',
+        kind: 'Deployment',
+        path: 'spec.template.spec.containers.image',
+      },
+    ]);
+    assert.equal(schemaHit?.provenance.authority, 'cluster_api');
+    assert.equal(policyHit?.provenance.authority, 'organization');
+    assert.equal('resource' in schemaHit!, false);
+    assert.equal('trustLevel' in schemaHit!, false);
   },
 );
 
@@ -120,6 +133,9 @@ await check('eval 调用可注入 run-scoped trace sink', async () => {
     assert.equal(traces.length, 1);
     assert.equal(traces[0]!.path, 'exact');
     assert.equal(traces[0]!.queryExpansion?.status, 'skipped_exact');
+    assert.deepEqual(traces[0]!.finalHits[0]!.targets, [
+      { apiVersion: 'v1', kind: 'Service', path: 'spec.type' },
+    ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -158,6 +174,35 @@ await check(
   },
 );
 
+await check('serving trace sink 失败不中断 editor retrieval', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pipeline-serving-fail-open-'));
+  const blockedParent = join(dir, 'blocked');
+  writeFileSync(blockedParent, 'not a directory');
+  const previousConsoleError = console.error;
+  const errors: string[] = [];
+  console.error = (...args: unknown[]) => errors.push(args.map(String).join(' '));
+  try {
+    const result = await retrieveContext(
+      '解释当前字段',
+      3,
+      { kind: 'Service', cursorPath: 'spec.type' },
+      'explain_field',
+      {
+        traceSink: (trace) => {
+          appendServingTrace(trace, join(blockedParent, 'trace.jsonl'));
+        },
+      },
+    );
+
+    assert.equal(result.trace.path, 'exact');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0]!, /serving retrieval trace write failed/);
+  } finally {
+    console.error = previousConsoleError;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 await check(
   'exact path 覆盖核心字段,并返回 schema/policy 分层来源',
   async () => {
@@ -185,7 +230,7 @@ await check(
 );
 
 await check('exact path 未命中时回到 search path', async () => {
-  const serviceType = chunk('Service::spec.type');
+  const serviceType = chunk('schema::v1::Service::spec.type');
   let called = false;
   let boostPath: string | undefined;
   const fakeSearch: RetrieveContextOptions['search'] = async (
@@ -211,7 +256,7 @@ await check('exact path 未命中时回到 search path', async () => {
         coarseHits: [toTraceHit(serviceType, 0.8)],
         rerankHits: [toTraceHit(serviceType, 0.9)],
         latencyMs: { total: 1 },
-        cache: { indexHit: true, embeddingHit: false },
+        cache: { index: { status: 'hit' }, embeddingHit: false },
       },
     };
   };
@@ -229,7 +274,7 @@ await check('exact path 未命中时回到 search path', async () => {
   assert.equal(result.trace.path, 'search');
   assert.deepEqual(
     result.hits.map((hit) => hit.id),
-    ['Service::spec.type'],
+    ['schema::v1::Service::spec.type'],
   );
 });
 

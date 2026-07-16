@@ -16,14 +16,20 @@ import {
   traceRelativePath,
 } from './artifacts';
 import {
+  EVAL_CASE_ERROR_STAGES,
+  EVAL_RUN_FATAL_STAGES,
   decodeEvalRun,
   metricObservation,
   type EvalRun,
   type TraceEnvelope,
 } from './protocol';
 import {
+  EvalCaseExecutionError,
+  EvalRunExecutionError,
   createErrorTraceEnvelope,
   createTraceEnvelope,
+  executeEvalCases,
+  executeEvalRunStage,
   startEvalRun,
   type EvalRunDefinition,
 } from './run-session';
@@ -33,6 +39,22 @@ let passed = 0;
 function check(name: string, fn: () => void): void {
   try {
     fn();
+    passed++;
+    console.log(`  ✓ ${name}`);
+  } catch (error) {
+    console.error(
+      `  ✗ ${name}\n    ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  }
+}
+
+async function checkAsync(
+  name: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  try {
+    await fn();
     passed++;
     console.log(`  ✓ ${name}`);
   } catch (error) {
@@ -63,7 +85,8 @@ function definition(
     },
     metricDefinitionVersion: 'legacy-v1',
     config: {
-      corpusHash: 'b'.repeat(64),
+      corpusContentHash: 'b'.repeat(64),
+      corpusManifestHash: 'e'.repeat(64),
       indexHash: 'c'.repeat(64),
       embeddingModel: 'voyage-4',
       rerankModel: 'rerank-2.5',
@@ -252,7 +275,10 @@ check('complete accepts success, skipped, and error outcomes', () => {
 
   assert.throws(() => session.appendCase(trace('case-success')), /completed/);
   assert.throws(() => session.complete(metrics), /completed/);
-  assert.throws(() => session.fail('runner', new Error('late')), /completed/);
+  assert.throws(
+    () => session.fail('artifact_write', new Error('late')),
+    /completed/,
+  );
 });
 
 check('complete rejects missing or tampered trace coverage', () => {
@@ -300,11 +326,11 @@ check('failed run keeps prior error trace without fabricating missing cases', ()
     'request failed api_key=run-secret password="hunter two"',
   );
   failure.stack = 'STACK containing run-secret and internal frames';
-  session.fail('runner', failure);
+  session.fail('runner_initialization', failure);
 
   const run = readRun('run-1', root);
   assert.equal(run.status, 'failed');
-  assert.equal(run.failure?.stage, 'runner');
+  assert.equal(run.failure?.stage, 'runner_initialization');
   assert.match(run.failure?.message ?? '', /\[REDACTED\]/);
   assert.doesNotMatch(run.failure?.message ?? '', /run-secret|hunter|STACK/);
   assert.equal(typeof run.completedAt, 'string');
@@ -321,7 +347,115 @@ check('failed run keeps prior error trace without fabricating missing cases', ()
 
   assert.throws(() => session.appendCase(trace('case-2')), /failed/);
   assert.throws(() => session.complete({}), /failed/);
-  assert.throws(() => session.fail('runner', failure), /failed/);
+  assert.throws(() => session.fail('runner_initialization', failure), /failed/);
+});
+
+await checkAsync(
+  'every case-error stage writes one error envelope and continues the batch',
+  async () => {
+    for (const [index, stage] of EVAL_CASE_ERROR_STAGES.entries()) {
+      const root = evalRoot();
+      const runId = `run-case-stage-${index}`;
+      const caseIds = ['case-before', 'case-error', 'case-after'];
+      const session = startEvalRun(definition(caseIds, runId), {
+        evalRoot: root,
+      });
+      const summary = await executeEvalCases({
+        cases: caseIds.map((id) => ({ id })),
+        evaluate: async (evalCase) => {
+          if (evalCase.id === 'case-error') {
+            throw new EvalCaseExecutionError(
+              stage,
+              new Error(`${stage} failed`),
+              { stage },
+            );
+          }
+          return { id: evalCase.id };
+        },
+        appendSuccess: (evalCase, result) => {
+          session.appendCase(
+            createTraceEnvelope({
+              runId,
+              evalCaseId: evalCase.id,
+              kind: 'retrieval',
+              outcome: 'success',
+              payload: result,
+            }),
+          );
+        },
+        appendError: (evalCase, failure) => {
+          session.appendCase(
+            createErrorTraceEnvelope({
+              runId,
+              evalCaseId: evalCase.id,
+              kind: 'retrieval',
+              payload: failure.payload ?? {},
+              stage: failure.stage,
+              error: failure.originalError,
+            }),
+          );
+        },
+      });
+
+      assert.deepEqual(
+        summary.results.map((result) => result.id),
+        ['case-before', 'case-after'],
+      );
+      assert.deepEqual(summary.harnessErrors, [
+        { evalCaseId: 'case-error', stage },
+      ]);
+      session.complete({
+        'retrieval.harness_error_count': metricObservation(1),
+      });
+      const envelopes = readTraceEnvelopes(
+        evalArtifactPath(traceRelativePath(runId, 'retrieval'), root),
+      );
+      assert.deepEqual(
+        envelopes.map((envelope) => envelope.outcome),
+        ['success', 'error', 'success'],
+      );
+    }
+  },
+);
+
+await checkAsync('fatal stages abort instead of becoming case errors', async () => {
+  for (const stage of EVAL_RUN_FATAL_STAGES) {
+    await assert.rejects(
+      () =>
+        executeEvalRunStage(stage, async () => {
+          throw new Error(`${stage} failed`);
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof EvalRunExecutionError);
+        assert.equal(error.stage, stage);
+        return true;
+      },
+    );
+  }
+});
+
+await checkAsync('artifact append failure aborts the batch', async () => {
+  const evaluated: string[] = [];
+  await assert.rejects(
+    () =>
+      executeEvalCases({
+        cases: [{ id: 'case-1' }, { id: 'case-2' }],
+        evaluate: async (evalCase) => {
+          evaluated.push(evalCase.id);
+          return evalCase.id;
+        },
+        appendSuccess: () => {
+          throw new Error('disk full');
+        },
+        appendError: () => undefined,
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof EvalRunExecutionError);
+      assert.equal(error.stage, 'artifact_write');
+      return true;
+    },
+  );
+  assert.deepEqual(evaluated, ['case-1']);
 });
 
 check('an empty dataset completes without a fabricated trace file', () => {

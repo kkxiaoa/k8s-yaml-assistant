@@ -1,31 +1,10 @@
-// fix 评估用例:故意坏的 YAML,喂给 fixResource 修。评估单位是"修好没 + 修了几轮 +
-// 有没有把资源类型改掉 + 有没有保留用户原意图/字段"(§6.3:fix 尽量保留原字段与意图)。
+import type { FixCase } from '../assertions';
 
-export type DefectType =
-  | 'type_error'
-  | 'missing_required'
-  | 'unknown_field'
-  | 'enum_error'
-  | 'parse_error';
+export type { DefectType, FixCase } from '../assertions';
 
-export interface FixEvalCase {
-  id: string;
-  /** 什么错(便于阅读) */
-  defect: string;
-  /** 缺陷类型,供 fix 评估按类型分组看模型擅长修哪类 */
-  defectType: DefectType;
-  /** 故意坏的 YAML(至少有一条 schema 校验错) */
-  brokenYaml: string;
-  /** 修复后仍应是这个 kind(不能为了消错而换资源类型) */
-  expectedKind: string;
-  /** 意图保留:修复后这些 (path,value) 必须仍在(数组段展开) */
-  mustPreserve: Array<{ path: string; value: unknown }>;
-}
-
-export const FIX_CASES: FixEvalCase[] = [
+export const FIX_CASES: FixCase[] = [
   {
     id: 'fix-type-replicas',
-    defect: 'replicas 填成字符串',
     defectType: 'type_error',
     brokenYaml: `apiVersion: apps/v1
 kind: Deployment
@@ -45,15 +24,25 @@ spec:
         - name: nginx
           image: nginx:1.27
 `,
-    expectedKind: 'Deployment',
-    mustPreserve: [
-      { path: 'metadata.name', value: 'web' },
-      { path: 'spec.template.spec.containers.image', value: 'nginx:1.27' },
+    target: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+    preserve: [
+      { type: 'equals', path: 'spec.selector.matchLabels.app', value: 'web' },
+      { type: 'equals', path: 'spec.template.metadata.labels.app', value: 'web' },
+      {
+        type: 'matches',
+        path: 'spec.template.spec.containers',
+        rule: {
+          name: 'array_contains_object',
+          value: { name: 'nginx', image: 'nginx:1.27' },
+        },
+      },
+    ],
+    expectedCorrections: [
+      { type: 'equals', path: 'spec.replicas', value: 3 },
     ],
   },
   {
     id: 'fix-enum-imagepullpolicy',
-    defect: 'imagePullPolicy 非法枚举 Sometimes',
     defectType: 'enum_error',
     brokenYaml: `apiVersion: v1
 kind: Pod
@@ -65,15 +54,34 @@ spec:
       image: redis:7
       imagePullPolicy: Sometimes
 `,
-    expectedKind: 'Pod',
-    mustPreserve: [
-      { path: 'metadata.name', value: 'cache' },
-      { path: 'spec.containers.image', value: 'redis:7' },
+    target: { apiVersion: 'v1', kind: 'Pod', name: 'cache' },
+    preserve: [
+      {
+        type: 'matches',
+        path: 'spec.containers',
+        rule: {
+          name: 'array_contains_object',
+          value: { name: 'redis', image: 'redis:7' },
+        },
+      },
+    ],
+    expectedCorrections: [
+      {
+        type: 'matches',
+        path: 'spec.containers',
+        rule: {
+          name: 'array_contains_object',
+          value: {
+            name: 'redis',
+            image: 'redis:7',
+            imagePullPolicy: 'IfNotPresent',
+          },
+        },
+      },
     ],
   },
   {
     id: 'fix-missing-provisioner',
-    defect: 'StorageClass 缺 required provisioner',
     defectType: 'missing_required',
     brokenYaml: `apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -82,15 +90,23 @@ metadata:
 reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
 `,
-    expectedKind: 'StorageClass',
-    mustPreserve: [
-      { path: 'metadata.name', value: 'fast' },
-      { path: 'reclaimPolicy', value: 'Retain' },
+    target: {
+      apiVersion: 'storage.k8s.io/v1',
+      kind: 'StorageClass',
+      name: 'fast',
+    },
+    preserve: [
+      { type: 'equals', path: 'reclaimPolicy', value: 'Retain' },
+      {
+        type: 'equals',
+        path: 'volumeBindingMode',
+        value: 'WaitForFirstConsumer',
+      },
     ],
+    expectedCorrections: [{ type: 'exists', path: 'provisioner' }],
   },
   {
     id: 'fix-wrong-nesting',
-    defect: 'Deployment 把 containers 放在 spec 下(应在 spec.template.spec)',
     defectType: 'unknown_field',
     brokenYaml: `apiVersion: apps/v1
 kind: Deployment
@@ -105,15 +121,37 @@ spec:
     - name: nginx
       image: nginx:1.27
 `,
-    expectedKind: 'Deployment',
-    mustPreserve: [
-      { path: 'metadata.name', value: 'web' },
-      { path: 'spec.template.spec.containers.image', value: 'nginx:1.27' },
+    target: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+    preserve: [
+      { type: 'equals', path: 'spec.replicas', value: 2 },
+      { type: 'equals', path: 'spec.selector.matchLabels.app', value: 'web' },
+      {
+        type: 'matches',
+        path: 'spec.template.spec.containers',
+        rule: {
+          name: 'array_contains_object',
+          value: { name: 'nginx', image: 'nginx:1.27' },
+        },
+      },
+    ],
+    expectedCorrections: [
+      {
+        type: 'matches',
+        path: 'spec.containers',
+        rule: { name: 'missing_or_empty' },
+      },
+      {
+        type: 'matches',
+        path: 'spec.template.spec.containers',
+        rule: {
+          name: 'array_contains_object',
+          value: { name: 'nginx', image: 'nginx:1.27' },
+        },
+      },
     ],
   },
   {
     id: 'fix-map-array-value',
-    defect: 'Service selector 的值填成数组',
     defectType: 'type_error',
     brokenYaml: `apiVersion: v1
 kind: Service
@@ -127,15 +165,24 @@ spec:
       targetPort: 8080
   type: ClusterIP
 `,
-    expectedKind: 'Service',
-    mustPreserve: [
-      { path: 'metadata.name', value: 'web' },
-      { path: 'spec.ports.targetPort', value: 8080 },
+    target: { apiVersion: 'v1', kind: 'Service', name: 'web' },
+    preserve: [
+      {
+        type: 'matches',
+        path: 'spec.ports',
+        rule: {
+          name: 'array_contains_object',
+          value: { port: 80, targetPort: 8080 },
+        },
+      },
+      { type: 'equals', path: 'spec.type', value: 'ClusterIP' },
+    ],
+    expectedCorrections: [
+      { type: 'equals', path: 'spec.selector.app', value: 'web' },
     ],
   },
   {
     id: 'fix-typo-field',
-    defect: 'provisioner 拼成 provisionr(未知字段 + 缺 required)',
     defectType: 'unknown_field',
     brokenYaml: `apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -144,15 +191,29 @@ metadata:
 provisionr: ebs.csi.aws.com
 allowVolumeExpansion: true
 `,
-    expectedKind: 'StorageClass',
-    mustPreserve: [
-      { path: 'metadata.name', value: 'gp3' },
-      { path: 'allowVolumeExpansion', value: true },
+    target: {
+      apiVersion: 'storage.k8s.io/v1',
+      kind: 'StorageClass',
+      name: 'gp3',
+    },
+    preserve: [
+      { type: 'equals', path: 'allowVolumeExpansion', value: true },
+    ],
+    expectedCorrections: [
+      {
+        type: 'equals',
+        path: 'provisioner',
+        value: 'ebs.csi.aws.com',
+      },
+      {
+        type: 'matches',
+        path: 'provisionr',
+        rule: { name: 'missing_or_empty' },
+      },
     ],
   },
   {
     id: 'fix-bad-accessmode',
-    defect: 'PVC accessModes 非法枚举 ReadWrite',
     defectType: 'enum_error',
     brokenYaml: `apiVersion: v1
 kind: PersistentVolumeClaim
@@ -165,12 +226,28 @@ spec:
     requests:
       storage: 10Gi
 `,
-    expectedKind: 'PersistentVolumeClaim',
-    mustPreserve: [{ path: 'metadata.name', value: 'data' }],
+    target: {
+      apiVersion: 'v1',
+      kind: 'PersistentVolumeClaim',
+      name: 'data',
+    },
+    preserve: [
+      {
+        type: 'equals',
+        path: 'spec.resources.requests.storage',
+        value: '10Gi',
+      },
+    ],
+    expectedCorrections: [
+      {
+        type: 'equals',
+        path: 'spec.accessModes',
+        value: ['ReadWriteOnce'],
+      },
+    ],
   },
   {
     id: 'fix-parse-error',
-    defect: 'YAML flow 映射未闭合(无法解析)',
     defectType: 'parse_error',
     brokenYaml: `apiVersion: v1
 kind: ConfigMap
@@ -178,7 +255,11 @@ metadata:
   name: app-config
 data: {LOG_LEVEL: info, TIMEOUT: "30"
 `,
-    expectedKind: 'ConfigMap',
-    mustPreserve: [{ path: 'metadata.name', value: 'app-config' }],
+    target: { apiVersion: 'v1', kind: 'ConfigMap', name: 'app-config' },
+    preserve: [
+      { type: 'equals', path: 'data.LOG_LEVEL', value: 'info' },
+      { type: 'equals', path: 'data.TIMEOUT', value: '30' },
+    ],
+    expectedCorrections: [{ type: 'exists', path: 'data' }],
   },
 ];

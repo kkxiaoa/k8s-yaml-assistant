@@ -2,31 +2,27 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import {
-  chunkPaths,
-  chunkResources,
-  primaryPath,
-  primaryResource,
-  type KnowledgeChunk,
-  type SourceType,
-} from '../knowledge/chunk';
+import type { KnowledgeChunk } from '../knowledge/chunk';
+import type { IndexMissReason } from './index-store';
 import type { QueryExpansionTrace } from './query-expansion-runtime';
 
-export interface TraceHit {
-  id: string;
-  title?: string;
-  sourceType: SourceType;
-  resources?: string[];
-  paths?: string[];
-  resource?: string;
-  path?: string;
+export type IndexCacheTrace =
+  | { status: 'hit' }
+  | { status: 'rebuilt'; reason: IndexMissReason }
+  | { status: 'not_used' };
+
+export type TraceHit = Pick<
+  KnowledgeChunk,
+  'id' | 'title' | 'sourceType' | 'provenance' | 'targets'
+> & {
   score?: number;
-}
+};
 
 export interface RetrievalTrace {
   question: string;
   mode: string;
   resourceHint?: string;
+  apiVersionHint?: string;
   fieldPathHint?: string;
   queryText: string;
   queryExpansion?: QueryExpansionTrace;
@@ -50,7 +46,7 @@ export interface RetrievalTrace {
   };
   cache?: {
     embeddingHit?: boolean;
-    indexHit?: boolean;
+    index: IndexCacheTrace;
   };
   createdAt: string;
 }
@@ -61,24 +57,17 @@ export function toTraceHit(
     | 'id'
     | 'title'
     | 'sourceType'
-    | 'resource'
-    | 'path'
-    | 'resources'
-    | 'paths'
-    | 'appliesTo'
+    | 'provenance'
+    | 'targets'
   >,
   score?: number,
 ): TraceHit {
-  const resources = chunkResources(chunk);
-  const paths = chunkPaths(chunk);
   return {
     id: chunk.id,
     title: chunk.title,
     sourceType: chunk.sourceType,
-    resources: resources.length ? resources : undefined,
-    paths: paths.length ? paths : undefined,
-    resource: primaryResource(chunk),
-    path: primaryPath(chunk),
+    provenance: chunk.provenance,
+    targets: chunk.targets,
     score,
   };
 }
@@ -97,8 +86,16 @@ export function appendTraceToPath(path: string, trace: RetrievalTrace): void {
 export function appendServingTrace(
   trace: RetrievalTrace,
   path = SERVING_TRACES_PATH,
-): void {
-  appendTraceToPath(path, trace);
+): boolean {
+  try {
+    appendTraceToPath(path, trace);
+    return true;
+  } catch (error) {
+    console.error(
+      `serving retrieval trace write failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
 }
 
 export function readRetrievalTraces(

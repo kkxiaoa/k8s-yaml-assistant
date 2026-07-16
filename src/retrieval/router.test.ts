@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { inferResource, type ResourceType } from './router';
 import { buildPolicyCorpus } from '../knowledge/policy-corpus';
+import { chunkResources } from '../knowledge/chunk';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -104,15 +105,13 @@ check('无关键词 → null(安全退化不过滤)', () => {
   assert.equal(inferResource('今天天气怎么样'), null);
 });
 
-// 守卫:policy chunk 的 resource 必须都能被 inferResource 认出(policy resource ⊆ router 识别集)。
-// 否则 future policy 用了 RULES 没注册的 resource,boost.ts 靠 chunk.resource === boostResource
-// 会 silently 不加权、路由也永不命中它——用 canonical kind 名反查,红在这里而非线上静默失效。
+// 守卫:policy target 的 kind 必须都能被 inferResource 认出。
+// 否则路由无法生成匹配的 boostResource，相关 policy 不会获得资源加权。
 check('policy resource ⊆ router 可识别集', () => {
   const resources = [
     ...new Set(
       buildPolicyCorpus()
-        .map((c) => c.resource)
-        .filter((resource): resource is string => Boolean(resource)),
+        .flatMap((chunk) => chunkResources(chunk)),
     ),
   ];
   for (const r of resources) {

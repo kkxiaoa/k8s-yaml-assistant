@@ -1,34 +1,50 @@
-import type { SourceType, TrustLevel } from '../knowledge/chunk';
+import type {
+  SourceAuthority,
+  SourceType,
+} from '../knowledge/chunk';
 
 export interface SourcePolicy {
   label: string;
-  trustLevel: TrustLevel;
+  factDomain: string;
   promptRole: string;
 }
 
-export const SOURCE_TYPES = ['schema', 'policy', 'docs', 'example'] as const satisfies readonly SourceType[];
+export const SOURCE_TYPES = [
+  'schema',
+  'policy',
+  'docs',
+  'example',
+] as const satisfies readonly SourceType[];
 
 const SOURCE_POLICIES: Record<SourceType, SourcePolicy> = {
   schema: {
-    label: 'K8s schema',
-    trustLevel: 'k8s-official',
-    promptRole: '官方字段事实:字段是否合法、类型、枚举、required 等结构事实。',
+    label: 'Schema',
+    factDomain: '字段结构事实',
+    promptRole: '说明字段是否合法、类型、枚举和 required 等结构事实。',
   },
   policy: {
-    label: '组织策略',
-    trustLevel: 'org-policy',
-    promptRole: '组织或平台规范:推荐、禁止或约束怎么配置,不是 K8s 官方强制。',
+    label: 'Policy',
+    factDomain: '规则与约束',
+    promptRole: '说明来源声明的推荐、禁止和约束，不替代 Kubernetes schema。',
   },
   docs: {
-    label: '官方文档',
-    trustLevel: 'k8s-docs',
-    promptRole: '官方概念说明:解释行为语义、使用条件和注意事项。',
+    label: '文档',
+    factDomain: '概念与行为说明',
+    promptRole: '解释来源文档明确说明的行为语义、使用条件和注意事项。',
   },
   example: {
     label: '示例',
-    trustLevel: 'example',
-    promptRole: '示例配置:辅助生成或修复,不能替代 schema 合法性判断。',
+    factDomain: '配置样例',
+    promptRole: '辅助生成或修复，不能替代 schema 合法性判断。',
   },
+};
+
+const AUTHORITY_LABELS: Record<SourceAuthority, string> = {
+  kubernetes_official: 'Kubernetes 官方',
+  cluster_api: '当前集群 API',
+  extension_provider: '扩展提供方',
+  organization: '组织',
+  curated: '人工精选',
 };
 
 export function sourcePolicy(sourceType: SourceType): SourcePolicy {
@@ -39,11 +55,17 @@ export function sourceLabel(sourceType: SourceType): string {
   return sourcePolicy(sourceType).label;
 }
 
-export function sourceTrustLevel(sourceType: SourceType): TrustLevel {
-  return sourcePolicy(sourceType).trustLevel;
+export function sourceAuthorityLabel(authority: SourceAuthority): string {
+  return AUTHORITY_LABELS[authority];
 }
 
-export const CONFLICT_RULES = `- 来源分工:标 [schema][K8s schema] 的是官方事实(字段是否合法/能填什么);标 [policy][组织策略] 的是平台组织规范(推荐/禁止怎么配),不是 K8s 官方强制;标 [docs][官方文档] 的是官方概念和行为说明;标 [example][示例] 的是配置样例,不能替代 schema 合法性判断。
-- 冲突表达:当 schema 允许但 policy 禁止/不推荐时,同时说明两层。措辞严谨,例如:"image 字段在 K8s schema 层面允许填字符串,nginx:latest 能通过字段类型校验;但平台 policy 禁止 latest tag。"不要笼统说成"schema 合法"。
+const SOURCE_GUIDANCE = SOURCE_TYPES.map((sourceType) => {
+  const policy = sourcePolicy(sourceType);
+  return `[${sourceType}][${policy.label}] ${policy.factDomain}：${policy.promptRole}`;
+}).join('；');
+
+export const CONFLICT_RULES = `- 来源分工:${SOURCE_GUIDANCE}
+- Authority 以来源标签为准：Kubernetes 官方、当前集群 API、扩展提供方、组织、人工精选是不同权威边界；不得把当前集群 API 或扩展提供方 schema 表达为 Kubernetes 官方事实。
+- 冲突表达:当 schema 允许但 policy 禁止/不推荐时,同时说明两层。措辞严谨,例如:"image 字段在 schema 层面允许填字符串,nginx:latest 能通过字段类型校验;但平台 policy 禁止 latest tag。"不要笼统说成"schema 合法"。
 - 完整性:问题涉及"能不能/是否允许/推荐吗/生产可用吗",必须同时检查 schema 与 policy 来源;若未检索到 policy 来源,只答 schema 层事实并说明"未检索到组织规范"。
 - 红线:不得把 policy 说成 K8s 官方强制;policy 一律标"组织策略/平台规范",强度由级别(required/forbidden/recommended/discouraged)表达。`;

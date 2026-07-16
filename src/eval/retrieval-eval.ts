@@ -2,21 +2,21 @@
 //       npm run eval -- 5   (k=5)
 
 import { config } from 'dotenv';
-import { embed } from '../retrieval/embeddings';
 import { CORPUS } from '../knowledge/corpus';
-import { chunkResources } from '../knowledge/chunk';
-import type { RetrievalEvalCase } from './cases/retrieval-cases';
-import { inferResource, RESOURCE_BOOST } from '../retrieval/router';
-import { getCorpusIndex, searchCorpusTraced } from '../retrieval/retrieve';
+import type { SemanticRetrievalCase } from './cases/retrieval-cases';
+import { inferResource } from '../retrieval/router';
+import { searchCorpusTraced } from '../retrieval/retrieve';
 import { toTraceHit, type RetrievalTrace } from '../retrieval/trace';
 import { retrievalMiss, upsertBadCases, type BadCase } from './bad-cases';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
-import { metricObservation } from './protocol';
+import { metricObservation, type TraceEnvelope } from './protocol';
 import {
   LEGACY_METRIC_DEFINITION_VERSION,
   buildRetrievalEvalTracePayload,
+  harnessErrorMetrics,
   isDirectExecution,
   retrievalDatasetIdentity,
+  retrievalExecutionError,
   retrievalEvalConfig,
   selectRetrievalCases,
   toPersistedPayload,
@@ -24,26 +24,13 @@ import {
 import {
   createErrorTraceEnvelope,
   createTraceEnvelope,
+  executeEvalCaseStage,
+  executeEvalCases,
+  executeEvalRunStage,
+  failEvalRunSession,
   startEvalRun,
   type EvalRunSession,
 } from './run-session';
-
-type Mode = 'none' | 'oracle' | 'auto';
-
-function cosine(left: number[], right: number[]): number {
-  let dot = 0;
-  let leftNorm = 0;
-  let rightNorm = 0;
-  for (let index = 0; index < left.length; index++) {
-    const leftValue = left[index] ?? 0;
-    const rightValue = right[index] ?? 0;
-    dot += leftValue * rightValue;
-    leftNorm += leftValue * leftValue;
-    rightNorm += rightValue * rightValue;
-  }
-  const denominator = Math.sqrt(leftNorm) * Math.sqrt(rightNorm);
-  return denominator === 0 ? 0 : dot / denominator;
-}
 
 interface Result {
   recall: number | null;
@@ -63,137 +50,125 @@ function result(recallNumerator: number, mrrNumerator: number, n: number): Resul
   };
 }
 
-function evaluate(
-  cases: readonly RetrievalEvalCase[],
-  queryEmbeddings: number[][],
-  corpusEmbeddings: number[][],
-  k: number,
-  mode: Mode,
-): Result {
-  let recallSum = 0;
-  let mrrSum = 0;
-
-  for (let index = 0; index < cases.length; index++) {
-    const evalCase = cases[index]!;
-    const queryEmbedding = queryEmbeddings[index]!;
-    const filterResource =
-      mode === 'oracle'
-        ? (evalCase.resource ?? null)
-        : mode === 'auto'
-          ? inferResource(evalCase.question)
-          : null;
-
-    const ranked = CORPUS.map((chunk, chunkIndex) => ({
-      id: chunk.id,
-      score:
-        cosine(queryEmbedding, corpusEmbeddings[chunkIndex]!) +
-        (filterResource && chunkResources(chunk).includes(filterResource)
-          ? RESOURCE_BOOST
-          : 0),
-    })).sort((left, right) => right.score - left.score);
-    const topK = ranked.slice(0, k);
-    const foundCount = evalCase.expectedChunkIds.filter((id) =>
-      topK.some((item) => item.id === id),
-    ).length;
-    const firstIndex = ranked.findIndex((item) =>
-      evalCase.expectedChunkIds.includes(item.id),
-    );
-
-    recallSum += foundCount / evalCase.expectedChunkIds.length;
-    mrrSum += firstIndex < 0 ? 0 : 1 / (firstIndex + 1);
-  }
-
-  return result(recallSum, mrrSum, cases.length);
-}
-
-interface ServingResult extends Result {
+interface SemanticResult extends Result {
   misses: BadCase[];
+  harnessErrorCount: number;
 }
 
-async function evaluateServing(params: {
-  cases: readonly RetrievalEvalCase[];
+interface SemanticCaseResult {
+  evalCase: SemanticRetrievalCase;
+  rankedIds: string[];
+  payload: ReturnType<typeof buildRetrievalEvalTracePayload>;
+  envelope: TraceEnvelope<
+    'retrieval',
+    ReturnType<typeof buildRetrievalEvalTracePayload>
+  >;
+}
+
+async function evaluateSemanticSearch(params: {
+  cases: readonly SemanticRetrievalCase[];
   k: number;
   runId: string;
   session: EvalRunSession;
-}): Promise<ServingResult> {
+}): Promise<SemanticResult> {
   const { cases, k, runId, session } = params;
-  let recallSum = 0;
-  let mrrSum = 0;
-  const misses: BadCase[] = [];
+  const batch = await executeEvalCases({
+    cases,
+    evaluate: async (evalCase): Promise<SemanticCaseResult> => {
+      const routed = inferResource(evalCase.question) ?? undefined;
+      const errorPayload = {
+        expected: { chunkIds: evalCase.expectedChunkIds, k },
+      };
+      let ranked: Awaited<ReturnType<typeof searchCorpusTraced>>['hits'];
+      let trace: Awaited<ReturnType<typeof searchCorpusTraced>>['trace'];
+      try {
+        ({ hits: ranked, trace } = await searchCorpusTraced(
+          evalCase.question,
+          { boostResource: routed },
+        ));
+      } catch (error) {
+        throw retrievalExecutionError(error, () => errorPayload);
+      }
 
-  for (const evalCase of cases) {
-    const routed = inferResource(evalCase.question) ?? undefined;
-    const stage = `case:${evalCase.id}:retrieval`;
-    let rankedIds: string[];
-    let payload: ReturnType<typeof buildRetrievalEvalTracePayload>;
-    try {
-      const { hits: ranked, trace } = await searchCorpusTraced(
-        evalCase.question,
-        { boostResource: routed },
+      return executeEvalCaseStage(
+        'trace_payload',
+        () => {
+          const rankedIds = ranked.map((item) => item.chunk.id);
+          const retrievalTrace = toPersistedPayload({
+            ...trace,
+            question: evalCase.question,
+            mode: 'free',
+            resourceHint: routed,
+            path: 'search',
+            finalHits: ranked
+              .slice(0, k)
+              .map((item) => toTraceHit(item.chunk, item.score)),
+            createdAt: new Date().toISOString(),
+          }) satisfies RetrievalTrace;
+          const payload = buildRetrievalEvalTracePayload({
+            trace: retrievalTrace,
+            expectedChunkIds: evalCase.expectedChunkIds,
+            rankedIds,
+            k,
+          });
+          const envelope = createTraceEnvelope({
+            runId,
+            evalCaseId: evalCase.id,
+            kind: 'retrieval',
+            outcome: payload.ranking.recall === 1 ? 'success' : 'failed',
+            payload,
+          });
+          return { evalCase, rankedIds, payload, envelope };
+        },
+        errorPayload,
       );
-      rankedIds = ranked.map((item) => item.chunk.id);
-      const retrievalTrace = toPersistedPayload({
-          ...trace,
-          question: evalCase.question,
-          mode: 'free',
-          resourceHint: routed,
-          path: 'search',
-          finalHits: ranked
-            .slice(0, k)
-            .map((item) => toTraceHit(item.chunk, item.score)),
-          createdAt: new Date().toISOString(),
-        }) satisfies RetrievalTrace;
-      payload = buildRetrievalEvalTracePayload({
-        trace: retrievalTrace,
-        expectedChunkIds: evalCase.expectedChunkIds,
-        rankedIds,
-        k,
-      });
-    } catch (error) {
+    },
+    appendSuccess: (_evalCase, value) => session.appendCase(value.envelope),
+    appendError: (evalCase, failure) => {
       session.appendCase(
         createErrorTraceEnvelope({
           runId,
           evalCaseId: evalCase.id,
           kind: 'retrieval',
-          payload: {
-            expected: { chunkIds: evalCase.expectedChunkIds, k },
-          },
-          stage,
-          error,
+          payload:
+            failure.payload ?? {
+              expected: { chunkIds: evalCase.expectedChunkIds, k },
+            },
+          stage: failure.stage,
+          error: failure.originalError,
         }),
       );
-      throw error;
-    }
+    },
+  });
 
-    const envelope = createTraceEnvelope({
-      runId,
-      evalCaseId: evalCase.id,
-      kind: 'retrieval',
-      outcome: payload.ranking.recall === 1 ? 'success' : 'failed',
-      payload,
-    });
-    session.appendCase(envelope);
-    recallSum += payload.ranking.recall;
-    mrrSum += payload.ranking.reciprocalRank;
-
-    if (payload.ranking.recall < 1) {
+  let recallSum = 0;
+  let mrrSum = 0;
+  const misses: BadCase[] = [];
+  for (const value of batch.results) {
+    recallSum += value.payload.ranking.recall;
+    mrrSum += value.payload.ranking.reciprocalRank;
+    if (value.payload.ranking.recall < 1) {
       misses.push(
         retrievalMiss({
-          evalCaseId: evalCase.id,
+          evalCaseId: value.evalCase.id,
           runId,
-          traceId: envelope.traceId,
-          question: evalCase.question,
-          resource: evalCase.resource!,
-          expectedChunkIds: evalCase.expectedChunkIds,
-          actualTopIds: payload.ranking.topKIds,
-          rankedIds,
+          traceId: value.envelope.traceId,
+          question: value.evalCase.question,
+          resource: value.evalCase.target.kind,
+          expectedChunkIds: value.evalCase.expectedChunkIds,
+          actualTopIds: value.payload.ranking.topKIds,
+          rankedIds: value.rankedIds,
           k,
         }),
       );
     }
   }
 
-  return { ...result(recallSum, mrrSum, cases.length), misses };
+  return {
+    ...result(recallSum, mrrSum, batch.results.length),
+    misses,
+    harnessErrorCount: batch.harnessErrors.length,
+  };
 }
 
 function formatRate(value: number | null): string {
@@ -206,118 +181,75 @@ function formatMrr(value: number | null): string {
 
 async function main(): Promise<void> {
   const k = Number(process.argv[2]) || 3;
-  const cases = selectRetrievalCases();
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
-  const runConfig = retrievalEvalConfig(k);
-  const session = startEvalRun({
-    id: runId,
-    kind: 'retrieval',
-    scope: 'full',
-    dataset: retrievalDatasetIdentity(cases),
-    metricDefinitionVersion: LEGACY_METRIC_DEFINITION_VERSION,
-    config: runConfig,
+  const setup = await executeEvalRunStage('dataset_preflight', () => {
+    const cases = selectRetrievalCases();
+    return {
+      cases,
+      dataset: retrievalDatasetIdentity(cases),
+      config: retrievalEvalConfig(k),
+    };
   });
-  let stage = 'initialize';
-  let serving: ServingResult;
+  const { cases } = setup;
+  const session = await executeEvalRunStage('artifact_write', () =>
+    startEvalRun({
+      id: runId,
+      kind: 'retrieval',
+      scope: 'full',
+      dataset: setup.dataset,
+      metricDefinitionVersion: LEGACY_METRIC_DEFINITION_VERSION,
+      config: setup.config,
+    }),
+  );
+  let semantic: SemanticResult;
+  let added = 0;
+  let completed = false;
 
   try {
     console.error(
-      `评估(k=${k},语料 ${CORPUS.length} 段,标注 ${cases.length} 条,检索指标仅算可答)\n`,
+      `评估(k=${k},语料 ${CORPUS.length} 段,语义检索标注 ${cases.length} 条)\n`,
     );
-    stage = 'index';
-    const index = await getCorpusIndex();
-    const corpusEmbeddings = index.map((chunk) => chunk.embedding);
-    stage = 'query_embedding';
-    const queryEmbeddings = await embed(
-      cases.map((evalCase) => evalCase.question),
-      'query',
-      runConfig.embeddingModel,
+    semantic = await evaluateSemanticSearch({ cases, k, runId, session });
+
+    console.error('━━━━━━ 语义检索汇总 ━━━━━━');
+    console.error(
+      `Recall@${k}=${formatRate(semantic.recall)}  MRR@${k}=${formatMrr(semantic.mrr)}`,
+    );
+    console.error(
+      `quality fail=${semantic.misses.length} 条；skipped=0 条；harness error=${semantic.harnessErrorCount} 条；质量分母=${semantic.caseCount}/${cases.length}`,
+    );
+    console.error(
+      'EditorContext exact-field 分流由独立确定性测试覆盖。',
     );
 
-    const none = evaluate(cases, queryEmbeddings, corpusEmbeddings, k, 'none');
-    const oracle = evaluate(
-      cases,
-      queryEmbeddings,
-      corpusEmbeddings,
-      k,
-      'oracle',
+    const metrics = await executeEvalRunStage('metric_aggregation', () => ({
+      'retrieval.semantic.recall': metricObservation(
+        semantic.recall,
+        semantic.recallNumerator,
+        semantic.caseCount,
+      ),
+      'retrieval.semantic.mrr': metricObservation(
+        semantic.mrr,
+        semantic.mrrNumerator,
+        semantic.caseCount,
+      ),
+      ...harnessErrorMetrics('retrieval', semantic.harnessErrorCount),
+    }));
+    added = await executeEvalRunStage('artifact_write', () =>
+      upsertBadCases(semantic.misses),
     );
-    const auto = evaluate(cases, queryEmbeddings, corpusEmbeddings, k, 'auto');
-    stage = 'serving_retrieval';
-    serving = await evaluateServing({ cases, k, runId, session });
-
-    console.error('━━━━━━ 汇总 对比 ━━━━━━');
-    console.error('模式            Recall   MRR');
-    console.error(
-      `① 无过滤        ${formatRate(none.recall)}   ${formatMrr(none.mrr)}`,
-    );
-    console.error(
-      `② oracle 过滤   ${formatRate(oracle.recall)}   ${formatMrr(oracle.mrr)}   ← 理想上限(路由全对)`,
-    );
-    console.error(
-      `③ auto 路由     ${formatRate(auto.recall)}   ${formatMrr(auto.mrr)}   ← 诊断:纯向量软加权(无 rerank)`,
-    );
-    console.error(
-      `④ serving 路径  ${formatRate(serving.recall)}   ${formatMrr(serving.mrr)}   ← == 线上(searchCorpusTraced,官方指标)`,
-    );
-    console.error(
-      '\n说明:①②③ 是同一索引上的诊断对照;④ 与线上 retrieveContext 走同一段 searchCorpusTraced 代码,是预测线上的官方指标。',
-    );
-
-    stage = 'complete';
-    session.complete({
-      [`serving.recall@${k}`]: metricObservation(
-        serving.recall,
-        serving.recallNumerator,
-        serving.caseCount,
-      ),
-      [`serving.mrr@${k}`]: metricObservation(
-        serving.mrr,
-        serving.mrrNumerator,
-        serving.caseCount,
-      ),
-      [`auto.recall@${k}`]: metricObservation(
-        auto.recall,
-        auto.recallNumerator,
-        auto.caseCount,
-      ),
-      [`auto.mrr@${k}`]: metricObservation(
-        auto.mrr,
-        auto.mrrNumerator,
-        auto.caseCount,
-      ),
-      [`oracle.recall@${k}`]: metricObservation(
-        oracle.recall,
-        oracle.recallNumerator,
-        oracle.caseCount,
-      ),
-      [`oracle.mrr@${k}`]: metricObservation(
-        oracle.mrr,
-        oracle.mrrNumerator,
-        oracle.caseCount,
-      ),
-      [`none.recall@${k}`]: metricObservation(
-        none.recall,
-        none.recallNumerator,
-        none.caseCount,
-      ),
-      [`none.mrr@${k}`]: metricObservation(
-        none.mrr,
-        none.mrrNumerator,
-        none.caseCount,
-      ),
-    });
+    await executeEvalRunStage('artifact_write', () => session.complete(metrics));
+    completed = true;
   } catch (error) {
-    session.fail(stage, error);
+    if (!completed) failEvalRunSession(session, error);
     throw error;
   }
 
-  const added = upsertBadCases(serving.misses);
   const tracePath = evalArtifactPath(traceRelativePath(runId, 'retrieval'));
   console.error(
     `\n逐条 trace → ${tracePath}` +
       `\n运行结果 → ${runPath(runId)}` +
-      `\nserving 未命中 ${serving.misses.length} 条,新沉淀 bad-cases ${added} 条` +
+      `\n语义检索未命中 ${semantic.misses.length} 条,新沉淀 bad-cases ${added} 条` +
       '\n指标仍使用 legacy-v1 定义,当前 run 不可晋升 baseline。',
   );
 }

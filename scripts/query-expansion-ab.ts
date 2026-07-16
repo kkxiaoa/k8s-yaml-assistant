@@ -5,7 +5,10 @@ import { config } from 'dotenv';
 config({ override: true });
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { RETRIEVAL_CASES, type RetrievalEvalCase } from '../src/eval/cases/retrieval-cases';
+import {
+  RETRIEVAL_CASES,
+  type SemanticRetrievalCase,
+} from '../src/eval/cases/retrieval-cases';
 import { inferResource } from '../src/retrieval/router';
 import { searchCorpusTraced } from '../src/retrieval/retrieve';
 import {
@@ -30,7 +33,7 @@ interface AliasTarget {
 }
 
 interface ABCase {
-  evalCase: RetrievalEvalCase;
+  evalCase: SemanticRetrievalCase;
   metric: boolean;
   targetIds: string[];
   targetChunkIds: string[];
@@ -200,7 +203,7 @@ interface AllABResult {
 async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promise<ABResult> {
   const { evalCase } = abCase;
   const autoResource = inferResource(evalCase.question) ?? undefined;
-  const oracleResource = evalCase.resource;
+  const oracleResource = evalCase.target.kind;
 
   const forced = forceTargetExpansion(evalCase.question, abCase.targetChunkIds, aliases);
 
@@ -277,7 +280,7 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
 }
 
 async function evaluateAllCase(
-  evalCase: RetrievalEvalCase,
+  evalCase: SemanticRetrievalCase,
 ): Promise<AllABResult> {
   const autoResource = inferResource(evalCase.question) ?? undefined;
 
@@ -428,7 +431,7 @@ function printAllSummary(results: AllABResult[]): void {
   );
 
   console.log('\n━━━━━━ A3 full eval A/B 汇总 ━━━━━━');
-  console.log(`answerable cases: ${results.length}; alias matched cases: ${matched.length}`);
+  console.log(`semantic cases: ${results.length}; alias matched cases: ${matched.length}`);
   console.log(
     `no-expansion:    R@3=${pct(avg(results, (r) => r.noExpansion.recall3))} MRR=${avg(results, (r) => r.noExpansion.reciprocalRank).toFixed(3)}`,
   );
@@ -457,8 +460,8 @@ async function runTargeted(): Promise<void> {
 }
 
 async function runAll(): Promise<void> {
-  const cases = RETRIEVAL_CASES.filter((ec) => ec.answerable);
-  console.error(`A3 full eval A/B answerable cases: ${cases.length} 条`);
+  const cases = RETRIEVAL_CASES;
+  console.error(`A3 full eval A/B semantic cases: ${cases.length} 条`);
 
   const results: AllABResult[] = [];
   for (const evalCase of cases) {

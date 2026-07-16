@@ -1,56 +1,72 @@
-// 校验 retrieval cases 完整性(纯本地,不调 embedding/rerank,不花额度):
-// 1. id 唯一;
-// 2. 可答用例:expectedChunkIds 非空且都存在于 CORPUS,resource 在白名单;
-// 3. 拒答用例(answerable=false):expectedChunkIds 必须为空;
-// 4. 报告覆盖资源与拒答数,便于看代表性。
-// 用法:npm run eval:check
-
 import { CORPUS } from '../src/knowledge/corpus';
-import { RETRIEVAL_CASES } from '../src/eval/cases/retrieval-cases';
+import { chunkResources } from '../src/knowledge/chunk';
+import {
+  GROUNDED_ANSWER_CASES,
+  decodeGroundedAnswerCases,
+} from '../src/eval/cases/grounded-answer-cases';
+import {
+  RETRIEVAL_CASES,
+  decodeSemanticRetrievalCases,
+} from '../src/eval/cases/retrieval-cases';
 
-const ids = new Set(CORPUS.map((c) => c.id));
-const resources = new Set(CORPUS.map((c) => c.resource));
-
+const chunkIds = new Set(CORPUS.map((chunk) => chunk.id));
+const corpusKinds = new Set(CORPUS.flatMap((chunk) => chunkResources(chunk)));
 const problems: string[] = [];
 
-// 1. id 唯一
-const seen = new Set<string>();
-for (const ec of RETRIEVAL_CASES) {
-  if (seen.has(ec.id)) problems.push(`重复 id: ${ec.id}`);
-  seen.add(ec.id);
+let semanticCases = RETRIEVAL_CASES;
+try {
+  semanticCases = decodeSemanticRetrievalCases(RETRIEVAL_CASES, {
+    knownChunkIds: chunkIds,
+  });
+} catch (error) {
+  problems.push(error instanceof Error ? error.message : String(error));
 }
 
-// 2 & 3. 分可答/拒答校验
-const answerableCases = RETRIEVAL_CASES.filter((c) => c.answerable);
-const refusalCases = RETRIEVAL_CASES.filter((c) => !c.answerable);
+let groundedCases = GROUNDED_ANSWER_CASES;
+try {
+  groundedCases = decodeGroundedAnswerCases(
+    GROUNDED_ANSWER_CASES,
+    semanticCases,
+  );
+} catch (error) {
+  problems.push(error instanceof Error ? error.message : String(error));
+}
 
-for (const ec of answerableCases) {
-  if (!ec.resource) problems.push(`[${ec.id}] 可答用例缺 resource`);
-  else if (!resources.has(ec.resource))
-    problems.push(`[${ec.id}] resource "${ec.resource}" 不在语料`);
-  if (ec.expectedChunkIds.length === 0)
-    problems.push(`[${ec.id}] 可答用例 expectedChunkIds 为空`);
-  for (const id of ec.expectedChunkIds) {
-    if (!ids.has(id)) problems.push(`[${ec.id}] expectedChunkId 不存在: ${id}`);
+for (const evalCase of semanticCases) {
+  if (!corpusKinds.has(evalCase.target.kind)) {
+    problems.push(
+      `[${evalCase.id}] target kind "${evalCase.target.kind}" 不在语料`,
+    );
   }
 }
 
-for (const ec of refusalCases) {
-  if (ec.expectedChunkIds.length > 0)
-    problems.push(`[${ec.id}] 拒答用例不应有 expectedChunkIds`);
+const referenced = groundedCases.filter(
+  (evalCase) => evalCase.input.kind === 'retrieval_case',
+);
+const standalone = groundedCases.filter(
+  (evalCase) => evalCase.input.kind === 'standalone_question',
+);
+const covered = new Set(semanticCases.map((evalCase) => evalCase.target.kind));
+const uncovered = [...corpusKinds].filter((kind) => !covered.has(kind)).sort();
+
+console.log('=== eval case contracts 校验 ===');
+console.log(`semantic retrieval : ${semanticCases.length}`);
+console.log(
+  `grounded answer    : ${groundedCases.length}(检索引用 ${referenced.length} / 独立拒答 ${standalone.length})`,
+);
+console.log(
+  `覆盖资源 (${covered.size}/${corpusKinds.size}) : ${[...covered].sort().join(', ')}`,
+);
+if (uncovered.length > 0) {
+  console.log(`未覆盖资源        : ${uncovered.join(', ')}`);
 }
 
-const covered = new Set(answerableCases.map((c) => c.resource));
-console.log('=== retrieval cases 校验 ===');
-console.log(`用例数            : ${RETRIEVAL_CASES.length}(可答 ${answerableCases.length} / 拒答 ${refusalCases.length})`);
-console.log(`覆盖资源 (${covered.size}/${resources.size}) : ${[...covered].sort().join(', ')}`);
-const uncovered = [...resources].filter((r) => !covered.has(r)).sort();
-if (uncovered.length) console.log(`未覆盖资源        : ${uncovered.join(', ')}`);
-
-if (problems.length) {
+if (problems.length > 0) {
   console.log(`\n✗ 发现 ${problems.length} 处问题:`);
-  for (const p of problems) console.log(`  ${p}`);
+  for (const problem of problems) console.log(`  ${problem}`);
   process.exit(1);
-} else {
-  console.log(`\n✓ id 唯一;${answerableCases.length} 条可答用例 expectedChunkIds 均命中 CORPUS;${refusalCases.length} 条拒答用例结构正确。`);
 }
+
+console.log(
+  `\n✓ semantic expected IDs 均命中 CORPUS;grounded references 均对齐。`,
+);

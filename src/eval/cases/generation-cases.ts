@@ -1,168 +1,465 @@
-// 生成评估用例。与 retrieval case 分开:评估单位是 parse / schema 校验 /
-// kind 匹配 / 必备路径覆盖 / 一致性,而不是"命中哪个 chunk"。
-// 单资源为主;多资源一致性用例(consistencyChecks)由 4b 补充。
+import type { GenerationCaseContract } from '../assertions';
 
-export type ConsistencyCheck =
-  | 'selector_label_match' // Deployment.spec.selector 与 template.labels 一致
-  | 'service_target_port_match' // Service.targetPort 命中 Pod containerPort
-  | 'ingress_service_match'; // Ingress backend service 名存在于同批 Service
-
-export interface GenerationEvalCase {
-  id: string;
-  requirement: string;
-  /** 生成结果应包含的 kind(全部必须出现) */
-  expectedKinds: string[];
-  /** 应存在的字段路径(数组段自动对元素展开,如 spec.template.spec.containers.image) */
-  mustHavePaths: string[];
-  /** 跨资源一致性检查(4b) */
-  consistencyChecks?: ConsistencyCheck[];
-}
+export type GenerationEvalCase = GenerationCaseContract;
 
 export const GENERATION_CASES: GenerationEvalCase[] = [
   {
     id: 'deploy-basic',
     requirement: '名为 web 的 Deployment,3 副本,镜像 nginx:1.27,容器端口 80',
-    expectedKinds: ['Deployment'],
-    mustHavePaths: [
-      'metadata.name',
-      'spec.replicas',
-      'spec.selector',
-      'spec.template.spec.containers.image',
-      'spec.template.spec.containers.ports.containerPort',
+    expectedResources: [
+      {
+        ref: 'deployment',
+        identity: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+        assertions: [
+          { type: 'equals', path: 'spec.replicas', value: 3 },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                image: 'nginx:1.27',
+                ports: [{ containerPort: 80 }],
+              },
+            },
+          },
+        ],
+      },
+    ],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'deployment',
+      },
     ],
   },
   {
     id: 'sts-basic',
     requirement:
       '名为 db 的 StatefulSet,关联 headless service db,3 副本,镜像 postgres:16,每副本 10Gi 存储',
-    expectedKinds: ['StatefulSet'],
-    mustHavePaths: [
-      'spec.serviceName',
-      'spec.replicas',
-      'spec.volumeClaimTemplates',
-      'spec.template.spec.containers.image',
+    expectedResources: [
+      {
+        ref: 'statefulset',
+        identity: { apiVersion: 'apps/v1', kind: 'StatefulSet', name: 'db' },
+        assertions: [
+          { type: 'equals', path: 'spec.serviceName', value: 'db' },
+          { type: 'equals', path: 'spec.replicas', value: 3 },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: { image: 'postgres:16' },
+            },
+          },
+          {
+            type: 'matches',
+            path: 'spec.volumeClaimTemplates',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                spec: { resources: { requests: { storage: '10Gi' } } },
+              },
+            },
+          },
+        ],
+      },
+    ],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'statefulset',
+      },
+    ],
+    rationale: [
+      '要求未明确必须同时输出 Service 文档，因此这里只验证 serviceName；headless Service 关系由 multi-sts-headless 覆盖。',
     ],
   },
   {
     id: 'svc-clusterip',
     requirement: '名为 web 的 ClusterIP Service,选择 app=web,端口 80 转发到 8080',
-    expectedKinds: ['Service'],
-    mustHavePaths: [
-      'spec.type',
-      'spec.selector',
-      'spec.ports.port',
-      'spec.ports.targetPort',
+    expectedResources: [
+      {
+        ref: 'service',
+        identity: { apiVersion: 'v1', kind: 'Service', name: 'web' },
+        assertions: [
+          { type: 'equals', path: 'spec.type', value: 'ClusterIP' },
+          { type: 'equals', path: 'spec.selector', value: { app: 'web' } },
+          {
+            type: 'matches',
+            path: 'spec.ports',
+            rule: {
+              name: 'array_contains_object',
+              value: { port: 80, targetPort: 8080 },
+            },
+          },
+        ],
+      },
     ],
   },
   {
     id: 'configmap-basic',
     requirement: '名为 app-config 的 ConfigMap,包含 LOG_LEVEL=info、TIMEOUT=30',
-    expectedKinds: ['ConfigMap'],
-    mustHavePaths: ['metadata.name', 'data'],
+    expectedResources: [
+      {
+        ref: 'configmap',
+        identity: { apiVersion: 'v1', kind: 'ConfigMap', name: 'app-config' },
+        assertions: [
+          { type: 'equals', path: 'data.LOG_LEVEL', value: 'info' },
+          { type: 'equals', path: 'data.TIMEOUT', value: '30' },
+        ],
+      },
+    ],
   },
   {
     id: 'secret-basic',
     requirement: '名为 db-secret 的 Opaque Secret,stringData 里 password=s3cr3t',
-    expectedKinds: ['Secret'],
-    mustHavePaths: ['metadata.name', 'type', 'stringData'],
+    expectedResources: [
+      {
+        ref: 'secret',
+        identity: { apiVersion: 'v1', kind: 'Secret', name: 'db-secret' },
+        assertions: [
+          { type: 'equals', path: 'type', value: 'Opaque' },
+          {
+            type: 'equals',
+            path: 'stringData.password',
+            value: 's3cr3t',
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'pvc-basic',
     requirement: '名为 data 的 PVC,访问模式 ReadWriteOnce,申请 10Gi',
-    expectedKinds: ['PersistentVolumeClaim'],
-    mustHavePaths: ['spec.accessModes', 'spec.resources.requests'],
+    expectedResources: [
+      {
+        ref: 'pvc',
+        identity: {
+          apiVersion: 'v1',
+          kind: 'PersistentVolumeClaim',
+          name: 'data',
+        },
+        assertions: [
+          {
+            type: 'contains',
+            path: 'spec.accessModes',
+            value: 'ReadWriteOnce',
+          },
+          {
+            type: 'equals',
+            path: 'spec.resources.requests.storage',
+            value: '10Gi',
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'job-basic',
     requirement: '名为 migrate 的 Job,镜像 busybox 执行迁移,完成 1 次,失败重试 3 次',
-    expectedKinds: ['Job'],
-    mustHavePaths: [
-      'spec.backoffLimit',
-      'spec.template.spec.containers.image',
-      'spec.template.spec.restartPolicy',
+    expectedResources: [
+      {
+        ref: 'job',
+        identity: { apiVersion: 'batch/v1', kind: 'Job', name: 'migrate' },
+        assertions: [
+          { type: 'equals', path: 'spec.completions', value: 1 },
+          { type: 'equals', path: 'spec.backoffLimit', value: 3 },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: { image: 'busybox' },
+            },
+          },
+          { type: 'exists', path: 'spec.template.spec.restartPolicy' },
+        ],
+      },
     ],
+    rationale: ['“执行迁移”没有给出稳定的命令或参数文本，因此不猜测具体 command。'],
   },
   {
     id: 'cronjob-basic',
     requirement: '每天 0 点执行的 CronJob,名为 report,镜像 busybox 打印 hello',
-    expectedKinds: ['CronJob'],
-    mustHavePaths: [
-      'spec.schedule',
-      'spec.jobTemplate.spec.template.spec.containers.image',
+    expectedResources: [
+      {
+        ref: 'cronjob',
+        identity: { apiVersion: 'batch/v1', kind: 'CronJob', name: 'report' },
+        assertions: [
+          { type: 'equals', path: 'spec.schedule', value: '0 0 * * *' },
+          {
+            type: 'matches',
+            path: 'spec.jobTemplate.spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: { image: 'busybox' },
+            },
+          },
+        ],
+      },
+    ],
+    rationale: [
+      '打印 hello 可由 command、args 或 shell 表达式实现，没有唯一稳定的字段表示。',
     ],
   },
   {
     id: 'hpa-basic',
     requirement:
       '对名为 web 的 Deployment 做 HPA,副本 2 到 10,CPU 利用率目标 80%',
-    expectedKinds: ['HorizontalPodAutoscaler'],
-    mustHavePaths: [
-      'spec.scaleTargetRef',
-      'spec.minReplicas',
-      'spec.maxReplicas',
-      'spec.metrics',
+    expectedResources: [
+      {
+        ref: 'hpa',
+        identity: { apiVersion: 'autoscaling/v2', kind: 'HorizontalPodAutoscaler' },
+        assertions: [
+          {
+            type: 'equals',
+            path: 'spec.scaleTargetRef',
+            value: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+          },
+          { type: 'equals', path: 'spec.minReplicas', value: 2 },
+          { type: 'equals', path: 'spec.maxReplicas', value: 10 },
+          {
+            type: 'matches',
+            path: 'spec.metrics',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                type: 'Resource',
+                resource: {
+                  name: 'cpu',
+                  target: { type: 'Utilization', averageUtilization: 80 },
+                },
+              },
+            },
+          },
+        ],
+      },
     ],
+    rationale: ['要求没有指定 HPA 自身的 metadata.name。'],
   },
   {
     id: 'ingress-basic',
     requirement:
       '名为 web 的 Ingress,host example.com,Prefix 路径 / 转发到 service web 的 80 端口',
-    expectedKinds: ['Ingress'],
-    mustHavePaths: ['spec.rules.host', 'spec.rules.http.paths.pathType'],
+    expectedResources: [
+      {
+        ref: 'ingress',
+        identity: {
+          apiVersion: 'networking.k8s.io/v1',
+          kind: 'Ingress',
+          name: 'web',
+        },
+        assertions: [
+          {
+            type: 'matches',
+            path: 'spec.rules',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                host: 'example.com',
+                http: {
+                  paths: [
+                    {
+                      path: '/',
+                      pathType: 'Prefix',
+                      backend: {
+                        service: { name: 'web', port: { number: 80 } },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'sa-basic',
     requirement: '名为 ci-runner 的 ServiceAccount,关闭 token 自动挂载',
-    expectedKinds: ['ServiceAccount'],
-    mustHavePaths: ['metadata.name', 'automountServiceAccountToken'],
+    expectedResources: [
+      {
+        ref: 'serviceaccount',
+        identity: { apiVersion: 'v1', kind: 'ServiceAccount', name: 'ci-runner' },
+        assertions: [
+          {
+            type: 'equals',
+            path: 'automountServiceAccountToken',
+            value: false,
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'netpol-basic',
     requirement:
       '名为 deny-ingress 的 NetworkPolicy,选中 app=web 的 Pod,默认拒绝所有入站',
-    expectedKinds: ['NetworkPolicy'],
-    mustHavePaths: ['spec.podSelector', 'spec.policyTypes'],
+    expectedResources: [
+      {
+        ref: 'networkpolicy',
+        identity: {
+          apiVersion: 'networking.k8s.io/v1',
+          kind: 'NetworkPolicy',
+          name: 'deny-ingress',
+        },
+        assertions: [
+          {
+            type: 'equals',
+            path: 'spec.podSelector.matchLabels',
+            value: { app: 'web' },
+          },
+          { type: 'contains', path: 'spec.policyTypes', value: 'Ingress' },
+          {
+            type: 'matches',
+            path: 'spec.ingress',
+            rule: { name: 'missing_or_empty' },
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'pdb-basic',
     requirement:
       '名为 web-pdb 的 PodDisruptionBudget,选中 app=web,至少保留 2 个可用',
-    expectedKinds: ['PodDisruptionBudget'],
-    mustHavePaths: ['spec.minAvailable', 'spec.selector'],
+    expectedResources: [
+      {
+        ref: 'pdb',
+        identity: {
+          apiVersion: 'policy/v1',
+          kind: 'PodDisruptionBudget',
+          name: 'web-pdb',
+        },
+        assertions: [
+          { type: 'equals', path: 'spec.minAvailable', value: 2 },
+          {
+            type: 'equals',
+            path: 'spec.selector.matchLabels',
+            value: { app: 'web' },
+          },
+        ],
+      },
+    ],
   },
   {
     id: 'storageclass-basic',
     requirement:
       '名为 fast-ssd 的 StorageClass,provisioner ebs.csi.aws.com,回收策略 Retain,延迟绑定,允许扩容',
-    expectedKinds: ['StorageClass'],
-    mustHavePaths: [
-      'provisioner',
-      'reclaimPolicy',
-      'volumeBindingMode',
-      'allowVolumeExpansion',
+    expectedResources: [
+      {
+        ref: 'storageclass',
+        identity: {
+          apiVersion: 'storage.k8s.io/v1',
+          kind: 'StorageClass',
+          name: 'fast-ssd',
+        },
+        assertions: [
+          { type: 'equals', path: 'provisioner', value: 'ebs.csi.aws.com' },
+          { type: 'equals', path: 'reclaimPolicy', value: 'Retain' },
+          {
+            type: 'equals',
+            path: 'volumeBindingMode',
+            value: 'WaitForFirstConsumer',
+          },
+          { type: 'equals', path: 'allowVolumeExpansion', value: true },
+        ],
+      },
     ],
   },
   {
     id: 'role-basic',
     requirement:
       '名为 pod-reader 的 Role,允许对 pods 执行 get、list、watch',
-    expectedKinds: ['Role'],
-    mustHavePaths: ['rules', 'rules.verbs', 'rules.resources'],
+    expectedResources: [
+      {
+        ref: 'role',
+        identity: {
+          apiVersion: 'rbac.authorization.k8s.io/v1',
+          kind: 'Role',
+          name: 'pod-reader',
+        },
+        assertions: [
+          {
+            type: 'matches',
+            path: 'rules',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                apiGroups: [''],
+                resources: ['pods'],
+                verbs: ['get', 'list', 'watch'],
+              },
+            },
+          },
+        ],
+      },
+    ],
   },
-
-  // ── 多资源(§6.3 一致性;consistencyChecks 度量由 4b 计算)──────────────
   {
     id: 'multi-deploy-svc',
     requirement:
       '名为 web 的 Deployment(3 副本,镜像 nginx:1.27,容器端口 80,标签 app=web),' +
       '再配一个 ClusterIP Service(名 web,选择 app=web,端口 80 转发到容器端口 80)',
-    expectedKinds: ['Deployment', 'Service'],
-    mustHavePaths: [
-      'spec.selector',
-      'spec.template.spec.containers.ports.containerPort',
-      'spec.ports.targetPort',
+    expectedResources: [
+      {
+        ref: 'deployment',
+        identity: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+        assertions: [
+          { type: 'equals', path: 'spec.replicas', value: 3 },
+          {
+            type: 'equals',
+            path: 'spec.template.metadata.labels.app',
+            value: 'web',
+          },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                image: 'nginx:1.27',
+                ports: [{ containerPort: 80 }],
+              },
+            },
+          },
+        ],
+      },
+      {
+        ref: 'service',
+        identity: { apiVersion: 'v1', kind: 'Service', name: 'web' },
+        assertions: [
+          { type: 'equals', path: 'spec.type', value: 'ClusterIP' },
+          { type: 'equals', path: 'spec.selector', value: { app: 'web' } },
+          {
+            type: 'matches',
+            path: 'spec.ports',
+            rule: {
+              name: 'array_contains_object',
+              value: { port: 80, targetPort: 80 },
+            },
+          },
+        ],
+      },
     ],
-    consistencyChecks: ['selector_label_match', 'service_target_port_match'],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'service_selector_matches_workload_labels',
+        serviceRef: 'service',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'service_target_port_matches_workload_container_port',
+        serviceRef: 'service',
+        workloadRef: 'deployment',
+      },
+    ],
   },
   {
     id: 'multi-deploy-svc-ingress',
@@ -170,117 +467,550 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
       '一套 web 应用:Deployment(2 副本,镜像 myapp:1.0,容器端口 8080,标签 app=myapp),' +
       'ClusterIP Service(选择 app=myapp,端口 80 转 8080),' +
       'Ingress(host myapp.example.com,Prefix / 转发到该 Service 的 80 端口)',
-    expectedKinds: ['Deployment', 'Service', 'Ingress'],
-    mustHavePaths: [
-      'spec.template.spec.containers.ports.containerPort',
-      'spec.ports.targetPort',
-      'spec.rules.http.paths.backend.service.name',
+    expectedResources: [
+      {
+        ref: 'deployment',
+        identity: { apiVersion: 'apps/v1', kind: 'Deployment' },
+        assertions: [
+          { type: 'equals', path: 'spec.replicas', value: 2 },
+          {
+            type: 'equals',
+            path: 'spec.template.metadata.labels.app',
+            value: 'myapp',
+          },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                image: 'myapp:1.0',
+                ports: [{ containerPort: 8080 }],
+              },
+            },
+          },
+        ],
+      },
+      {
+        ref: 'service',
+        identity: { apiVersion: 'v1', kind: 'Service' },
+        assertions: [
+          { type: 'equals', path: 'spec.type', value: 'ClusterIP' },
+          { type: 'equals', path: 'spec.selector', value: { app: 'myapp' } },
+          {
+            type: 'matches',
+            path: 'spec.ports',
+            rule: {
+              name: 'array_contains_object',
+              value: { port: 80, targetPort: 8080 },
+            },
+          },
+        ],
+      },
+      {
+        ref: 'ingress',
+        identity: { apiVersion: 'networking.k8s.io/v1', kind: 'Ingress' },
+        assertions: [
+          {
+            type: 'matches',
+            path: 'spec.rules',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                host: 'myapp.example.com',
+                http: {
+                  paths: [
+                    {
+                      path: '/',
+                      pathType: 'Prefix',
+                      backend: { service: { port: { number: 80 } } },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
     ],
-    consistencyChecks: [
-      'selector_label_match',
-      'service_target_port_match',
-      'ingress_service_match',
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'service_selector_matches_workload_labels',
+        serviceRef: 'service',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'service_target_port_matches_workload_container_port',
+        serviceRef: 'service',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'ingress_backend_matches_service',
+        ingressRef: 'ingress',
+        serviceRef: 'service',
+      },
     ],
+    rationale: ['要求未明确 Deployment、Service 和 Ingress 各自的 metadata.name。'],
   },
   {
     id: 'multi-api-deploy-svc',
     requirement:
       '名为 api 的 Deployment(2 副本,镜像 registry/api:1.2,容器端口 9000,标签 app=api、tier=backend),' +
       '配 ClusterIP Service api 选择 app=api,端口 8080 转发到 9000',
-    expectedKinds: ['Deployment', 'Service'],
-    mustHavePaths: [
-      'spec.selector',
-      'spec.template.spec.containers.ports.containerPort',
-      'spec.ports.targetPort',
+    expectedResources: [
+      {
+        ref: 'deployment',
+        identity: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'api' },
+        assertions: [
+          { type: 'equals', path: 'spec.replicas', value: 2 },
+          {
+            type: 'equals',
+            path: 'spec.template.metadata.labels',
+            value: { app: 'api', tier: 'backend' },
+          },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                image: 'registry/api:1.2',
+                ports: [{ containerPort: 9000 }],
+              },
+            },
+          },
+        ],
+      },
+      {
+        ref: 'service',
+        identity: { apiVersion: 'v1', kind: 'Service', name: 'api' },
+        assertions: [
+          { type: 'equals', path: 'spec.type', value: 'ClusterIP' },
+          { type: 'equals', path: 'spec.selector', value: { app: 'api' } },
+          {
+            type: 'matches',
+            path: 'spec.ports',
+            rule: {
+              name: 'array_contains_object',
+              value: { port: 8080, targetPort: 9000 },
+            },
+          },
+        ],
+      },
     ],
-    consistencyChecks: ['selector_label_match', 'service_target_port_match'],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'service_selector_matches_workload_labels',
+        serviceRef: 'service',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'service_target_port_matches_workload_container_port',
+        serviceRef: 'service',
+        workloadRef: 'deployment',
+      },
+    ],
   },
   {
     id: 'multi-sts-headless',
     requirement:
       '名为 redis 的 StatefulSet(3 副本,镜像 redis:7,容器端口 6379,标签 app=redis,serviceName 为 redis),' +
       '再配一个 headless Service redis(clusterIP: None,选择 app=redis,端口 6379)',
-    expectedKinds: ['StatefulSet', 'Service'],
-    mustHavePaths: [
-      'spec.serviceName',
-      'spec.template.spec.containers.ports.containerPort',
-      'spec.ports.port',
+    expectedResources: [
+      {
+        ref: 'statefulset',
+        identity: {
+          apiVersion: 'apps/v1',
+          kind: 'StatefulSet',
+          name: 'redis',
+        },
+        assertions: [
+          { type: 'equals', path: 'spec.replicas', value: 3 },
+          { type: 'equals', path: 'spec.serviceName', value: 'redis' },
+          {
+            type: 'equals',
+            path: 'spec.template.metadata.labels.app',
+            value: 'redis',
+          },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                image: 'redis:7',
+                ports: [{ containerPort: 6379 }],
+              },
+            },
+          },
+        ],
+      },
+      {
+        ref: 'service',
+        identity: { apiVersion: 'v1', kind: 'Service', name: 'redis' },
+        assertions: [
+          { type: 'equals', path: 'spec.clusterIP', value: 'None' },
+          { type: 'equals', path: 'spec.selector', value: { app: 'redis' } },
+          {
+            type: 'matches',
+            path: 'spec.ports',
+            rule: {
+              name: 'array_contains_object',
+              value: { port: 6379 },
+            },
+          },
+        ],
+      },
     ],
-    consistencyChecks: ['selector_label_match', 'service_target_port_match'],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'statefulset',
+      },
+      {
+        type: 'service_selector_matches_workload_labels',
+        serviceRef: 'service',
+        workloadRef: 'statefulset',
+      },
+      {
+        type: 'service_target_port_matches_workload_container_port',
+        serviceRef: 'service',
+        workloadRef: 'statefulset',
+      },
+      {
+        type: 'statefulset_service_name_matches_headless_service',
+        statefulSetRef: 'statefulset',
+        serviceRef: 'service',
+      },
+    ],
   },
   {
     id: 'multi-app-configmap',
     requirement:
       '名为 web 的 Deployment(镜像 nginx,标签 app=web)通过 envFrom 引用名为 web-config 的 ConfigMap,' +
       '并生成该 ConfigMap(含 LOG_LEVEL=info)',
-    expectedKinds: ['Deployment', 'ConfigMap'],
-    mustHavePaths: ['spec.template.spec.containers.image', 'data'],
+    expectedResources: [
+      {
+        ref: 'deployment',
+        identity: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+        assertions: [
+          {
+            type: 'equals',
+            path: 'spec.template.metadata.labels.app',
+            value: 'web',
+          },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                image: 'nginx',
+                envFrom: [{ configMapRef: { name: 'web-config' } }],
+              },
+            },
+          },
+        ],
+      },
+      {
+        ref: 'configmap',
+        identity: { apiVersion: 'v1', kind: 'ConfigMap', name: 'web-config' },
+        assertions: [
+          { type: 'equals', path: 'data.LOG_LEVEL', value: 'info' },
+        ],
+      },
+    ],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'deployment_config_map_ref_matches',
+        deploymentRef: 'deployment',
+        configMapRef: 'configmap',
+      },
+    ],
   },
   {
     id: 'multi-hpa-deploy',
     requirement:
       '名为 web 的 Deployment(2 副本,镜像 nginx:1.27,容器端口 80),' +
       '再配针对它的 HPA(副本 2 到 10,CPU 利用率 80%)',
-    expectedKinds: ['Deployment', 'HorizontalPodAutoscaler'],
-    mustHavePaths: ['spec.maxReplicas', 'spec.scaleTargetRef', 'spec.replicas'],
+    expectedResources: [
+      {
+        ref: 'deployment',
+        identity: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+        assertions: [
+          { type: 'equals', path: 'spec.replicas', value: 2 },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                image: 'nginx:1.27',
+                ports: [{ containerPort: 80 }],
+              },
+            },
+          },
+        ],
+      },
+      {
+        ref: 'hpa',
+        identity: { apiVersion: 'autoscaling/v2', kind: 'HorizontalPodAutoscaler' },
+        assertions: [
+          { type: 'equals', path: 'spec.minReplicas', value: 2 },
+          { type: 'equals', path: 'spec.maxReplicas', value: 10 },
+          {
+            type: 'matches',
+            path: 'spec.metrics',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                type: 'Resource',
+                resource: {
+                  name: 'cpu',
+                  target: { type: 'Utilization', averageUtilization: 80 },
+                },
+              },
+            },
+          },
+        ],
+      },
+    ],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'deployment',
+      },
+      {
+        type: 'hpa_target_matches_workload',
+        hpaRef: 'hpa',
+        workloadRef: 'deployment',
+      },
+    ],
+    rationale: ['要求没有指定 HPA 自身的 metadata.name。'],
   },
-
-  // ── 难例:深字段/枚举/多容器/探针,考验内容正确性与自检修复 ──────────
   {
     id: 'hard-pod-multi-container',
     requirement:
       '名为 sidecar-pod 的 Pod,两个容器:app(镜像 myapp:1.0,端口 8080)和 log-agent(镜像 fluentd:1.16);restartPolicy 设为 Never',
-    expectedKinds: ['Pod'],
-    mustHavePaths: [
-      'spec.containers.image',
-      'spec.containers.ports.containerPort',
-      'spec.restartPolicy',
+    expectedResources: [
+      {
+        ref: 'pod',
+        identity: { apiVersion: 'v1', kind: 'Pod', name: 'sidecar-pod' },
+        assertions: [
+          {
+            type: 'matches',
+            path: 'spec.containers',
+            rule: { name: 'array_length_equals', value: 2 },
+          },
+          {
+            type: 'matches',
+            path: 'spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                name: 'app',
+                image: 'myapp:1.0',
+                ports: [{ containerPort: 8080 }],
+              },
+            },
+          },
+          {
+            type: 'matches',
+            path: 'spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: { name: 'log-agent', image: 'fluentd:1.16' },
+            },
+          },
+          { type: 'equals', path: 'spec.restartPolicy', value: 'Never' },
+        ],
+      },
     ],
   },
   {
     id: 'hard-deploy-probes-resources',
     requirement:
       '名为 api 的 Deployment,镜像 api:2.0,容器端口 8080;存活探针 HTTP GET /healthz 端口 8080,就绪探针 TCP 8080;资源 limits cpu 500m 内存 256Mi、requests cpu 100m 内存 128Mi',
-    expectedKinds: ['Deployment'],
-    mustHavePaths: [
-      'spec.template.spec.containers.livenessProbe.httpGet.path',
-      'spec.template.spec.containers.readinessProbe.tcpSocket',
-      'spec.template.spec.containers.resources.limits',
-      'spec.template.spec.containers.resources.requests',
+    expectedResources: [
+      {
+        ref: 'deployment',
+        identity: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'api' },
+        assertions: [
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                image: 'api:2.0',
+                ports: [{ containerPort: 8080 }],
+                livenessProbe: {
+                  httpGet: { path: '/healthz', port: 8080 },
+                },
+                readinessProbe: { tcpSocket: { port: 8080 } },
+                resources: {
+                  limits: { cpu: '500m', memory: '256Mi' },
+                  requests: { cpu: '100m', memory: '128Mi' },
+                },
+              },
+            },
+          },
+        ],
+      },
+    ],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'deployment',
+      },
     ],
   },
   {
     id: 'hard-cronjob-full',
     requirement:
       '名为 cleanup 的 CronJob,每 5 分钟执行;concurrencyPolicy 为 Forbid,保留 3 条成功历史、1 条失败历史;镜像 busybox 执行清理,restartPolicy 为 OnFailure',
-    expectedKinds: ['CronJob'],
-    mustHavePaths: [
-      'spec.schedule',
-      'spec.concurrencyPolicy',
-      'spec.successfulJobsHistoryLimit',
-      'spec.jobTemplate.spec.template.spec.restartPolicy',
+    expectedResources: [
+      {
+        ref: 'cronjob',
+        identity: { apiVersion: 'batch/v1', kind: 'CronJob', name: 'cleanup' },
+        assertions: [
+          { type: 'equals', path: 'spec.schedule', value: '*/5 * * * *' },
+          { type: 'equals', path: 'spec.concurrencyPolicy', value: 'Forbid' },
+          {
+            type: 'equals',
+            path: 'spec.successfulJobsHistoryLimit',
+            value: 3,
+          },
+          {
+            type: 'equals',
+            path: 'spec.failedJobsHistoryLimit',
+            value: 1,
+          },
+          {
+            type: 'matches',
+            path: 'spec.jobTemplate.spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: { image: 'busybox' },
+            },
+          },
+          {
+            type: 'equals',
+            path: 'spec.jobTemplate.spec.template.spec.restartPolicy',
+            value: 'OnFailure',
+          },
+        ],
+      },
     ],
+    rationale: ['“执行清理”没有给出稳定的命令或参数文本，因此不猜测具体 command。'],
   },
   {
     id: 'hard-hpa-behavior',
     requirement:
       '对名为 web 的 Deployment 做 HPA(autoscaling/v2),副本 2 到 20,基于 CPU 70% 和内存 80% 两个指标;缩容稳定窗口设为 300 秒',
-    expectedKinds: ['HorizontalPodAutoscaler'],
-    mustHavePaths: [
-      'spec.metrics',
-      'spec.behavior.scaleDown.stabilizationWindowSeconds',
+    expectedResources: [
+      {
+        ref: 'hpa',
+        identity: { apiVersion: 'autoscaling/v2', kind: 'HorizontalPodAutoscaler' },
+        assertions: [
+          {
+            type: 'equals',
+            path: 'spec.scaleTargetRef',
+            value: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+          },
+          { type: 'equals', path: 'spec.minReplicas', value: 2 },
+          { type: 'equals', path: 'spec.maxReplicas', value: 20 },
+          {
+            type: 'matches',
+            path: 'spec.metrics',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                type: 'Resource',
+                resource: {
+                  name: 'cpu',
+                  target: { type: 'Utilization', averageUtilization: 70 },
+                },
+              },
+            },
+          },
+          {
+            type: 'matches',
+            path: 'spec.metrics',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                type: 'Resource',
+                resource: {
+                  name: 'memory',
+                  target: { type: 'Utilization', averageUtilization: 80 },
+                },
+              },
+            },
+          },
+          {
+            type: 'equals',
+            path: 'spec.behavior.scaleDown.stabilizationWindowSeconds',
+            value: 300,
+          },
+        ],
+      },
     ],
+    rationale: ['要求没有指定 HPA 自身的 metadata.name。'],
   },
   {
     id: 'hard-networkpolicy-rules',
     requirement:
       '名为 web-netpol 的 NetworkPolicy,选中 app=web 的 Pod;允许来自 app=frontend 的 Pod 访问 8080 入站;允许出站到 UDP 53(DNS)',
-    expectedKinds: ['NetworkPolicy'],
-    mustHavePaths: [
-      'spec.podSelector',
-      'spec.policyTypes',
-      'spec.ingress',
-      'spec.egress',
+    expectedResources: [
+      {
+        ref: 'networkpolicy',
+        identity: {
+          apiVersion: 'networking.k8s.io/v1',
+          kind: 'NetworkPolicy',
+          name: 'web-netpol',
+        },
+        assertions: [
+          {
+            type: 'equals',
+            path: 'spec.podSelector.matchLabels',
+            value: { app: 'web' },
+          },
+          { type: 'contains', path: 'spec.policyTypes', value: 'Ingress' },
+          { type: 'contains', path: 'spec.policyTypes', value: 'Egress' },
+          {
+            type: 'matches',
+            path: 'spec.ingress',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                from: [{ podSelector: { matchLabels: { app: 'frontend' } } }],
+                ports: [{ port: 8080 }],
+              },
+            },
+          },
+          {
+            type: 'matches',
+            path: 'spec.egress',
+            rule: {
+              name: 'array_contains_object',
+              value: { ports: [{ protocol: 'UDP', port: 53 }] },
+            },
+          },
+        ],
+      },
     ],
   },
 ];

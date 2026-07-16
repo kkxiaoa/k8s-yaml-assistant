@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import {
+  canonicalHash,
+  canonicalJson,
+  type JsonValue,
+} from '../shared/json';
+
+export type { JsonValue } from '../shared/json';
 
 export const EVAL_SCHEMA_VERSION = 1 as const;
 
@@ -39,6 +46,40 @@ export const EvalRunStatusSchema = z.enum(['running', 'completed', 'failed']);
 export type EvalKind = z.infer<typeof EvalKindSchema>;
 export type EvalScope = z.infer<typeof EvalScopeSchema>;
 export type EvalRunStatus = z.infer<typeof EvalRunStatusSchema>;
+
+export const EVAL_CASE_ERROR_STAGES = [
+  'embedding',
+  'retrieval',
+  'rerank',
+  'context_selection',
+  'answer_model',
+  'yaml_parse',
+  'schema_validation',
+  'judge_request',
+  'judge_parse',
+  'judge_quorum',
+  'trace_payload',
+] as const;
+
+export const EVAL_RUN_FATAL_STAGES = [
+  'dataset_preflight',
+  'index',
+  'runner_initialization',
+  'metric_aggregation',
+  'artifact_write',
+  'case_execution',
+] as const;
+
+export const EvalCaseErrorStageSchema = z.enum(EVAL_CASE_ERROR_STAGES);
+export const EvalRunFatalStageSchema = z.enum(EVAL_RUN_FATAL_STAGES);
+export const EvalErrorStageSchema = z.enum([
+  ...EVAL_CASE_ERROR_STAGES,
+  ...EVAL_RUN_FATAL_STAGES,
+]);
+
+export type EvalCaseErrorStage = z.infer<typeof EvalCaseErrorStageSchema>;
+export type EvalRunFatalStage = z.infer<typeof EvalRunFatalStageSchema>;
+export type EvalErrorStage = z.infer<typeof EvalErrorStageSchema>;
 
 export const MetricObservationSchema = z
   .strictObject({
@@ -120,14 +161,15 @@ export const EvalDatasetIdentitySchema = z
 
 export type EvalDatasetIdentity = z.infer<typeof EvalDatasetIdentitySchema>;
 
-const QueryExpansionConfigSchema = z.strictObject({
+export const QueryExpansionConfigSchema = z.strictObject({
   enabled: z.boolean(),
   registryHash: Sha256Schema.nullable(),
   reviewedAliasCount: NonNegativeIntegerSchema,
 });
 
 const RetrievalConfigShape = {
-  corpusHash: Sha256Schema,
+  corpusContentHash: Sha256Schema,
+  corpusManifestHash: Sha256Schema,
   indexHash: Sha256Schema,
   embeddingModel: NonEmptyStringSchema,
   rerankModel: NonEmptyStringSchema,
@@ -144,6 +186,7 @@ export const FaithEvalConfigSchema = z.strictObject({
   answerPromptHash: Sha256Schema,
   judgePromptHash: Sha256Schema,
   judgeParserSchemaIdentity: NonEmptyStringSchema,
+  judgeAttemptLimit: PositiveIntegerSchema,
 });
 
 export const JudgeEvalConfigSchema = z.strictObject({
@@ -170,7 +213,7 @@ export type GenerationEvalConfig = z.infer<typeof GenerationEvalConfigSchema>;
 export type FixEvalConfig = z.infer<typeof FixEvalConfigSchema>;
 
 const FailureSchema = z.strictObject({
-  stage: NonEmptyStringSchema,
+  stage: EvalErrorStageSchema,
   message: NonEmptyStringSchema,
 });
 
@@ -332,108 +375,10 @@ export const EvalBaselineSchema = z.discriminatedUnion('kind', [
 
 export type EvalBaseline = z.infer<typeof EvalBaselineSchema>;
 
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
-
-function canonicalizeJson(
-  value: unknown,
-  activeObjects: WeakSet<object>,
-  path: string,
-): JsonValue {
-  if (value === null) return null;
-
-  switch (typeof value) {
-    case 'string':
-    case 'boolean':
-      return value;
-    case 'number':
-      if (!Number.isFinite(value)) {
-        throw new TypeError(`${path} must be a finite JSON number`);
-      }
-      return value;
-    case 'object':
-      break;
-    default:
-      throw new TypeError(`${path} is not JSON-serializable`);
-  }
-
-  if (activeObjects.has(value)) {
-    throw new TypeError(`${path} contains a cycle`);
-  }
-  activeObjects.add(value);
-
-  try {
-    if (Array.isArray(value)) {
-      for (const key of Reflect.ownKeys(value)) {
-        if (typeof key !== 'string') {
-          throw new TypeError(`${path} cannot contain symbol keys`);
-        }
-        if (key === 'length') continue;
-        const index = Number(key);
-        if (
-          !Number.isInteger(index) ||
-          index < 0 ||
-          index >= value.length ||
-          String(index) !== key
-        ) {
-          throw new TypeError(`${path}.${key} is not a JSON array index`);
-        }
-      }
-
-      const canonical: JsonValue[] = [];
-      for (let index = 0; index < value.length; index++) {
-        if (!Object.hasOwn(value, index)) {
-          throw new TypeError(`${path}[${index}] cannot be an array hole`);
-        }
-        canonical.push(
-          canonicalizeJson(value[index], activeObjects, `${path}[${index}]`),
-        );
-      }
-      return canonical;
-    }
-
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      throw new TypeError(`${path} must be a plain JSON object`);
-    }
-
-    const keys: string[] = [];
-    for (const key of Reflect.ownKeys(value)) {
-      if (typeof key !== 'string') {
-        throw new TypeError(`${path} cannot contain symbol keys`);
-      }
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (!descriptor?.enumerable || !('value' in descriptor)) {
-        throw new TypeError(
-          `${path}.${key} must be an enumerable data property`,
-        );
-      }
-      keys.push(key);
-    }
-
-    const canonical = Object.create(null) as { [key: string]: JsonValue };
-    for (const key of keys.sort()) {
-      canonical[key] = canonicalizeJson(
-        (value as Record<string, unknown>)[key],
-        activeObjects,
-        `${path}.${key}`,
-      );
-    }
-    return canonical;
-  } finally {
-    activeObjects.delete(value);
-  }
-}
-
 const JsonValueSchema = z.custom<JsonValue>(
   (value) => {
     try {
-      canonicalizeJson(value, new WeakSet(), 'payload');
+      canonicalJson(value, 'payload');
       return true;
     } catch {
       return false;
@@ -443,7 +388,7 @@ const JsonValueSchema = z.custom<JsonValue>(
 );
 
 const TraceErrorSchema = z.strictObject({
-  stage: NonEmptyStringSchema,
+  stage: EvalCaseErrorStageSchema,
   message: NonEmptyStringSchema,
 });
 
@@ -503,8 +448,7 @@ export function decodeTraceEnvelope(value: unknown): TraceEnvelope {
 }
 
 export function computeCanonicalHash(value: unknown): string {
-  const canonical = canonicalizeJson(value, new WeakSet(), 'value');
-  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+  return canonicalHash(value);
 }
 
 export function computeDatasetHash(
@@ -512,9 +456,7 @@ export function computeDatasetHash(
 ): string {
   const serializedCases = canonicalCaseSnapshots
     .map((snapshot, index) =>
-      JSON.stringify(
-        canonicalizeJson(snapshot, new WeakSet(), `case[${index}]`),
-      ),
+      canonicalJson(snapshot, `case[${index}]`),
     )
     .sort();
 

@@ -1,6 +1,3 @@
-// Stage 6:context 里的来源标签(schema/policy 分层),供生成 prompt 区分表达。
-// 运行: npx tsx src/retrieval/sources.test.ts
-
 import assert from 'node:assert/strict';
 import { extractSourceUri, formatSources, type SourceInput } from './sources';
 
@@ -10,8 +7,10 @@ function check(name: string, fn: () => void): void {
     fn();
     passed++;
     console.log(`  ✓ ${name}`);
-  } catch (e) {
-    console.error(`  ✗ ${name}\n    ${e instanceof Error ? e.message : String(e)}`);
+  } catch (error) {
+    console.error(
+      `  ✗ ${name}\n    ${error instanceof Error ? error.message : String(error)}`,
+    );
     process.exitCode = 1;
   }
 }
@@ -21,65 +20,64 @@ const policy: SourceInput = {
   title: '禁止使用 latest tag',
   text: '生产环境镜像禁止使用 latest tag。',
   sourceType: 'policy',
+  provenance: { authority: 'organization' },
+  targets: [
+    { kind: 'Deployment', path: 'spec.template.spec.containers.image' },
+  ],
 };
 
-const schema: SourceInput = {
-  id: 'schema-1',
+const officialSchema: SourceInput = {
+  id: 'schema::v1::Pod::spec.containers.image',
   title: 'Container.image',
   text: 'image 字段是字符串类型。',
   sourceType: 'schema',
+  provenance: { authority: 'kubernetes_official' },
+  targets: [
+    { apiVersion: 'v1', kind: 'Pod', path: 'spec.containers.image' },
+  ],
+};
+
+const clusterSchema: SourceInput = {
+  ...officialSchema,
+  id: 'schema::example.io/v1::Widget::spec.image',
+  provenance: { authority: 'cluster_api' },
+  targets: [
+    { apiVersion: 'example.io/v1', kind: 'Widget', path: 'spec.image' },
+  ],
 };
 
 const docs: SourceInput = {
   id: 'docs-1',
   title: 'NetworkPolicy concepts',
-  text: 'NetworkPolicy controls traffic.',
+  text: 'NetworkPolicy controls traffic. More info: https://k8s.io/network-policy',
   sourceType: 'docs',
-  resources: ['NetworkPolicy'],
-};
-
-const example: SourceInput = {
-  id: 'example-1',
-  title: 'Deployment example',
-  text: 'apiVersion: apps/v1',
-  sourceType: 'example',
-  resources: ['Deployment'],
+  provenance: { authority: 'kubernetes_official' },
+  targets: [{ kind: 'NetworkPolicy' }],
 };
 
 console.log('formatSources:');
 
-check('policy 来源带 [S1][policy][组织策略]', () => {
-  const { context } = formatSources([policy, schema]);
-  assert.ok(context.includes('[S1][policy][组织策略]'), context);
+check('context 同时标记知识形态和 authority', () => {
+  const { context } = formatSources([policy, officialSchema, clusterSchema]);
+  assert.ok(context.includes('[S1][policy][Policy][组织]'), context);
+  assert.ok(context.includes('[S2][schema][Schema][Kubernetes 官方]'), context);
+  assert.ok(context.includes('[S3][schema][Schema][当前集群 API]'), context);
 });
 
-check('schema 来源带 [S2][schema][K8s schema]', () => {
-  const { context } = formatSources([policy, schema]);
-  assert.ok(context.includes('[S2][schema][K8s schema]'), context);
+check('sources 只输出 canonical targets/provenance', () => {
+  const { sources } = formatSources([clusterSchema, docs]);
+  assert.deepEqual(sources[0]!.targets, clusterSchema.targets);
+  assert.deepEqual(sources[0]!.provenance, clusterSchema.provenance);
+  assert.equal('resource' in sources[0]!, false);
+  assert.equal('path' in sources[0]!, false);
+  assert.equal('trustLevel' in sources[0]!, false);
+  assert.deepEqual(sources[1]!.provenance, {
+    authority: 'kubernetes_official',
+    sourceUri: 'https://k8s.io/network-policy',
+  });
 });
 
-check('schema-only:label 逻辑不假设混合输入', () => {
-  const { context } = formatSources([schema]);
-  assert.ok(context.includes('[S1][schema][K8s schema]'), context);
-});
-
-check('docs/example 来源标签可区分', () => {
-  const { context } = formatSources([docs, example]);
-  assert.ok(context.includes('[S1][docs][官方文档]'), context);
-  assert.ok(context.includes('[S2][example][示例]'), context);
-});
-
-check('sources 元数据包含 resources/paths 与默认 trustLevel', () => {
-  const { sources } = formatSources([schema, docs]);
-  assert.equal(sources[0]!.trustLevel, 'k8s-official');
-  assert.deepEqual(sources[1]!.resources, ['NetworkPolicy']);
-  assert.deepEqual(sources[1]!.paths, []);
-  assert.equal(sources[1]!.resource, 'NetworkPolicy');
-  assert.equal(sources[1]!.path, undefined);
-  assert.equal(sources[1]!.trustLevel, 'k8s-docs');
-});
-
-check('空数组 → context 空串、sources 空', () => {
+check('空数组返回空 context 与 sources', () => {
   const { context, sources } = formatSources([]);
   assert.equal(context, '');
   assert.deepEqual(sources, []);
@@ -101,7 +99,7 @@ check('剥离 URL 尾部误吞的英文标点', () => {
   );
 });
 
-check('无 More info → undefined', () => {
+check('无 More info 返回 undefined', () => {
   assert.equal(extractSourceUri('image 字段是字符串类型。'), undefined);
 });
 

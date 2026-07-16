@@ -7,35 +7,44 @@ import {
   MAX_REPAIR_ROUNDS,
   SUBMIT_YAML_TOOL,
 } from '../server/agent-contract';
-import { CORPUS } from '../knowledge/corpus';
-import { SCHEMA_DEFINITIONS, SCHEMA_DOCS } from '../knowledge/schemas';
+import {
+  buildCorpusManifest,
+  SCHEMA_CORPUS_PROVIDER,
+} from '../knowledge/corpus';
 import { resolveEmbeddingModel } from '../retrieval/embeddings';
-import { computeCorpusHash, computeIndexHash } from '../retrieval/index-store';
+import { computeIndexHash } from '../retrieval/index-store';
 import {
   loadAliasRegistrySnapshot,
   resolveQueryExpansionEnabled,
 } from '../retrieval/query-expansion-runtime';
 import { RERANK_MODEL } from '../retrieval/rerank';
+import { RetrievalPipelineError } from '../retrieval/retrieve';
 import type { RetrievalTrace } from '../retrieval/trace';
 import { VALIDATION_LOGIC_REVISION } from '../validation/validate';
 import { ANSWER_SYSTEM, MODEL } from './answer';
 import {
   FIX_CASES,
-  type FixEvalCase,
+  type FixCase,
 } from './cases/fix-cases';
 import {
   GENERATION_CASES,
   type GenerationEvalCase,
 } from './cases/generation-cases';
 import {
+  GROUNDED_ANSWER_CASES,
+  resolveGroundedAnswerCase,
+  type GroundedAnswerCase,
+  type ResolvedGroundedAnswerCase,
+} from './cases/grounded-answer-cases';
+import {
   RETRIEVAL_CASES,
-  type RetrievalEvalCase,
+  type SemanticRetrievalCase,
 } from './cases/retrieval-cases';
 import type { FaithTrace } from './faith-store';
 import {
+  FAITH_JUDGE_ATTEMPT_LIMIT,
   JUDGE_MODEL,
   JUDGE_PARSER_SCHEMA_IDENTITY,
-  JUDGE_PARSE_ATTEMPTS,
   JUDGE_SYSTEM,
 } from './judge';
 import { TEXT_MAX_TOKENS } from './llm';
@@ -48,14 +57,21 @@ import type {
   JudgeCalibrationTrace,
 } from './metrics/judge-metrics';
 import {
+  EvalCaseExecutionError,
+  EvalRunExecutionError,
+} from './run-session';
+import {
   EvalDatasetIdentitySchema,
   computeCanonicalHash,
   computeDatasetHash,
+  metricObservation,
   type EvalDatasetIdentity,
+  type EvalKind,
   type FaithEvalConfig,
   type FixEvalConfig,
   type GenerationEvalConfig,
   type JudgeEvalConfig,
+  type MetricObservation,
   type RetrievalEvalConfig,
   type TraceEnvelope,
 } from './protocol';
@@ -64,10 +80,54 @@ export const LEGACY_METRIC_DEFINITION_VERSION = 'legacy-v1';
 export const FAITH_CONTEXT_K = 3;
 export const JUDGE_CALIBRATION_VOTES = 5;
 
+export function harnessErrorMetrics(
+  kind: EvalKind,
+  count: number,
+): Record<string, MetricObservation> {
+  if (!Number.isInteger(count) || count < 0) {
+    throw new TypeError('harness error count must be a non-negative integer');
+  }
+  return {
+    [`${kind}.harness_error_count`]: metricObservation(count),
+  };
+}
+
+export function generatedResultEvaluationStage(result: {
+  attempts: readonly { parseOk: boolean }[];
+}): 'yaml_parse' | 'schema_validation' {
+  // Normal invalid output remains a quality result; this only classifies an unexpected evaluator exception.
+  return result.attempts.at(-1)?.parseOk === false
+    ? 'yaml_parse'
+    : 'schema_validation';
+}
+
+type RetrievalCaseErrorStage = 'embedding' | 'retrieval' | 'rerank';
+
+export function retrievalExecutionError<TPayload>(
+  error: unknown,
+  payload: (stage: RetrievalCaseErrorStage) => TPayload,
+): EvalCaseExecutionError<TPayload> | EvalRunExecutionError {
+  if (error instanceof RetrievalPipelineError) {
+    if (error.stage === 'index') {
+      return new EvalRunExecutionError('index', error.originalError);
+    }
+    return new EvalCaseExecutionError(
+      error.stage,
+      error.originalError,
+      payload(error.stage),
+    );
+  }
+  return new EvalCaseExecutionError(
+    'retrieval',
+    error,
+    payload('retrieval'),
+  );
+}
+
 type EnvelopeOutcome = TraceEnvelope['outcome'];
 
 export interface FaithCaseSelection {
-  cases: RetrievalEvalCase[];
+  cases: GroundedAnswerCase[];
   suffix: '' | '-smoke' | '-policy';
   label: string;
   scope: 'full' | 'policy' | 'smoke';
@@ -125,17 +185,52 @@ function datasetIdentity<T>(
   });
 }
 
-function retrievalCaseSnapshot(evalCase: RetrievalEvalCase): unknown {
+function retrievalCaseSnapshot(evalCase: SemanticRetrievalCase): unknown {
   return {
     id: evalCase.id,
-    taskType: evalCase.taskType,
     question: evalCase.question,
     expectedChunkIds: [...evalCase.expectedChunkIds].sort(),
-    resource: evalCase.resource ?? null,
-    answerable: evalCase.answerable,
+    target: evalCase.target,
     source: evalCase.source,
-    apiVersion: evalCase.apiVersion ?? null,
-    path: evalCase.path ?? null,
+  };
+}
+
+function groundedAnswerCaseSnapshot(
+  resolved: ResolvedGroundedAnswerCase,
+): unknown {
+  const { sourceExpectation } = resolved;
+  return {
+    id: resolved.id,
+    input: resolved.input,
+    expectedBehavior: resolved.expectedBehavior,
+    sourceExpectation:
+      sourceExpectation === undefined
+        ? null
+        : {
+            mode: sourceExpectation.mode,
+            types: [...sourceExpectation.types].sort(),
+          },
+    question: resolved.question,
+    expectedChunkIds: [...resolved.expectedChunkIds].sort(),
+    target: resolved.target ?? null,
+  };
+}
+
+function faithTraceCaseSnapshot(trace: FaithTrace): unknown {
+  return {
+    id: trace.id,
+    input: trace.input,
+    expectedBehavior: trace.expectedBehavior,
+    sourceExpectation:
+      trace.sourceExpectation === undefined
+        ? null
+        : {
+            mode: trace.sourceExpectation.mode,
+            types: [...trace.sourceExpectation.types].sort(),
+          },
+    question: trace.question,
+    expectedChunkIds: [...trace.retrieval.expectedChunkIds].sort(),
+    target: trace.target ?? null,
   };
 }
 
@@ -143,20 +238,19 @@ function generationCaseSnapshot(evalCase: GenerationEvalCase): unknown {
   return {
     id: evalCase.id,
     requirement: evalCase.requirement,
-    expectedKinds: [...evalCase.expectedKinds].sort(),
-    mustHavePaths: [...evalCase.mustHavePaths].sort(),
-    consistencyChecks: [...(evalCase.consistencyChecks ?? [])].sort(),
+    expectedResources: evalCase.expectedResources,
+    relations: evalCase.relations ?? [],
   };
 }
 
-function fixCaseSnapshot(evalCase: FixEvalCase): unknown {
+function fixCaseSnapshot(evalCase: FixCase): unknown {
   return {
     id: evalCase.id,
-    defect: evalCase.defect,
     defectType: evalCase.defectType,
     brokenYaml: evalCase.brokenYaml,
-    expectedKind: evalCase.expectedKind,
-    mustPreserve: evalCase.mustPreserve,
+    target: evalCase.target,
+    preserve: evalCase.preserve,
+    expectedCorrections: evalCase.expectedCorrections,
   };
 }
 
@@ -164,22 +258,25 @@ function judgeCaseSnapshot(evalCase: JudgeCalibrationCase): unknown {
   return {
     id: evalCase.id,
     category: evalCase.category,
+    sourceFaithRunId: evalCase.sourceFaithRunId,
+    sourceFaithTraceId: evalCase.sourceFaithTraceId,
     question: evalCase.question,
     context: evalCase.context,
+    sources: evalCase.sources,
     answer: evalCase.answer,
     human: evalCase.human,
   };
 }
 
 export function selectRetrievalCases(
-  cases: readonly RetrievalEvalCase[] = RETRIEVAL_CASES,
-): RetrievalEvalCase[] {
-  return cases.filter((evalCase) => evalCase.answerable);
+  cases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
+): SemanticRetrievalCase[] {
+  return [...cases];
 }
 
 export function selectFaithCases(
   arg: string | undefined,
-  cases: readonly RetrievalEvalCase[] = RETRIEVAL_CASES,
+  cases: readonly GroundedAnswerCase[] = GROUNDED_ANSWER_CASES,
 ): FaithCaseSelection {
   if (arg === '--policy') {
     return {
@@ -197,25 +294,25 @@ export function selectFaithCases(
   if (!Number.isFinite(smokeN) || smokeN <= 0) {
     throw new Error('用法: npm run eval:faith [-- <N>|--policy]');
   }
-  const answerable = cases
-    .filter((evalCase) => evalCase.answerable)
+  const referenced = cases
+    .filter((evalCase) => evalCase.input.kind === 'retrieval_case')
     .slice(0, smokeN);
-  const refusal = cases
-    .filter((evalCase) => !evalCase.answerable)
+  const standalone = cases
+    .filter((evalCase) => evalCase.input.kind === 'standalone_question')
     .slice(0, smokeN);
   return {
-    cases: [...answerable, ...refusal],
+    cases: [...referenced, ...standalone],
     suffix: '-smoke',
-    label: `,冒烟:可答/拒答各 ${smokeN}`,
+    label: `,冒烟:检索引用/独立拒答各 ${smokeN}`,
     scope: 'smoke',
   };
 }
 
 export function retrievalDatasetIdentity(
-  cases: readonly RetrievalEvalCase[],
+  cases: readonly SemanticRetrievalCase[],
 ): EvalDatasetIdentity {
   return datasetIdentity(
-    'retrieval/answerable',
+    'retrieval/semantic',
     cases,
     (evalCase) => evalCase.id,
     retrievalCaseSnapshot,
@@ -223,13 +320,41 @@ export function retrievalDatasetIdentity(
 }
 
 export function faithDatasetIdentity(
-  cases: readonly RetrievalEvalCase[],
+  cases: readonly GroundedAnswerCase[],
+  retrievalCases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
+): EvalDatasetIdentity {
+  return prepareFaithDataset(cases, retrievalCases).identity;
+}
+
+export function prepareFaithDataset(
+  cases: readonly GroundedAnswerCase[],
+  retrievalCases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
+): {
+  cases: ResolvedGroundedAnswerCase[];
+  identity: EvalDatasetIdentity;
+} {
+  const resolvedCases = cases.map((evalCase) =>
+    resolveGroundedAnswerCase(evalCase, retrievalCases),
+  );
+  return {
+    cases: resolvedCases,
+    identity: datasetIdentity(
+      'faith/grounded-answer-selection',
+      resolvedCases,
+      (evalCase) => evalCase.id,
+      groundedAnswerCaseSnapshot,
+    ),
+  };
+}
+
+export function faithTraceDatasetIdentity(
+  traces: readonly FaithTrace[],
 ): EvalDatasetIdentity {
   return datasetIdentity(
-    'faith/retrieval-selection',
-    cases,
-    (evalCase) => evalCase.id,
-    retrievalCaseSnapshot,
+    'faith/grounded-answer-selection',
+    traces,
+    (trace) => trace.id,
+    faithTraceCaseSnapshot,
   );
 }
 
@@ -256,7 +381,7 @@ export function generationDatasetIdentity(
 }
 
 export function fixDatasetIdentity(
-  cases: readonly FixEvalCase[] = FIX_CASES,
+  cases: readonly FixCase[] = FIX_CASES,
 ): EvalDatasetIdentity {
   return datasetIdentity(
     'fix/cases',
@@ -283,11 +408,12 @@ function queryExpansionConfig(): RetrievalEvalConfig['queryExpansion'] {
 }
 
 function retrievalConfigShape(k: number) {
-  const corpusHash = computeCorpusHash(CORPUS);
+  const corpus = buildCorpusManifest();
   const embeddingModel = resolveEmbeddingModel();
   return {
-    corpusHash,
-    indexHash: computeIndexHash(corpusHash, embeddingModel),
+    corpusContentHash: corpus.contentHash,
+    corpusManifestHash: corpus.manifestHash,
+    indexHash: computeIndexHash(corpus, embeddingModel),
     embeddingModel,
     rerankModel: RERANK_MODEL,
     queryExpansion: queryExpansionConfig(),
@@ -306,23 +432,14 @@ function judgePromptHash(): string {
   return computeCanonicalHash({
     system: JUDGE_SYSTEM,
     request: { model: JUDGE_MODEL, maxTokens: TEXT_MAX_TOKENS },
-    parseAttempts: JUDGE_PARSE_ATTEMPTS,
   });
 }
 
 function validationSchemaIdentity(): string {
-  const resources = [...SCHEMA_DOCS].sort((left, right) =>
-    `${left.apiVersion}/${left.kind ?? left.resource}`.localeCompare(
-      `${right.apiVersion}/${right.kind ?? right.resource}`,
-    ),
-  );
-  const definitions = [...SCHEMA_DEFINITIONS.entries()].sort(([left], [right]) =>
-    left.localeCompare(right),
-  );
   return computeCanonicalHash({
     logicRevision: VALIDATION_LOGIC_REVISION,
-    resources,
-    definitions,
+    schemaProviderManifestHash:
+      SCHEMA_CORPUS_PROVIDER.manifest().manifestHash,
   });
 }
 
@@ -353,6 +470,7 @@ export function faithEvalConfig(k = FAITH_CONTEXT_K): FaithEvalConfig {
     answerPromptHash: answerPromptHash(),
     judgePromptHash: judgePromptHash(),
     judgeParserSchemaIdentity: JUDGE_PARSER_SCHEMA_IDENTITY,
+    judgeAttemptLimit: FAITH_JUDGE_ATTEMPT_LIMIT,
   };
 }
 
@@ -431,9 +549,7 @@ export function generationEnvelopeOutcome(
 }
 
 export function fixEnvelopeOutcome(result: FixCaseResult): EnvelopeOutcome {
-  return result.validYaml && result.kindKept && result.intentPreserved
-    ? 'success'
-    : 'failed';
+  return result.contentPass ? 'success' : 'failed';
 }
 
 export function isDirectExecution(moduleUrl: string): boolean {

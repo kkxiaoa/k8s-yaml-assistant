@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -55,7 +55,7 @@ function runFixture(
     createdAt,
     completedAt: createdAt,
     dataset: {
-      id: 'retrieval/answerable',
+      id: 'retrieval/semantic',
       hash: HASH_A,
       caseIds: ['case-1'],
       caseCount: 1,
@@ -63,7 +63,8 @@ function runFixture(
     artifactPaths: { trace: `traces/${id}.retrieval.jsonl` },
     metricDefinitionVersion: 'legacy-v1',
     config: {
-      corpusHash: HASH_A,
+      corpusContentHash: HASH_A,
+      corpusManifestHash: HASH_B,
       indexHash: HASH_B,
       embeddingModel: 'embedding-model',
       rerankModel: 'rerank-model',
@@ -130,6 +131,18 @@ check('readRun rejects old or malformed contracts instead of defaulting them', (
   });
 
   assert.throws(() => readRun('legacy', { evalRoot }), /invalid eval run/);
+});
+
+check('readRun preserves artifact context for malformed JSON', () => {
+  const evalRoot = mkdtempSync(join(tmpdir(), 'run-store-'));
+  const path = runPath('broken-json', evalRoot);
+  writeJsonAtomic(path, {});
+  writeFileSync(path, '{');
+
+  assert.throws(
+    () => readRun('broken-json', { evalRoot }),
+    /invalid eval run broken-json: invalid eval run JSON at/,
+  );
 });
 
 check('readRun rejects a filename/run-id mismatch', () => {

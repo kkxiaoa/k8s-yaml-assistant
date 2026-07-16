@@ -27,7 +27,7 @@ function alias(
   return {
     resource: 'Deployment',
     path: 'spec.template.spec.containers.image',
-    chunkId: 'Deployment::spec.template.spec.containers.image',
+    chunkId: 'schema::apps/v1::Deployment::spec.template.spec.containers.image',
     fieldTerms: ['image', 'container image'],
     weakZhAliases: ['镜像', '容器镜像'],
     strongZhAliases: [],
@@ -76,7 +76,7 @@ check('query 命中中文 alias 后追加 field terms + path', () => {
   ]);
   assert.deepEqual(result.matchedAliases, [
     {
-      chunkId: 'Deployment::spec.template.spec.containers.image',
+      chunkId: 'schema::apps/v1::Deployment::spec.template.spec.containers.image',
       resource: 'Deployment',
       path: 'spec.template.spec.containers.image',
       zhAlias: '容器镜像',
@@ -98,14 +98,14 @@ check('topN 限制生效', () => {
       alias({
         id: 'resources',
         path: 'spec.template.spec.containers.resources.requests',
-        chunkId: 'Deployment::spec.template.spec.containers.resources.requests',
+        chunkId: 'schema::apps/v1::Deployment::spec.template.spec.containers.resources.requests',
         weakZhAliases: ['资源'],
         fieldTerms: ['resources', 'requests'],
       }),
       alias({
         id: 'volumes',
         path: 'spec.template.spec.volumes',
-        chunkId: 'Deployment::spec.template.spec.volumes',
+        chunkId: 'schema::apps/v1::Deployment::spec.template.spec.volumes',
         weakZhAliases: ['卷'],
         fieldTerms: ['volumes'],
       }),
@@ -116,8 +116,8 @@ check('topN 限制生效', () => {
   assert.deepEqual(
     result.matchedAliases.map((hit) => hit.chunkId),
     [
-      'Deployment::spec.template.spec.containers.image',
-      'Deployment::spec.template.spec.containers.resources.requests',
+      'schema::apps/v1::Deployment::spec.template.spec.containers.image',
+      'schema::apps/v1::Deployment::spec.template.spec.containers.resources.requests',
     ],
   );
   assert.deepEqual(result.expansionTerms, [
@@ -147,7 +147,7 @@ check('alias-aware:无 routedResource 时可由 alias 选中资源字段', () =>
         id: 'volume-mode',
         resource: 'PersistentVolumeClaim',
         path: 'spec.volumeMode',
-        chunkId: 'PersistentVolumeClaim::spec.volumeMode',
+        chunkId: 'schema::v1::PersistentVolumeClaim::spec.volumeMode',
         weakZhAliases: ['卷模式'],
         strongZhAliases: ['裸块设备'],
         fieldTerms: ['volumeMode', 'Block'],
@@ -158,7 +158,7 @@ check('alias-aware:无 routedResource 时可由 alias 选中资源字段', () =>
 
   assert.deepEqual(result.matchedAliases, [
     {
-      chunkId: 'PersistentVolumeClaim::spec.volumeMode',
+      chunkId: 'schema::v1::PersistentVolumeClaim::spec.volumeMode',
       resource: 'PersistentVolumeClaim',
       path: 'spec.volumeMode',
       zhAlias: '裸块设备',
@@ -179,7 +179,7 @@ check('alias-aware: routedResource 错误时仍可由 alias 选中正确资源',
         id: 'binding-mode',
         resource: 'StorageClass',
         path: 'volumeBindingMode',
-        chunkId: 'StorageClass::volumeBindingMode',
+        chunkId: 'schema::storage.k8s.io/v1::StorageClass::volumeBindingMode',
         weakZhAliases: ['延迟绑定'],
         strongZhAliases: ['Pod 调度后再绑定'],
         fieldTerms: ['volumeBindingMode', 'WaitForFirstConsumer'],
@@ -190,7 +190,7 @@ check('alias-aware: routedResource 错误时仍可由 alias 选中正确资源',
 
   assert.deepEqual(result.matchedAliases, [
     {
-      chunkId: 'StorageClass::volumeBindingMode',
+      chunkId: 'schema::storage.k8s.io/v1::StorageClass::volumeBindingMode',
       resource: 'StorageClass',
       path: 'volumeBindingMode',
       zhAlias: 'Pod 调度后再绑定',
@@ -228,7 +228,7 @@ check('wrong resource: weak alias 完全不扩展', () => {
         id: 'endpoint-ports',
         resource: 'Endpoints',
         path: 'subsets.ports',
-        chunkId: 'Endpoints::subsets.ports',
+        chunkId: 'schema::v1::Endpoints::subsets.ports',
         fieldTerms: ['ports', 'subsets.ports'],
         weakZhAliases: ['端口号'],
         strongZhAliases: ['后端地址和端口'],

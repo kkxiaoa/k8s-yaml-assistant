@@ -7,7 +7,6 @@ import {
   type BadCaseEvidenceReference,
   type BadCaseTracking,
 } from './bad-cases';
-import { RETRIEVAL_CASES, type RetrievalEvalCase } from './cases/retrieval-cases';
 import {
   decodeFaithTrace,
   type FaithOutcome,
@@ -18,11 +17,9 @@ import {
   readTraceEnvelopes,
   runPath,
 } from './artifacts';
-import { faithDatasetIdentity } from './runner-protocol';
+import { faithTraceDatasetIdentity } from './runner-protocol';
 import { readRun } from './run-store';
-import {
-  type EvalRun,
-} from './protocol';
+import { type EvalRun } from './protocol';
 
 type FaithEvalRun = Extract<EvalRun, { kind: 'faith' }>;
 
@@ -87,18 +84,13 @@ function faithScope(run: FaithEvalRun): FaithScope {
 export function readFaithBadCaseInput(params: {
   runId: string;
   evalRoot?: string;
-  evalSet?: RetrievalEvalCase[];
 }): {
   run: FaithEvalRun;
   observations: FaithTraceObservation[];
   scope: FaithScope;
   warnings: string[];
 } {
-  const {
-    runId,
-    evalRoot,
-    evalSet = RETRIEVAL_CASES,
-  } = params;
+  const { runId, evalRoot } = params;
   const runFilePath = runPath(runId, evalRoot);
 
   if (!existsSync(runFilePath)) {
@@ -145,23 +137,9 @@ export function readFaithBadCaseInput(params: {
     throw new Error('faith trace cases do not match run dataset');
   }
 
-  const evalById = new Map(evalSet.map((ec) => [ec.id, ec]));
-  const alignedCases: RetrievalEvalCase[] = [];
-  for (const { trace } of observations) {
-    const evalCase = evalById.get(trace.id);
-    if (!evalCase) {
-      throw new Error(`trace case ${trace.id} not found in RETRIEVAL_CASES`);
-    }
-    if (
-      trace.question !== evalCase.question ||
-      !equalSorted(trace.retrieval.expectedChunkIds, evalCase.expectedChunkIds)
-    ) {
-      throw new Error(`trace case drift: ${trace.id}`);
-    }
-    alignedCases.push(evalCase);
-  }
-
-  const selectionHash = faithDatasetIdentity(alignedCases).hash;
+  const selectionHash = faithTraceDatasetIdentity(
+    observations.map(({ trace }) => trace),
+  ).hash;
   if (run.dataset.hash !== selectionHash) {
     throw new Error(
       `dataset hash mismatch: run=${run.dataset.hash} trace=${selectionHash}`,

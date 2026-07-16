@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import {
   buildJudgeCalibrationTrace,
   computeJudgeCalibrationMetrics,
+  decodeJudgeCalibrationCases,
+  decodeJudgeCalibrationLabels,
+  decodeJudgeCalibrationTrace,
   judgeMetricsRecord,
+  parseJudgeCalibrationLabelsJsonl,
   type JudgeCalibrationCase,
-  type JudgeVote,
 } from './metrics/judge-metrics';
+import type { JudgeAttempt, JudgeVote } from './judge-votes';
 import { metricObservation } from './protocol';
 
 let passed = 0;
@@ -14,13 +18,22 @@ function check(name: string, fn: () => void): void {
     fn();
     passed++;
     console.log(`  ✓ ${name}`);
-  } catch (e) {
+  } catch (error) {
     console.error(
-      `  ✗ ${name}\n    ${e instanceof Error ? e.message : String(e)}`,
+      `  ✗ ${name}\n    ${error instanceof Error ? error.message : String(error)}`,
     );
     process.exitCode = 1;
   }
 }
+
+const SOURCE = {
+  n: 1,
+  id: 'schema::v1::Pod::spec.field',
+  title: 'Pod field',
+  sourceType: 'schema' as const,
+  provenance: { authority: 'cluster_api' as const, version: 'v1' },
+  targets: [{ apiVersion: 'v1', kind: 'Pod', path: 'spec.field' }],
+};
 
 function calibrationCase(
   id: string,
@@ -29,9 +42,12 @@ function calibrationCase(
 ): JudgeCalibrationCase {
   return {
     id,
-    category: 'test',
+    category: 'faithful',
+    sourceFaithRunId: 'faith-run-1',
+    sourceFaithTraceId: `faith-trace-${id}`,
     question: `${id}?`,
     context: 'context',
+    sources: [SOURCE],
     answer: 'answer',
     human: {
       faithful,
@@ -53,133 +69,328 @@ function vote(
   };
 }
 
+function valid(
+  faithful: boolean,
+  policy?: JudgeVote['policy'],
+): JudgeAttempt {
+  return { status: 'valid', vote: vote(faithful, policy) };
+}
+
+function invalid(reason = 'invalid vote'): JudgeAttempt {
+  return { status: 'invalid', code: 'invalid_vote', reason };
+}
+
+function requestError(message = 'request failed'): JudgeAttempt {
+  return { status: 'error', stage: 'judge_request', message };
+}
+
 console.log('judge-eval:');
 
-check('buildJudgeCalibrationTrace 计算 faithful 多数与不稳定标记', () => {
-  const trace = buildJudgeCalibrationTrace({
-    calibrationCase: calibrationCase('case-a', true),
-    votes: [vote(true), vote(true), vote(false)],
-  });
-
-  assert.equal(trace.majority.faithful, true);
-  assert.equal(trace.majority.trueVotes, 2);
-  assert.equal(trace.majority.totalVotes, 3);
-  assert.equal(trace.majority.unstable, true);
-  assert.equal(trace.majority.agree, true);
+check('calibration preflight rejects malformed labels and missing snapshots', () => {
+  assert.equal(
+    decodeJudgeCalibrationLabels([
+      {
+        id: 'case-a',
+        category: 'faithful',
+        human: { faithful: true, note: 'reviewed' },
+      },
+    ]).length,
+    1,
+  );
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationLabels([
+        {
+          id: 'case-a',
+          category: 'faithful',
+          human: { faithful: 'true', note: 'reviewed' },
+        },
+      ]),
+    /faithful/i,
+  );
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationLabels([
+        {
+          id: 'case-a',
+          category: 'faithful',
+          human: { faithful: true },
+        },
+      ]),
+    /note/i,
+  );
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationCases([
+        { ...calibrationCase('case-a', true), answer: '' },
+      ]),
+    /answer/i,
+  );
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationCases([
+        { ...calibrationCase('case-a', true), sourceFaithTraceId: '' },
+      ]),
+    /sourceFaithTraceId/i,
+  );
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationCases([
+        { ...calibrationCase('case-a', true), sources: [] },
+      ]),
+    /sources/i,
+  );
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationCases([
+        calibrationCase('case-a', true),
+        calibrationCase('case-a', false),
+      ]),
+    /duplicate calibration case id/i,
+  );
+  assert.throws(
+    () =>
+      parseJudgeCalibrationLabelsJsonl(
+        '{"id":"case-a","category":"faithful","human":{"faithful":true,"note":"reviewed"}}\n{bad json}\n',
+      ),
+    /line 2/i,
+  );
 });
 
-check('policy 维度统计 missing / disagree / unstable', () => {
+check('trace records planned, valid, invalid, error attempts and lineage', () => {
+  const attempts = [
+    valid(true),
+    valid(true),
+    valid(false),
+    invalid(),
+    requestError(),
+  ];
   const trace = buildJudgeCalibrationTrace({
-    calibrationCase: calibrationCase('policy-a', true, {
+    calibrationCase: calibrationCase('case-a', true),
+    attempts,
+    plannedVotes: 5,
+  });
+
+  assert.equal(trace.sourceFaithRunId, 'faith-run-1');
+  assert.equal(trace.sourceFaithTraceId, 'faith-trace-case-a');
+  assert.deepEqual(trace.attempts, {
+    planned: 5,
+    executed: 5,
+    valid: 3,
+    invalid: 1,
+    error: 1,
+    items: attempts,
+  });
+  assert.deepEqual(trace.majority, {
+    faithful: true,
+    quorum: 3,
+    trueVotes: 2,
+    falseVotes: 1,
+    validVotes: 3,
+    reachedQuorum: true,
+    indeterminateReason: null,
+    unstable: true,
+    agree: true,
+  });
+});
+
+check('1/5, 2/5, and a 2:2 tie remain indeterminate', () => {
+  for (const [id, attempts, reason] of [
+    [
+      'one-valid',
+      [valid(false), invalid(), invalid(), requestError(), requestError()],
+      'insufficient_valid_votes',
+    ],
+    [
+      'two-valid',
+      [valid(false), valid(false), invalid(), requestError(), requestError()],
+      'insufficient_valid_votes',
+    ],
+    [
+      'tie',
+      [valid(true), valid(true), valid(false), valid(false), invalid()],
+      'tie',
+    ],
+  ] as const) {
+    const trace = buildJudgeCalibrationTrace({
+      calibrationCase: calibrationCase(id, false),
+      attempts,
+      plannedVotes: 5,
+    });
+    assert.equal(trace.majority.faithful, null);
+    assert.equal(trace.majority.agree, null);
+    assert.equal(trace.majority.indeterminateReason, reason);
+  }
+});
+
+check('each explicitly labeled policy dimension reaches quorum independently', () => {
+  const trace = buildJudgeCalibrationTrace({
+    calibrationCase: calibrationCase('policy', true, {
       distinguished: true,
       conflictExplained: false,
       misstatedAsOfficial: false,
     }),
-    votes: [
-      vote(true, { distinguished: true, conflictExplained: true }),
-      vote(true, { distinguished: false, conflictExplained: true }),
-      vote(true, { distinguished: true, conflictExplained: true }),
+    plannedVotes: 5,
+    attempts: [
+      valid(true, {
+        distinguished: true,
+        conflictExplained: false,
+        misstatedAsOfficial: true,
+      }),
+      valid(true, {
+        distinguished: false,
+        conflictExplained: false,
+        misstatedAsOfficial: true,
+      }),
+      valid(true, {
+        distinguished: true,
+        misstatedAsOfficial: false,
+      }),
+      valid(true, { misstatedAsOfficial: false }),
+      valid(true),
     ],
   });
 
   assert.deepEqual(trace.policy.distinguished, {
     human: true,
     judge: true,
+    quorum: 3,
     trueVotes: 2,
-    totalVotes: 3,
-    missing: false,
+    falseVotes: 1,
+    validVotes: 3,
+    reachedQuorum: true,
+    indeterminateReason: null,
     unstable: true,
     agree: true,
   });
-  assert.deepEqual(trace.policy.conflictExplained, {
-    human: false,
-    judge: true,
-    trueVotes: 3,
-    totalVotes: 3,
-    missing: false,
-    unstable: false,
-    agree: false,
-  });
-  assert.deepEqual(trace.policy.misstatedAsOfficial, {
-    human: false,
-    judge: null,
-    trueVotes: 0,
-    totalVotes: 0,
-    missing: true,
-    unstable: false,
-    agree: false,
-  });
+  assert.equal(trace.policy.conflictExplained?.judge, null);
+  assert.equal(
+    trace.policy.conflictExplained?.indeterminateReason,
+    'insufficient_valid_votes',
+  );
+  assert.equal(trace.policy.misstatedAsOfficial?.judge, null);
+  assert.equal(trace.policy.misstatedAsOfficial?.indeterminateReason, 'tie');
 });
 
-check('computeJudgeCalibrationMetrics 汇总 faithful 与 policy 指标', () => {
+check('trace decoder rejects inconsistent counts, labels, and quorum', () => {
+  const trace = buildJudgeCalibrationTrace({
+    calibrationCase: calibrationCase('policy-trace', true, {
+      distinguished: true,
+    }),
+    plannedVotes: 5,
+    attempts: [
+      valid(true, { distinguished: true }),
+      valid(true, { distinguished: true }),
+      valid(true, { distinguished: false }),
+      invalid(),
+      requestError(),
+    ],
+  });
+
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationTrace({
+        ...trace,
+        attempts: { ...trace.attempts, valid: 4 },
+      }),
+    /attempt counts|valid vote count/i,
+  );
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationTrace({
+        ...trace,
+        majority: {
+          ...trace.majority,
+          trueVotes: 2,
+          falseVotes: 1,
+          unstable: true,
+        },
+      }),
+    /faithful quorum diagnostics/i,
+  );
+  assert.throws(
+    () =>
+      decodeJudgeCalibrationTrace({
+        ...trace,
+        human: { ...trace.human, policy: undefined },
+      }),
+    /policy result requires an explicit human label/i,
+  );
+  assert.throws(
+    () =>
+      buildJudgeCalibrationTrace({
+        calibrationCase: calibrationCase('bad-quorum', true),
+        plannedVotes: 2,
+        quorum: 3,
+        attempts: [valid(true), valid(true)],
+      }),
+    /quorum.*planned votes/i,
+  );
+});
+
+check('metrics exclude indeterminate cases and retain attempt diagnostics', () => {
   const traces = [
     buildJudgeCalibrationTrace({
       calibrationCase: calibrationCase('agree', true),
-      votes: [vote(true), vote(true), vote(true)],
+      plannedVotes: 5,
+      attempts: Array.from({ length: 5 }, () => valid(true)),
     }),
     buildJudgeCalibrationTrace({
       calibrationCase: calibrationCase('disagree', true),
-      votes: [vote(false), vote(false), vote(true)],
+      plannedVotes: 5,
+      attempts: [valid(false), valid(false), valid(false), invalid(), requestError()],
     }),
     buildJudgeCalibrationTrace({
-      calibrationCase: calibrationCase('failed', false),
-      votes: [],
+      calibrationCase: calibrationCase('insufficient', false),
+      plannedVotes: 5,
+      attempts: [valid(false), valid(false), invalid(), requestError(), requestError()],
+    }),
+    buildJudgeCalibrationTrace({
+      calibrationCase: calibrationCase('tie', false),
+      plannedVotes: 5,
+      attempts: [valid(true), valid(true), valid(false), valid(false), invalid()],
     }),
     buildJudgeCalibrationTrace({
       calibrationCase: calibrationCase('policy', true, {
         distinguished: true,
       }),
-      votes: [
-        vote(true, { distinguished: true }),
-        vote(true, { distinguished: false }),
-        vote(true, { distinguished: true }),
+      plannedVotes: 5,
+      attempts: [
+        valid(true, { distinguished: true }),
+        valid(true, { distinguished: false }),
+        valid(true, { distinguished: true }),
+        valid(true),
+        valid(true),
       ],
     }),
   ];
 
   const metrics = computeJudgeCalibrationMetrics(traces);
-
   assert.equal(metrics.judged, 3);
   assert.equal(metrics.agree, 2);
-  assert.equal(metrics.judgeFailed, 1);
-  assert.equal(metrics.unstableCount, 1);
+  assert.equal(metrics.judgeFailed, 2);
   assert.equal(metrics.agreementRate, 2 / 3);
+  assert.deepEqual(metrics.attempts, {
+    planned: 25,
+    executed: 25,
+    valid: 19,
+    invalid: 3,
+    error: 3,
+  });
   assert.equal(metrics.policy.distinguished.total, 1);
   assert.equal(metrics.policy.distinguished.judged, 1);
   assert.equal(metrics.policy.distinguished.agree, 1);
   assert.equal(metrics.policy.distinguished.unstable, 1);
+  assert.equal(metrics.policy.distinguished.indeterminate, 0);
   assert.equal(metrics.policy.distinguished.agreementRate, 1);
 
-  assert.deepEqual(judgeMetricsRecord(metrics), {
-    'judge.agree': metricObservation(2),
-    'judge.agreement_rate': metricObservation(2 / 3, 2, 3),
-    'judge.failed': metricObservation(1),
-    'judge.judged': metricObservation(3),
-    'judge.policy.conflictExplained.agree': metricObservation(0),
-    'judge.policy.conflictExplained.agreement_rate': metricObservation(
-      null,
-      0,
-      0,
-    ),
-    'judge.policy.conflictExplained.judged': metricObservation(0),
-    'judge.policy.conflictExplained.missing': metricObservation(0),
-    'judge.policy.conflictExplained.unstable': metricObservation(0),
-    'judge.policy.distinguished.agree': metricObservation(1),
-    'judge.policy.distinguished.agreement_rate': metricObservation(1, 1, 1),
-    'judge.policy.distinguished.judged': metricObservation(1),
-    'judge.policy.distinguished.missing': metricObservation(0),
-    'judge.policy.distinguished.unstable': metricObservation(1),
-    'judge.policy.misstatedAsOfficial.agree': metricObservation(0),
-    'judge.policy.misstatedAsOfficial.agreement_rate': metricObservation(
-      null,
-      0,
-      0,
-    ),
-    'judge.policy.misstatedAsOfficial.judged': metricObservation(0),
-    'judge.policy.misstatedAsOfficial.missing': metricObservation(0),
-    'judge.policy.misstatedAsOfficial.unstable': metricObservation(0),
-    'judge.unstable': metricObservation(1),
-  });
+  const record = judgeMetricsRecord(metrics);
+  assert.deepEqual(record['judge.agreement_rate'], metricObservation(2 / 3, 2, 3));
+  assert.deepEqual(record['judge.failed'], metricObservation(2));
+  assert.deepEqual(record['judge.attempt.planned'], metricObservation(25));
+  assert.deepEqual(record['judge.attempt.valid'], metricObservation(19));
+  assert.deepEqual(record['judge.attempt.invalid'], metricObservation(3));
+  assert.deepEqual(record['judge.attempt.error'], metricObservation(3));
 });
 
 console.log(`\n通过 ${passed} 项`);

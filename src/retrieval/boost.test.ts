@@ -1,6 +1,3 @@
-// Stage 6:policyBoost 单测。纯函数,无需网络/key。
-// 运行: npm test
-
 import assert from 'node:assert/strict';
 import type { Chunk } from '../knowledge/corpus';
 import { policyBoost } from './boost';
@@ -12,89 +9,87 @@ function check(name: string, fn: () => void): void {
     fn();
     passed++;
     console.log(`  ✓ ${name}`);
-  } catch (e) {
-    console.error(`  ✗ ${name}\n    ${e instanceof Error ? e.message : String(e)}`);
+  } catch (error) {
+    console.error(
+      `  ✗ ${name}\n    ${error instanceof Error ? error.message : String(error)}`,
+    );
     process.exitCode = 1;
   }
 }
 
-const policyChunk: Chunk = {
-  id: 'policy.deployment.spec.replicas.example',
-  resource: 'Deployment',
-  path: 'spec.replicas',
-  title: '平台规范 · Deployment · spec.replicas',
-  text: '[平台规范] 示例规则。级别:required。适用:prod。理由:测试用。(组织策略/平台规范,非 K8s 官方强制)',
-  sourceType: 'policy',
-};
+function chunk(
+  sourceType: Chunk['sourceType'],
+  kind: string,
+  path?: string,
+): Chunk {
+  return {
+    id:
+      sourceType === 'policy'
+        ? `policy.${kind.toLowerCase()}.test`
+        : `schema::v1::${kind}::${path ?? 'spec'}`,
+    title: `${kind} test`,
+    text: 'test knowledge',
+    sourceType,
+    provenance: {
+      authority:
+        sourceType === 'policy' ? 'organization' : 'kubernetes_official',
+    },
+    targets: [{ kind, ...(path === undefined ? {} : { path }) }],
+  };
+}
 
-// 资源级 policy(buildPolicyCorpus 在 appliesTo.field 缺失时 emit path='')。
-const resourceLevelPolicyChunk: Chunk = {
-  id: 'policy.pod.security.privileged.forbidden',
-  resource: 'Pod',
-  path: '',
-  title: '平台规范 · Pod · (资源级)',
-  text: '[平台规范] 禁止特权容器。(组织策略/平台规范,非 K8s 官方强制)',
-  sourceType: 'policy',
-};
-
-const appliesToOnlyPolicyChunk: Chunk = {
-  id: 'policy.deployment.image.tag.no-latest',
-  title: '平台规范 · Deployment · spec.template.spec.containers.image',
-  text: '[平台规范] 禁止 latest tag。(组织策略/平台规范,非 K8s 官方强制)',
-  sourceType: 'policy',
-  appliesTo: {
-    resource: 'Deployment',
-    field: 'spec.template.spec.containers.image',
-  },
-};
-
-const schemaChunk: Chunk = {
-  id: 'schema.deployment.spec.replicas',
-  resource: 'Deployment',
-  path: 'spec.replicas',
-  title: 'Deployment · spec.replicas',
-  text: 'spec.replicas: integer',
-  sourceType: 'schema',
-};
+const policyChunk = chunk('policy', 'Deployment', 'spec.replicas');
+const resourceLevelPolicyChunk = chunk('policy', 'Pod');
+const schemaChunk = chunk('schema', 'Deployment', 'spec.replicas');
 
 console.log('policyBoost:');
 
-check('policy + resource 匹配 → 加权(无需 path)', () => {
-  assert.equal(policyBoost(policyChunk, 'Deployment', undefined), POLICY_RELATED_BOOST);
-});
-
-check('policy + resource 匹配 + path 匹配 → 叠加增强', () => {
-  // boostPath 约定已归一化(小写),故传小写。
-  const boosted = policyBoost(policyChunk, 'Deployment', 'spec.replicas');
-  assert.ok(boosted > POLICY_RELATED_BOOST);
-});
-
-check('policy 可从 appliesTo 推导 resource/path 加权', () => {
-  const boosted = policyBoost(
-    appliesToOnlyPolicyChunk,
-    'Deployment',
-    'spec.template.spec.containers.image',
-  );
-  assert.ok(boosted > POLICY_RELATED_BOOST);
-});
-
-check('policy + resource 不匹配 → 0', () => {
-  assert.equal(policyBoost(policyChunk, 'Service', undefined), 0);
-});
-
-check('schema chunk → 0', () => {
-  assert.equal(policyBoost(schemaChunk, 'Deployment', undefined), 0);
-});
-
-check('无 boostResource → 0', () => {
-  assert.equal(policyBoost(policyChunk, undefined, undefined), 0);
-});
-
-check('资源级 policy(path 空)+ 非空 boostPath → 只加基础 boost', () => {
-  // 空 path 对任何非空 boostPath 的 endsWith 为 false → 不叠加 bonus,安全退化。
+check('policy + resource 匹配时加基础权重', () => {
   assert.equal(
-    policyBoost(resourceLevelPolicyChunk, 'Pod', 'spec.hostnetwork'),
+    policyBoost(policyChunk, 'Deployment'),
     POLICY_RELATED_BOOST,
+  );
+});
+
+check('policy + resource/path 同时匹配时叠加 path 权重', () => {
+  assert.ok(
+    policyBoost(policyChunk, 'Deployment', 'spec.replicas') >
+      POLICY_RELATED_BOOST,
+  );
+});
+
+check('不匹配 resource、schema 或无 hint 时不加权', () => {
+  assert.equal(policyBoost(policyChunk, 'Service'), 0);
+  assert.equal(policyBoost(schemaChunk, 'Deployment'), 0);
+  assert.equal(policyBoost(policyChunk), 0);
+});
+
+check('资源级 policy 不会因伪造空 path 命中字段 bonus', () => {
+  assert.equal(
+    policyBoost(resourceLevelPolicyChunk, 'Pod', 'spec.hostNetwork'),
+    POLICY_RELATED_BOOST,
+  );
+});
+
+check('versioned policy 不匹配 apiVersion hint 时不加权', () => {
+  const versionedPolicy: Chunk = {
+    ...policyChunk,
+    targets: [
+      {
+        apiVersion: 'apps/v2',
+        kind: 'Deployment',
+        path: 'spec.replicas',
+      },
+    ],
+  };
+  assert.equal(
+    policyBoost(
+      versionedPolicy,
+      'Deployment',
+      'spec.replicas',
+      'apps/v1',
+    ),
+    0,
   );
 });
 

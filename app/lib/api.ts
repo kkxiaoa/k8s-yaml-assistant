@@ -1,21 +1,21 @@
 // 前端 API 客户端:封装与 /api/* 的通信细节(fetch / headers / JSON / 读流)。
 // page 只调函数 + 管状态,不碰 URL、请求格式、流读取。
 import type { VErr } from './yaml';
+import type {
+  KnowledgeTarget,
+  Provenance,
+  SourceType,
+} from '@/knowledge/chunk';
 
 export interface SourceHit {
   /** 引用编号,对应答案里的 [S{n}] */
   n?: number;
   id: string;
   title: string;
-  resource?: string;
-  path?: string;
-  resources?: string[];
-  paths?: string[];
   text: string;
-  sourceType: 'schema' | 'docs' | 'example' | 'policy';
-  /** 官方文档链接(从 chunk "More info" 提取) */
-  sourceUri?: string;
-  trustLevel?: string;
+  sourceType: SourceType;
+  provenance: Provenance;
+  targets: KnowledgeTarget[];
   score?: number;
 }
 

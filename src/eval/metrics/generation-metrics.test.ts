@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import type { GenerateResult } from '../../server/agent';
 import type { GenerationEvalCase } from '../cases/generation-cases';
-import type { FixEvalCase } from '../cases/fix-cases';
+import { preflightFixCases, type FixCase } from '../assertions';
 import {
   buildFixCaseResult,
   buildGenerationCaseResult,
@@ -60,33 +60,91 @@ console.log('generation-metrics:');
 check('buildGenerationCaseResult 生成结构化内容指标', () => {
   const evalCase: GenerationEvalCase = {
     id: 'gen-configmap',
-    requirement: '生成 ConfigMap',
-    expectedKinds: ['ConfigMap'],
-    mustHavePaths: ['metadata.name', 'data'],
+    requirement: '生成名为 app-config、LOG_LEVEL=info 的 ConfigMap',
+    expectedResources: [
+      {
+        ref: 'config',
+        identity: {
+          apiVersion: 'v1',
+          kind: 'ConfigMap',
+          name: 'app-config',
+        },
+        assertions: [
+          { type: 'exists', path: 'data' },
+          { type: 'equals', path: 'data.LOG_LEVEL', value: 'info' },
+        ],
+      },
+    ],
+    relations: [],
   };
 
   const item = buildGenerationCaseResult(evalCase, result(validConfigMap));
 
   assert.equal(item.validYaml, true);
-  assert.equal(item.kindMatch, true);
-  assert.deepEqual(item.requiredPathHits, ['metadata.name', 'data']);
-  assert.equal(item.requiredPathCoverage, 1);
-  assert.equal(item.consistencyPass, null);
+  assert.equal(item.matchedResourceCount, 1);
+  assert.equal(item.resourceAssertionPassCount, 2);
+  assert.equal(item.resourceAssertionTotal, 2);
+  assert.equal(item.resourceResults[0]?.match.status, 'matched');
+  assert.ok(item.resourceResults[0]?.assertions.every((entry) => entry.pass));
+  assert.equal(item.relationPass, null);
   assert.equal(item.contentPass, true);
 });
 
-check('computeGenerationEvalMetrics 汇总合法率和内容覆盖', () => {
+check('wrong values fail content even when kind and paths exist', () => {
+  const evalCase: GenerationEvalCase = {
+    id: 'wrong-value',
+    requirement: '生成 LOG_LEVEL=debug 的 ConfigMap',
+    expectedResources: [
+      {
+        ref: 'config',
+        identity: {
+          apiVersion: 'v1',
+          kind: 'ConfigMap',
+          name: 'app-config',
+        },
+        assertions: [
+          { type: 'equals', path: 'data.LOG_LEVEL', value: 'debug' },
+        ],
+      },
+    ],
+  };
+
+  const item = buildGenerationCaseResult(evalCase, result(validConfigMap));
+  assert.equal(item.validYaml, true);
+  assert.equal(item.resourceResults[0]?.assertions[0]?.pass, false);
+  assert.match(item.resourceResults[0]?.assertions[0]?.reason ?? '', /debug/);
+  assert.equal(item.contentPass, false);
+});
+
+check('computeGenerationEvalMetrics 汇总资源断言、关系和完整内容', () => {
   const okCase: GenerationEvalCase = {
     id: 'ok',
     requirement: '生成 ConfigMap',
-    expectedKinds: ['ConfigMap'],
-    mustHavePaths: ['metadata.name', 'data'],
+    expectedResources: [
+      {
+        ref: 'config',
+        identity: {
+          apiVersion: 'v1',
+          kind: 'ConfigMap',
+          name: 'app-config',
+        },
+        assertions: [
+          { type: 'exists', path: 'data' },
+          { type: 'equals', path: 'data.LOG_LEVEL', value: 'info' },
+        ],
+      },
+    ],
   };
   const missCase: GenerationEvalCase = {
     id: 'miss',
     requirement: '生成 Secret',
-    expectedKinds: ['Secret'],
-    mustHavePaths: ['metadata.name'],
+    expectedResources: [
+      {
+        ref: 'secret',
+        identity: { apiVersion: 'v1', kind: 'Secret', name: 'db-secret' },
+        assertions: [{ type: 'exists', path: 'stringData.password' }],
+      },
+    ],
   };
   const metrics = computeGenerationEvalMetrics([
     buildGenerationCaseResult(okCase, result(validConfigMap)),
@@ -95,53 +153,192 @@ check('computeGenerationEvalMetrics 汇总合法率和内容覆盖', () => {
 
   assert.equal(metrics.caseCount, 2);
   assert.equal(metrics.validYamlCount, 1);
-  assert.equal(metrics.kindMatchCount, 1);
-  assert.equal(metrics.requiredPathCoverageAvg, 1);
+  assert.equal(metrics.resourceAssertionPassCount, 2);
+  assert.equal(metrics.resourceAssertionCount, 3);
+  assert.equal(metrics.relationCount, 0);
+  assert.equal(metrics.contentPassCount, 1);
   assert.deepEqual(generationMetricsRecord(metrics), {
     'generation.avg_rounds': metricObservation(1, 2, 2),
     'generation.avg_submits': metricObservation(1, 2, 2),
-    'generation.consistency_pass_rate': metricObservation(null, 0, 0),
+    'generation.content_pass_rate': metricObservation(0.5, 1, 2),
     'generation.first_parse_ok_rate': metricObservation(0.5, 1, 2),
     'generation.first_validation_ok_rate': metricObservation(0.5, 1, 2),
-    'generation.kind_match_rate': metricObservation(1, 1, 1),
     'generation.max_round_failure_rate': metricObservation(0.5, 1, 2),
+    'generation.relation_pass_rate': metricObservation(null, 0, 0),
     'generation.repair_attempted_rate': metricObservation(0, 0, 2),
     'generation.repair_success_after_fail_rate': metricObservation(0, 0, 1),
-    'generation.required_path_coverage': metricObservation(1, 1, 1),
+    'generation.resource_assertion_pass_rate': metricObservation(2 / 3, 2, 3),
     'generation.valid_yaml_rate': metricObservation(0.5, 1, 2),
   });
 });
 
-check('buildFixCaseResult 和 fix metrics 统计 kind/意图保留', () => {
-  const fixCase: FixEvalCase = {
-    id: 'fix-configmap',
-    defect: 'parse error',
-    defectType: 'parse_error',
-    brokenYaml: 'bad: [',
-    expectedKind: 'ConfigMap',
-    mustPreserve: [{ path: 'metadata.name', value: 'app-config' }],
-  };
+check('no measured generation/fix cases produces N/A quality ratios', () => {
+  const generation = generationMetricsRecord(computeGenerationEvalMetrics([]));
+  const fix = fixMetricsRecord(computeFixEvalMetrics([]));
 
-  const item = buildFixCaseResult(fixCase, result(validConfigMap));
-  const metrics = computeFixEvalMetrics([item]);
+  for (const key of [
+    'generation.valid_yaml_rate',
+    'generation.resource_assertion_pass_rate',
+    'generation.relation_pass_rate',
+    'generation.content_pass_rate',
+  ]) {
+    assert.deepEqual(generation[key], metricObservation(null, 0, 0));
+  }
+  for (const key of [
+    'fix.valid_yaml_rate',
+    'fix.expected_correction_pass_rate',
+    'fix.preserve_pass_rate',
+    'fix.side_effect_free_pass_rate',
+    'fix.success_rate',
+  ]) {
+    assert.deepEqual(fix[key], metricObservation(null, 0, 0));
+  }
+});
+
+const fixCase: FixCase = {
+  id: 'fix-configmap',
+  defectType: 'unknown_field',
+  brokenYaml: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: info
+unexpected: true
+`,
+  target: { apiVersion: 'v1', kind: 'ConfigMap', name: 'app-config' },
+  preserve: [{ type: 'equals', path: 'data.LOG_LEVEL', value: 'info' }],
+  expectedCorrections: [
+    {
+      type: 'matches',
+      path: 'unexpected',
+      rule: { name: 'missing_or_empty' },
+    },
+  ],
+};
+
+const fixedConfigMap = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: info
+`;
+
+check('buildFixCaseResult requires target-bound corrections and preservation', () => {
+  const [fixture] = preflightFixCases([fixCase]);
+  assert.ok(fixture);
+  const item = buildFixCaseResult(fixCase, result(fixedConfigMap), fixture);
 
   assert.equal(item.validYaml, true);
-  assert.equal(item.kindKept, true);
-  assert.equal(item.intentPreserved, true);
-  assert.equal(metrics.validYamlCount, 1);
+  assert.equal(item.targetMatch.status, 'matched');
+  assert.equal(item.correctionPass, true);
+  assert.equal(item.preservePass, true);
+  assert.equal(item.sideEffectFree, true);
+  assert.equal(item.contentPass, true);
+});
+
+check('a preserve value on another document cannot satisfy the target', () => {
+  const multiDocumentCase: FixCase = {
+    id: 'fix-configmap',
+    defectType: 'unknown_field',
+    brokenYaml: `${fixCase.brokenYaml}\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: other\ndata:\n  LOG_LEVEL: debug\n`,
+    target: fixCase.target,
+    preserve: fixCase.preserve,
+    expectedCorrections: fixCase.expectedCorrections,
+  };
+  const [fixture] = preflightFixCases([multiDocumentCase]);
+  assert.ok(fixture);
+  const swappedValue = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: debug
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: other
+data:
+  LOG_LEVEL: info
+`;
+
+  const item = buildFixCaseResult(
+    multiDocumentCase,
+    result(swappedValue),
+    fixture,
+  );
+  assert.equal(item.validYaml, true);
+  assert.equal(item.correctionPass, true);
+  assert.equal(item.sideEffectFree, true);
+  assert.equal(item.preservePass, false);
+  assert.equal(item.preserveResults[0]?.pass, false);
+  assert.equal(item.contentPass, false);
+});
+
+check('an added resource fails an otherwise correct repair', () => {
+  const [fixture] = preflightFixCases([fixCase]);
+  assert.ok(fixture);
+  const withExtra = `${fixedConfigMap}\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: unrequested\ntype: Opaque\n`;
+  const item = buildFixCaseResult(fixCase, result(withExtra), fixture);
+
+  assert.equal(item.validYaml, true);
+  assert.equal(item.correctionPass, true);
+  assert.equal(item.preservePass, true);
+  assert.equal(item.sideEffectFree, false);
+  assert.equal(item.contentPass, false);
+});
+
+check('changing the target identity fails even when repaired fields are valid', () => {
+  const [fixture] = preflightFixCases([fixCase]);
+  assert.ok(fixture);
+  const renamed = fixedConfigMap.replace('name: app-config', 'name: renamed');
+  const item = buildFixCaseResult(fixCase, result(renamed), fixture);
+
+  assert.equal(item.validYaml, true);
+  assert.equal(item.targetMatch.status, 'missing');
+  assert.equal(item.correctionPass, false);
+  assert.equal(item.preservePass, false);
+  assert.equal(item.sideEffectFree, false);
+  assert.equal(item.contentPass, false);
+});
+
+check('fix metrics count complete acceptance rather than valid YAML alone', () => {
+  const [fixture] = preflightFixCases([fixCase]);
+  assert.ok(fixture);
+  const passedItem = buildFixCaseResult(
+    fixCase,
+    result(fixedConfigMap),
+    fixture,
+  );
+  const failedItem = buildFixCaseResult(
+    { ...fixCase, id: 'fix-configmap-side-effect' },
+    result(`${fixedConfigMap}\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: unrequested\ntype: Opaque\n`),
+    { ...fixture, caseId: 'fix-configmap-side-effect' },
+  );
+
+  const metrics = computeFixEvalMetrics([passedItem, failedItem]);
+
+  assert.equal(metrics.validYamlCount, 2);
+  assert.equal(metrics.correctionPassCount, 2);
+  assert.equal(metrics.preservePassCount, 2);
+  assert.equal(metrics.sideEffectFreePassCount, 1);
+  assert.equal(metrics.contentPassCount, 1);
   assert.deepEqual(fixMetricsRecord(metrics), {
-    'fix.avg_rounds': metricObservation(0, 0, 1),
-    'fix.avg_submits': metricObservation(1, 1, 1),
-    'fix.defect.parse_error.success_rate': metricObservation(1, 1, 1),
-    'fix.first_parse_ok_rate': metricObservation(1, 1, 1),
-    'fix.first_validation_ok_rate': metricObservation(1, 1, 1),
-    'fix.intent_preserved_rate': metricObservation(1, 1, 1),
-    'fix.kind_kept_rate': metricObservation(1, 1, 1),
-    'fix.max_round_failure_rate': metricObservation(0, 0, 1),
-    'fix.preserve_coverage': metricObservation(1, 1, 1),
-    'fix.repair_attempted_rate': metricObservation(0, 0, 1),
+    'fix.avg_rounds': metricObservation(0, 0, 2),
+    'fix.avg_submits': metricObservation(1, 2, 2),
+    'fix.defect.unknown_field.success_rate': metricObservation(0.5, 1, 2),
+    'fix.expected_correction_pass_rate': metricObservation(1, 2, 2),
+    'fix.first_parse_ok_rate': metricObservation(1, 2, 2),
+    'fix.first_validation_ok_rate': metricObservation(1, 2, 2),
+    'fix.max_round_failure_rate': metricObservation(0, 0, 2),
+    'fix.preserve_pass_rate': metricObservation(1, 2, 2),
+    'fix.repair_attempted_rate': metricObservation(0, 0, 2),
     'fix.repair_success_after_fail_rate': metricObservation(null, 0, 0),
-    'fix.success_rate': metricObservation(1, 1, 1),
+    'fix.side_effect_free_pass_rate': metricObservation(0.5, 1, 2),
+    'fix.success_rate': metricObservation(0.5, 1, 2),
+    'fix.valid_yaml_rate': metricObservation(1, 2, 2),
   });
 });
 

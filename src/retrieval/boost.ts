@@ -3,7 +3,6 @@
 // 不基于 query 文本出现"必须/禁止"就全局抬 policy——否则问字段事实时 policy 抢占 schema。
 
 import type { Chunk } from '../knowledge/corpus';
-import { chunkPaths, chunkResources } from '../knowledge/chunk';
 import { POLICY_RELATED_BOOST } from './router';
 
 const POLICY_PATH_BONUS = 0.03;
@@ -13,11 +12,22 @@ export function policyBoost(
   chunk: Chunk,
   boostResource?: string,
   boostPath?: string,
+  boostApiVersion?: string,
 ): number {
   if (chunk.sourceType !== 'policy') return 0;
-  if (!boostResource || !chunkResources(chunk).includes(boostResource)) return 0;
+  if (!boostResource) return 0;
+  const matchingTargets = chunk.targets.filter(
+    (target) =>
+      target.kind === boostResource &&
+      (!boostApiVersion ||
+        !target.apiVersion ||
+        target.apiVersion === boostApiVersion),
+  );
+  if (matchingTargets.length === 0) return 0;
   const pathHit =
     boostPath &&
-    chunkPaths(chunk).some((path) => path.toLowerCase().endsWith(boostPath));
+    matchingTargets.some((target) =>
+      target.path?.toLowerCase().endsWith(boostPath),
+    );
   return POLICY_RELATED_BOOST + (pathHit ? POLICY_PATH_BONUS : 0);
 }
