@@ -1,16 +1,22 @@
 import assert from 'node:assert/strict';
 import type { GenerateResult } from '../../server/agent';
 import type { GenerationEvalCase } from '../cases/generation-cases';
-import { preflightFixCases, type FixCase } from '../assertions';
+import {
+  DEFECT_TYPES,
+  preflightFixCases,
+  type FixCase,
+} from '../assertions';
 import {
   buildFixCaseResult,
   buildGenerationCaseResult,
+  attemptStats,
   computeFixEvalMetrics,
   computeGenerationEvalMetrics,
   fixMetricsRecord,
   generationMetricsRecord,
 } from './generation-metrics';
 import { metricObservation } from '../protocol';
+import { harnessErrorMetrics } from '../runner-protocol';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -160,6 +166,7 @@ check('computeGenerationEvalMetrics 汇总资源断言、关系和完整内容',
   assert.deepEqual(generationMetricsRecord(metrics), {
     'generation.avg_rounds': metricObservation(1, 2, 2),
     'generation.avg_submits': metricObservation(1, 2, 2),
+    'generation.case_count': metricObservation(2),
     'generation.content_pass_rate': metricObservation(0.5, 1, 2),
     'generation.first_parse_ok_rate': metricObservation(0.5, 1, 2),
     'generation.first_validation_ok_rate': metricObservation(0.5, 1, 2),
@@ -181,6 +188,13 @@ check('no measured generation/fix cases produces N/A quality ratios', () => {
     'generation.resource_assertion_pass_rate',
     'generation.relation_pass_rate',
     'generation.content_pass_rate',
+    'generation.first_parse_ok_rate',
+    'generation.first_validation_ok_rate',
+    'generation.repair_attempted_rate',
+    'generation.repair_success_after_fail_rate',
+    'generation.max_round_failure_rate',
+    'generation.avg_submits',
+    'generation.avg_rounds',
   ]) {
     assert.deepEqual(generation[key], metricObservation(null, 0, 0));
   }
@@ -190,9 +204,57 @@ check('no measured generation/fix cases produces N/A quality ratios', () => {
     'fix.preserve_pass_rate',
     'fix.side_effect_free_pass_rate',
     'fix.success_rate',
+    'fix.first_parse_ok_rate',
+    'fix.first_validation_ok_rate',
+    'fix.repair_attempted_rate',
+    'fix.repair_success_after_fail_rate',
+    'fix.max_round_failure_rate',
+    'fix.avg_submits',
+    'fix.avg_rounds',
   ]) {
     assert.deepEqual(fix[key], metricObservation(null, 0, 0));
   }
+  for (const defectType of DEFECT_TYPES) {
+    assert.deepEqual(
+      fix[`fix.defect.${defectType}.success_rate`],
+      metricObservation(null, 0, 0),
+    );
+  }
+});
+
+check('empty attempt aggregation preserves zero raw counts without a fake divisor', () => {
+  assert.deepEqual(attemptStats([]), {
+    caseCount: 0,
+    firstParseOkCount: 0,
+    firstValidationOkCount: 0,
+    repairAttemptedCount: 0,
+    failedFirstCount: 0,
+    repairSuccessAfterFailCount: 0,
+    maxRoundFailureCount: 0,
+    submitCount: 0,
+    roundCount: 0,
+  });
+});
+
+check('all generation/fix case errors keep quality N/A and report harness errors', () => {
+  const generation = {
+    ...generationMetricsRecord(computeGenerationEvalMetrics([])),
+    ...harnessErrorMetrics('generation', 2),
+  };
+  const fix = {
+    ...fixMetricsRecord(computeFixEvalMetrics([])),
+    ...harnessErrorMetrics('fix', 2),
+  };
+  assert.deepEqual(
+    generation['generation.content_pass_rate'],
+    metricObservation(null, 0, 0),
+  );
+  assert.deepEqual(
+    generation['generation.harness_error_count'],
+    metricObservation(2),
+  );
+  assert.deepEqual(fix['fix.success_rate'], metricObservation(null, 0, 0));
+  assert.deepEqual(fix['fix.harness_error_count'], metricObservation(2));
 });
 
 const fixCase: FixCase = {
@@ -224,6 +286,20 @@ metadata:
 data:
   LOG_LEVEL: info
 `;
+
+check('repair success after fail is N/A when no case failed first', () => {
+  const [fixture] = preflightFixCases([fixCase]);
+  assert.ok(fixture);
+  const metrics = computeFixEvalMetrics([
+    buildFixCaseResult(fixCase, result(fixedConfigMap), fixture),
+  ]);
+
+  assert.equal(metrics.attemptStats.failedFirstCount, 0);
+  assert.deepEqual(
+    fixMetricsRecord(metrics)['fix.repair_success_after_fail_rate'],
+    metricObservation(null, 0, 0),
+  );
+});
 
 check('buildFixCaseResult requires target-bound corrections and preservation', () => {
   const [fixture] = preflightFixCases([fixCase]);
@@ -328,6 +404,11 @@ check('fix metrics count complete acceptance rather than valid YAML alone', () =
   assert.deepEqual(fixMetricsRecord(metrics), {
     'fix.avg_rounds': metricObservation(0, 0, 2),
     'fix.avg_submits': metricObservation(1, 2, 2),
+    'fix.case_count': metricObservation(2),
+    'fix.defect.enum_error.success_rate': metricObservation(null, 0, 0),
+    'fix.defect.missing_required.success_rate': metricObservation(null, 0, 0),
+    'fix.defect.parse_error.success_rate': metricObservation(null, 0, 0),
+    'fix.defect.type_error.success_rate': metricObservation(null, 0, 0),
     'fix.defect.unknown_field.success_rate': metricObservation(0.5, 1, 2),
     'fix.expected_correction_pass_rate': metricObservation(1, 2, 2),
     'fix.first_parse_ok_rate': metricObservation(1, 2, 2),

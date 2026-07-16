@@ -1,7 +1,7 @@
 # AI 应用开发能力训练实现方案
 
 > 状态：当前执行依据。
-> 最近核对：2026-07-12。
+> 最近核对：2026-07-16。
 > 用途：维护当前能力状态、质量门禁和唯一执行顺序。具体数据契约由已确认的 design/spec 定义，不在本文重复维护。
 
 ## 1. 项目目标
@@ -67,27 +67,28 @@ npm run corpus:stats
 
 ### 3.2 Eval 数据
 
-当前 retrieval 数据集：
+当前检索与 Grounded Answer 数据集：
 
-- 86 条人工 case，其中 81 条可答、5 条拒答。
-- 主要覆盖字段解释，尚缺系统化的错误解释、CRD、schema 派生和 bad-case 来源分层。
-- 当前 case 尚未形成 development、regression、holdout 的用途分层。
+- Semantic Retrieval 为 81 条 self-contained 可答 case，只测 semantic retrieval pipeline。
+- Grounded Answer 为 86 条 case，其中 81 条显式引用 retrieval case，5 条为独立拒答案例。
+- 主要覆盖字段解释，尚缺系统化的错误解释、真实 CRD 和 holdout。
+- 当前 case 尚未形成 task/origin/role 与 development/regression/holdout 用途分层。
 
 当前生成数据集：
 
 - Generation 26 条，其中多资源 case 6 条。
 - Fix 8 条。
-- 数量已具备训练价值，但资源断言、关系断言和 fixture preflight 仍需按 Evaluator Validity 设计纠偏。
+- 资源值断言、跨资源关系、修复保留/副作用检查和 fixture preflight 已进入 evaluator；正式指标仍待新版本 full run 验证。
 
 ### 3.3 能力状态
 
 | 能力 | 状态 | 当前边界 |
 |---|---|---|
 | Monaco YAML 工作流与 `ask/check/gen/fix` | 已完成基础闭环 | 继续以编辑器 YAML authoring 为唯一产品场景 |
-| schema ingestion、`$ref` registry、curated corpus | 已完成基础能力 | provenance、版本化 ID 和 corpus identity 待纠偏 |
+| schema ingestion、`$ref` registry、curated corpus | provenance、targets、版本化 ID 和 corpus/index identity 已纠偏 | 尚未接入 docs/example provider，真实 CRD 样本不足 |
 | dense retrieval、rerank、query expansion serving | 已完成基础能力 | 历史指标需在新 evaluator 下重测，不能直接沿用 |
-| run/trace/baseline/bad case | 第一轮结构已实现，未通过 correctness review | 当前最高优先级 |
-| Generation/Fix repair loop | 已完成基础能力 | evaluator 仍可能误判通过 |
+| run/trace/baseline/bad case | runtime protocol、metric registry、compare/promote 门禁已实现 | 新 baseline 尚未重建，usage/cost 尚未贯通 |
+| Generation/Fix repair loop | evaluator 已验证目标值、资源关系、保留项和副作用 | 尚未执行新版本 full eval/baseline |
 | `[S]` 引用、schema/policy 分层 | 部分完成 | answer correctness 与 claim-level verification 未完成 |
 | Stage 6 policy | 已完成 Ask 侧接入 | docs/examples 与 Generate/Fix policy compliance 未完成 |
 | Stage 7 离线 feedback | retrieval/faith bad case 前置已完成 | serving feedback、采纳信号和审核式回灌未完成 |
@@ -135,9 +136,11 @@ Compare 和 baseline 要求：
 
 - dataset hash、metric definition version 或 kind 不一致时，不输出改进/退化结论。
 - baseline 有而当前缺失的稳定指标属于 harness 缺口，不能静默跳过。
+- 所有 runner 在写 completed run 前统一校验 metric registry、required completeness、observation contract 和 definition version。
 - retrieval、faith、generation、fix 只允许 full run 晋升；judge 只允许完整 calibration run 晋升。
-- 只有 `completed` 且通过门禁的 run 才能晋升。
+- 只有 `completed`、trace selection 完整且 harness error 为 0 的 run 才能晋升；不提供 error override。
 - baseline 晋升始终由人工显式执行。
+- baseline 只保存 dataset、metrics 和参与比较的 config identity，不引用 source run/trace 路径。
 
 设计依据：
 
@@ -285,15 +288,16 @@ Stage 是能力分类，不代表执行时序。
 
 ## 7. 唯一执行顺序
 
-### Phase A：质量底座纠偏（当前）
+### Phase A：质量底座纠偏（结构实现完成）
 
 1. 已完成：四份 2026-07-12 corrective specs 及其一对一 implementation plans 已交叉自审并落盘。
 2. 已完成：Eval Artifact Protocol 已实施并完成 review。
-3. 当前执行：Knowledge Provenance/Corpus Identity；完成后依次实施 Evaluator Validity 和 Metric Semantics，每个 Task 后停止 review。
-4. 对提交数据执行一次性迁移；ignored runs/traces/index 直接清理重建。
-5. 纠偏完成前不晋升 baseline，不根据旧指标优化 retrieval/prompt/model。
+3. 已完成：Knowledge Provenance/Corpus Identity 与 Evaluator Validity 已实施并完成逐 Task review。
+4. 已实现：Metric Semantics registry、N/A/分母、compare、promotion 和全 harness 本地门禁；正式 baseline 重建不属于结构实现完成条件。
+5. 当前边界：未执行真实模型 eval，未晋升任何 baseline，不根据旧指标优化 retrieval/prompt/model。
+6. 已完成提交数据的一次性 canonical identity 迁移；ignored runs/traces 不兼容读取，正式 eval 前按当前 identity 清理重建。
 
-### Phase B：工程收尾与重建尺子
+### Phase B：工程收尾与重建尺子（当前）
 
 1. 收敛 test runner、根 README 命令入口和 scripts inventory，删除有证据证明无引用的历史脚本；不新增平行 CLI 文档。
 2. 完成 docs 状态和引用清理，不让历史文档覆盖当前路线。

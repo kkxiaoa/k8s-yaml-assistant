@@ -119,6 +119,17 @@ export const MetricObservationSchema = z
         code: 'custom',
         message: 'zero denominator requires numerator 0 and value null',
       });
+      return;
+    }
+
+    if (
+      observation.denominator > 0 &&
+      observation.value !== observation.numerator / observation.denominator
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'ratio value must equal numerator divided by denominator',
+      });
     }
   });
 
@@ -133,6 +144,17 @@ export function metricObservation(
   if (arguments.length >= 2) candidate.numerator = numerator;
   if (arguments.length >= 3) candidate.denominator = denominator;
   return MetricObservationSchema.parse(candidate);
+}
+
+export function ratioObservation(
+  numerator: number,
+  denominator: number,
+): MetricObservation {
+  return metricObservation(
+    denominator === 0 ? null : numerator / denominator,
+    numerator,
+    denominator,
+  );
 }
 
 export const EvalDatasetIdentitySchema = z

@@ -25,10 +25,11 @@ import {
   type FaithSearchTrace,
   type FaithTrace,
 } from './faith-store';
-import { metricObservation, type FaithEvalConfig } from './protocol';
+import type { FaithEvalConfig } from './protocol';
+import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
 import {
   FAITH_CONTEXT_K,
-  LEGACY_METRIC_DEFINITION_VERSION,
+  faithMetricsRecord,
   faithEnvelopeOutcome,
   faithEvalConfig,
   harnessErrorMetrics,
@@ -318,7 +319,7 @@ async function main(): Promise<void> {
       kind: 'faith',
       scope: selection.scope,
       dataset: setup.dataset,
-      metricDefinitionVersion: LEGACY_METRIC_DEFINITION_VERSION,
+      metricDefinitionVersion: METRIC_DEFINITION_VERSION,
       config: runConfig,
     }),
   );
@@ -443,18 +444,36 @@ async function main(): Promise<void> {
       }
     }
 
+    const metrics = await executeEvalRunStage('metric_aggregation', () => ({
+      ...faithMetricsRecord({
+        faithfulCount,
+        judgedCount,
+        refusedCorrectlyCount: refusedCorrectly,
+        refusalJudgedCount: refusalTotal,
+        hallucinationCount: hallucination,
+        dualCauseCount: dualCause,
+        judgeIndeterminateCount: judgeFailed,
+        judgeInvalidAttemptCount: judgeInvalidAttempts,
+        judgeErrorAttemptCount: judgeErrorAttempts,
+        caseCount: batch.results.length,
+      }),
+      ...harnessErrorMetrics('faith', batch.harnessErrors.length),
+    }));
+    const faithfulRate = metrics['faith.faithful_rate'].value;
+    const refusalCorrectRate = metrics['faith.refusal_correct_rate'].value;
+
     console.error('\n━━━━━━ 汇总 ━━━━━━');
     console.error(
-      `Faithfulness 率 = ${judgedCount ? `${((faithfulCount / judgedCount) * 100).toFixed(1)}%` : 'N/A'}  (${faithfulCount}/${judgedCount})`,
+      `Faithfulness 率 = ${faithfulRate === null ? 'N/A' : `${(faithfulRate * 100).toFixed(1)}%`}  (${faithfulCount}/${judgedCount})`,
     );
     console.error(
-      `拒答正确率(应拒答的)= ${refusalTotal ? `${((refusedCorrectly / refusalTotal) * 100).toFixed(1)}%` : 'N/A'}  (${refusedCorrectly}/${refusalTotal})`,
+      `拒答正确率(应拒答的)= ${refusalCorrectRate === null ? 'N/A' : `${(refusalCorrectRate * 100).toFixed(1)}%`}  (${refusedCorrectly}/${refusalTotal})`,
     );
     console.error(
       `归因(可答不忠实)= 真幻觉(检索✓却瞎编)${hallucination} 条 / 检索漏+编造(检索✗)${dualCause} 条`,
     );
     console.error(
-      `judge indeterminate/skipped=${judgeFailed} 条(invalid attempts=${judgeInvalidAttempts}, request error attempts=${judgeErrorAttempts})`,
+      `judge indeterminate=${judgeFailed} 条(invalid attempts=${judgeInvalidAttempts}, request error attempts=${judgeErrorAttempts})`,
     );
     console.error(
       `quality fail=${judgedCount - faithfulCount} 条；harness error=${batch.harnessErrors.length} 条；质量分母=${judgedCount}；已完成 case=${batch.results.length}/${cases.length}`,
@@ -463,25 +482,6 @@ async function main(): Promise<void> {
       `注:被测=${MODEL}(flash),裁判=${JUDGE_MODEL}(pro)。Faithfulness=只忠于检索 context,不等于事实正确。`,
     );
 
-    const metrics = await executeEvalRunStage('metric_aggregation', () => ({
-      'faith.faithful_rate': metricObservation(
-        judgedCount ? faithfulCount / judgedCount : null,
-        faithfulCount,
-        judgedCount,
-      ),
-      'faith.refusal_correct_rate': metricObservation(
-        refusalTotal ? refusedCorrectly / refusalTotal : null,
-        refusedCorrectly,
-        refusalTotal,
-      ),
-      'faith.hallucination': metricObservation(hallucination),
-      'faith.dual_cause': metricObservation(dualCause),
-      'faith.judged': metricObservation(judgedCount),
-      'faith.judge_failed': metricObservation(judgeFailed),
-      'faith.judge_invalid_attempt': metricObservation(judgeInvalidAttempts),
-      'faith.judge_error_attempt': metricObservation(judgeErrorAttempts),
-      ...harnessErrorMetrics('faith', batch.harnessErrors.length),
-    }));
     await executeEvalRunStage('artifact_write', () => session.complete(metrics));
     completed = true;
     const tracePath = evalArtifactPath(traceRelativePath(runId, 'faith'));

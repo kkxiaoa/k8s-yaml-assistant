@@ -65,6 +65,7 @@ import {
   computeCanonicalHash,
   computeDatasetHash,
   metricObservation,
+  ratioObservation,
   type EvalDatasetIdentity,
   type EvalKind,
   type FaithEvalConfig,
@@ -76,7 +77,6 @@ import {
   type TraceEnvelope,
 } from './protocol';
 
-export const LEGACY_METRIC_DEFINITION_VERSION = 'legacy-v1';
 export const FAITH_CONTEXT_K = 3;
 export const JUDGE_CALIBRATION_VOTES = 5;
 
@@ -90,6 +90,72 @@ export function harnessErrorMetrics(
   return {
     [`${kind}.harness_error_count`]: metricObservation(count),
   };
+}
+
+export interface RetrievalMetricCounts {
+  recallNumerator: number;
+  mrrNumerator: number;
+  caseCount: number;
+  retrievalMissCount: number;
+  rerankMissCount: number;
+}
+
+export function retrievalMetricsRecord(counts: RetrievalMetricCounts) {
+  return {
+    'retrieval.semantic.recall': ratioObservation(
+      counts.recallNumerator,
+      counts.caseCount,
+    ),
+    'retrieval.semantic.mrr': ratioObservation(
+      counts.mrrNumerator,
+      counts.caseCount,
+    ),
+    'retrieval.semantic.case_count': metricObservation(counts.caseCount),
+    'retrieval.retrieval_miss_count': metricObservation(
+      counts.retrievalMissCount,
+    ),
+    'retrieval.rerank_miss_count': metricObservation(counts.rerankMissCount),
+  } satisfies Record<string, MetricObservation>;
+}
+
+export interface FaithMetricCounts {
+  faithfulCount: number;
+  judgedCount: number;
+  refusedCorrectlyCount: number;
+  refusalJudgedCount: number;
+  hallucinationCount: number;
+  dualCauseCount: number;
+  judgeIndeterminateCount: number;
+  judgeInvalidAttemptCount: number;
+  judgeErrorAttemptCount: number;
+  caseCount: number;
+}
+
+export function faithMetricsRecord(counts: FaithMetricCounts) {
+  return {
+    'faith.faithful_rate': ratioObservation(
+      counts.faithfulCount,
+      counts.judgedCount,
+    ),
+    'faith.refusal_correct_rate': ratioObservation(
+      counts.refusedCorrectlyCount,
+      counts.refusalJudgedCount,
+    ),
+    'faith.hallucination': metricObservation(counts.hallucinationCount),
+    'faith.dual_cause': metricObservation(counts.dualCauseCount),
+    'faith.judged': metricObservation(counts.judgedCount),
+    'faith.refusal_judged': metricObservation(counts.refusalJudgedCount),
+    'faith.case_count': metricObservation(counts.caseCount),
+    'faith.judge_indeterminate': metricObservation(
+      counts.judgeIndeterminateCount,
+    ),
+    'faith.judge_invalid_attempt': metricObservation(
+      counts.judgeInvalidAttemptCount,
+    ),
+    'faith.judge_error_attempt': metricObservation(
+      counts.judgeErrorAttemptCount,
+    ),
+  } satisfies Record<string, MetricObservation>;
 }
 
 export function generatedResultEvaluationStage(result: {

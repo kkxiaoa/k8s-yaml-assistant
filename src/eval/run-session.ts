@@ -21,6 +21,7 @@ import {
   type MetricObservation,
   type TraceEnvelope,
 } from './protocol';
+import { assertMetricRecord } from './metrics/definitions';
 
 const MAX_ERROR_MESSAGE_LENGTH = 1_000;
 const SENSITIVE_ASSIGNMENT =
@@ -364,6 +365,15 @@ export function startEvalRun(
   function complete(metrics: Record<string, MetricObservation>): void {
     ensureRunning('complete');
     assertCompleteTraceCoverage();
+    try {
+      assertMetricRecord({
+        evalKind: currentRun.kind,
+        metricDefinitionVersion: currentRun.metricDefinitionVersion,
+        metrics,
+      });
+    } catch (error) {
+      throw new EvalRunExecutionError('metric_aggregation', error);
+    }
     const completedRun = decodeEvalRun({
       ...currentRun,
       status: 'completed',

@@ -8,6 +8,7 @@ import {
   decodeEvalRun,
   decodeTraceEnvelope,
   metricObservation,
+  ratioObservation,
 } from './protocol';
 
 let passed = 0;
@@ -351,17 +352,13 @@ check('MetricObservation accepts only finite numbers or null', () => {
   }
 });
 
-check('ratio observations require a non-negative finite numerator pair', () => {
-  assert.deepEqual(metricObservation(0.5, 1, 2), {
+check('ratio observations derive value from a non-negative finite pair', () => {
+  assert.deepEqual(ratioObservation(1, 2), {
     value: 0.5,
     numerator: 1,
     denominator: 2,
   });
-  assert.deepEqual(metricObservation(0.9, 1, 2), {
-    value: 0.9,
-    numerator: 1,
-    denominator: 2,
-  });
+  assert.throws(() => metricObservation(0.9, 1, 2), /numerator.*denominator|ratio/i);
   assert.throws(() => metricObservation(0.5, 1));
   assert.throws(() => metricObservation(0.5, undefined, 2));
   assert.throws(() => metricObservation(0.5, -1, 2));
@@ -370,11 +367,12 @@ check('ratio observations require a non-negative finite numerator pair', () => {
 });
 
 check('zero denominator has exactly the 0/0 => null structure', () => {
-  assert.deepEqual(metricObservation(null, 0, 0), {
+  assert.deepEqual(ratioObservation(0, 0), {
     value: null,
     numerator: 0,
     denominator: 0,
   });
+  assert.throws(() => ratioObservation(1, 0));
   assert.throws(() => metricObservation(0, 0, 0));
   assert.throws(() => metricObservation(null, 1, 0));
 });
