@@ -24,7 +24,11 @@ import {
   type IndexMissReason,
   type IndexReadResult,
 } from './index-store';
-import { resolveCorpusIndex, type IndexedChunk } from './retrieve';
+import {
+  denseSearch,
+  resolveCorpusIndex,
+  type IndexedChunk,
+} from './retrieve';
 
 const BASE_CHUNK: KnowledgeChunk = {
   id: 'schema::v1::Pod::spec.containers.image',
@@ -189,6 +193,77 @@ check('index v2 round-trip 保存完整 identity 与 canonical metadata', () => 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+check('index hit 使用共享连续 Float32Array,不展开为 number[]', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'index-v2-contiguous-'));
+  try {
+    const chunks = [BASE_CHUNK, SECOND_CHUNK];
+    const expected = expectation(chunks);
+    writeIndex(
+      [
+        indexed(BASE_CHUNK, [0.25, 0.75]),
+        indexed(SECOND_CHUNK, [-0.5, 0.125]),
+      ],
+      expected,
+      dir,
+    );
+
+    const restored = readIndex(expected, dir);
+    assert.equal(restored.status, 'hit');
+    const first: unknown = restored.chunks[0]!.embedding;
+    const second: unknown = restored.chunks[1]!.embedding;
+    assert.ok(first instanceof Float32Array);
+    assert.ok(second instanceof Float32Array);
+    assert.equal(first.buffer, second.buffer);
+    assert.equal(first.byteOffset + first.byteLength, second.byteOffset);
+    assert.deepEqual(Array.from(first), [0.25, 0.75]);
+    assert.deepEqual(Array.from(second), [-0.5, 0.125]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+check('连续 Float32Array 与旧 number[] 的 dense score 和排序完全一致', () => {
+  const thirdChunk: KnowledgeChunk = {
+    ...BASE_CHUNK,
+    id: 'schema::v1::Pod::spec.nodeName',
+    title: 'Pod · spec.nodeName',
+    text: 'node name field',
+    targets: [{ apiVersion: 'v1', kind: 'Pod', path: 'spec.nodeName' }],
+  };
+  const chunks = [BASE_CHUNK, SECOND_CHUNK, thirdChunk];
+  const vectors = [
+    new Float32Array([0.125, -0.5, 0.75, 0.25]),
+    new Float32Array([-0.625, 0.375, 0.25, -0.125]),
+    new Float32Array([0.5, 0.25, -0.375, 0.625]),
+  ];
+  const dimension = vectors[0]!.length;
+  const matrix = new Float32Array(chunks.length * dimension);
+  vectors.forEach((vector, index) => matrix.set(vector, index * dimension));
+
+  const legacy = chunks.map((chunk, index) =>
+    indexed(chunk, Array.from(vectors[index]!)),
+  );
+  const compact: IndexedChunk[] = chunks.map((chunk, index) => ({
+    ...chunk,
+    embedding: matrix.subarray(
+      index * dimension,
+      (index + 1) * dimension,
+    ),
+  }));
+  const query = [0.3, -0.2, 0.4, 0.1];
+  const search = (index: IndexedChunk[]) =>
+    denseSearch(
+      query,
+      index,
+      chunks.length,
+      'Pod',
+      'spec.containers.image',
+      'v1',
+    ).map(({ chunk, score }) => ({ id: chunk.id, score }));
+
+  assert.deepEqual(search(compact), search(legacy));
 });
 
 check('text、metadata 与 model 变化分别给出明确 miss reason', () => {
