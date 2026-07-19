@@ -1,6 +1,6 @@
 # Eval Metric Semantics 纠偏设计
 
-> 状态：已自审，对应 implementation plan 已落盘，待执行。
+> 状态：已实施；对应实施计划已完成逐 Task（任务）审核。
 > 用途：定义指标的方向、分母、空样本语义、可比较条件和 baseline 晋升门禁。
 > 对应计划：`docs/superpowers/plans/2026-07-12-eval-metric-semantics.md`。
 > 顺序：第四项实施。依赖 Artifact Protocol 和各 evaluator 的最终指标输出，完成 compare/promote 后再重建 baseline。

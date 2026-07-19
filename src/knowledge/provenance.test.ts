@@ -4,7 +4,13 @@ import { join, relative, sep } from 'node:path';
 import { decodeKnowledgeChunk, type SourceAuthority } from './chunk';
 import { CORPUS } from './corpus';
 import { buildSchemaCorpusForDoc } from './schema-corpus';
-import { SCHEMA_DOCS, type SchemaDoc, type SchemaSource } from './schemas';
+import {
+  resolveSchemaNode,
+  SCHEMA_DOCS,
+  type SchemaDoc,
+  type SchemaNode,
+  type SchemaSource,
+} from './schemas';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -45,12 +51,73 @@ function onlyAuthority(source: SchemaSource): SourceAuthority {
   return chunks[0]!.provenance.authority;
 }
 
+function generatedSchemaDoc(file: string): SchemaDoc {
+  return JSON.parse(
+    readFileSync(join(process.cwd(), 'data', 'schemas', 'generated', 'resources', file), 'utf8'),
+  ) as SchemaDoc;
+}
+
+function schemaNodeAtPath(
+  schema: SchemaNode,
+  path: readonly string[],
+): SchemaNode | undefined {
+  let current = resolveSchemaNode(schema);
+  for (const segment of path) {
+    const child = current.properties?.[segment];
+    if (child === undefined) return undefined;
+    const resolved = resolveSchemaNode(child);
+    current = resolved.items ? resolveSchemaNode(resolved.items) : resolved;
+  }
+  return current;
+}
+
 console.log('knowledge provenance:');
 
 check('schema source 映射为独立 authority，cluster/CRD 不冒充官方', () => {
   assert.equal(onlyAuthority('builtin'), 'kubernetes_official');
   assert.equal(onlyAuthority('cluster'), 'cluster_api');
   assert.equal(onlyAuthority('crd'), 'extension_provider');
+});
+
+check('curated 目标 CRD 复用完整 cluster schema', () => {
+  const targets = [
+    {
+      file: 'gateway.networking.k8s.io.v1.HTTPRoute.json',
+      apiVersion: 'gateway.networking.k8s.io/v1',
+      kind: 'HTTPRoute',
+      path: ['spec', 'rules', 'backendRefs', 'weight'],
+    },
+    {
+      file: 'cert-manager.io.v1.Certificate.json',
+      apiVersion: 'cert-manager.io/v1',
+      kind: 'Certificate',
+      path: ['spec', 'issuerRef'],
+    },
+  ] as const;
+
+  for (const target of targets) {
+    const doc = generatedSchemaDoc(target.file);
+    assert.equal(doc.apiVersion, target.apiVersion);
+    assert.equal(doc.kind, target.kind);
+    assert.equal(doc.source, 'cluster');
+    assert.ok(Object.keys(doc.schema.properties ?? {}).length > 0);
+    assert.ok(
+      schemaNodeAtPath(doc.schema, target.path),
+      `${target.apiVersion}/${target.kind} missing ${target.path.join('.')}`,
+    );
+  }
+});
+
+check('curated cluster CRD chunk 保持 cluster_api authority', () => {
+  for (const id of [
+    'schema::gateway.networking.k8s.io/v1::HTTPRoute::spec.rules.backendRefs.weight',
+    'schema::cert-manager.io/v1::Certificate::spec.issuerRef',
+  ]) {
+    const chunk = CORPUS.find((candidate) => candidate.id === id);
+    assert.ok(chunk, `missing corpus chunk: ${id}`);
+    assert.equal(chunk.provenance.authority, 'cluster_api');
+    assert.notEqual(chunk.provenance.authority, 'kubernetes_official');
+  }
 });
 
 check('schema chunk 使用 canonical ID、target 与 provenance', () => {

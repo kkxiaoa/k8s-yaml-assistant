@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import {
   canonicalBadCaseId,
   decodeBadCase,
@@ -59,7 +60,7 @@ const ACTIONS: FaithBadCaseAction[] = [
   'error',
 ];
 
-type FaithScope = 'full' | 'policy' | 'smoke';
+type FaithScope = 'tuning' | 'holdout' | 'full' | 'policy' | 'smoke';
 
 interface FaithFailure {
   layer: BadCase['failure']['layer'];
@@ -75,7 +76,13 @@ function equalSorted(a: string[], b: string[]): boolean {
 }
 
 function faithScope(run: FaithEvalRun): FaithScope {
-  if (run.scope === 'full' || run.scope === 'policy' || run.scope === 'smoke') {
+  if (
+    run.scope === 'tuning' ||
+    run.scope === 'holdout' ||
+    run.scope === 'full' ||
+    run.scope === 'policy' ||
+    run.scope === 'smoke'
+  ) {
     return run.scope;
   }
   throw new Error(`unsupported faith scope: ${run.scope}`);
@@ -126,6 +133,11 @@ export function readFaithBadCaseInput(params: {
         `faith payload id mismatch: envelope=${envelope.evalCaseId} payload=${trace.id}`,
       );
     }
+    if (!isDeepStrictEqual(trace.governance, envelope.governance)) {
+      throw new Error(
+        `faith governance mismatch: envelope=${envelope.evalCaseId}`,
+      );
+    }
     seenCaseIds.add(envelope.evalCaseId);
     observations.push({
       trace,
@@ -133,16 +145,24 @@ export function readFaithBadCaseInput(params: {
     });
   }
 
-  if (!equalSorted([...seenCaseIds], run.dataset.caseIds)) {
+  if (
+    !equalSorted(
+      [...seenCaseIds],
+      run.dataset.cases.map((evalCase) => evalCase.id),
+    )
+  ) {
     throw new Error('faith trace cases do not match run dataset');
   }
 
-  const selectionHash = faithTraceDatasetIdentity(
+  const selectionIdentity = faithTraceDatasetIdentity(
     observations.map(({ trace }) => trace),
-  ).hash;
-  if (run.dataset.hash !== selectionHash) {
+  );
+  if (
+    run.dataset.hash !== selectionIdentity.hash ||
+    !isDeepStrictEqual(run.dataset.cases, selectionIdentity.cases)
+  ) {
     throw new Error(
-      `dataset hash mismatch: run=${run.dataset.hash} trace=${selectionHash}`,
+      `dataset identity mismatch: run=${run.dataset.hash} trace=${selectionIdentity.hash}`,
     );
   }
 
@@ -383,6 +403,7 @@ export function buildFaithBadCaseCandidates(params: {
     now = new Date().toISOString(),
   } = params;
   const candidates: FaithBadCaseCandidate[] = [];
+  if (scope === 'holdout') return candidates;
 
   for (const { trace, latestEvidence } of observations) {
     if (latestEvidence.runId !== run.id) {
@@ -390,6 +411,7 @@ export function buildFaithBadCaseCandidates(params: {
         `faith evidence run ${latestEvidence.runId} does not match ${run.id}`,
       );
     }
+    if (trace.governance.role === 'holdout') continue;
     if (trace.outcome === 'error') {
       candidates.push({
         action: 'error',

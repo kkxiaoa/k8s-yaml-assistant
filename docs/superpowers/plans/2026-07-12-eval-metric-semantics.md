@@ -1,8 +1,8 @@
 # Eval Metric Semantics 实施计划
 
-> 状态：已自审，待执行。
+> 状态：已实施并完成逐 Task（任务）审核。
 > 对应设计：`docs/superpowers/specs/2026-07-12-eval-metric-semantics-design.md`。
-> 顺序：纠偏计划 4/4。依赖前三份纠偏计划完成；本计划结束后才允许重建正式 baseline。
+> 顺序：纠偏计划 4/4，已完成；正式 baseline（基线）仍待重建。
 
 ## Goal
 

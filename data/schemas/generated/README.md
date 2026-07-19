@@ -4,15 +4,19 @@
 
 - `resources/*.json` —— 资源入口(`${group}.${version}.${kind}.json`),保留原始 `$ref`。
 - `definitions/*.json` —— OpenAPI definition registry,运行时本地解析 `$ref`(不请求网络)。
-- `manifest.json` —— 生成时间与规模。
+- `manifest.json` —— 版本、生成来源、时间，以及 `ingest-schemas` 明确拥有的资源和定义文件。
 
 生成方式:
 
 ```bash
 npm run ingest:schemas -- --source kubernetes --input openapi.json   # 官方 OpenAPI spec
 npm run ingest:schemas -- --source cluster-discovery                  # 连集群自动发现
-npm run ingest:schemas -- --source crd --input examples/my-crd.yaml   # 单个 CRD
+npm run ingest:schemas -- --source crd --input path/to/my-crd.yaml    # 单个 CRD
 ```
+
+每个输出目录是一份完整生成快照。再次写入时只删除上一份 manifest（清单）拥有、当前快照不再生成的直接子级 JSON 文件；README、未归属文件和其他目录不会被删除。未归属文件与新目标同名时直接失败，不会静默覆盖。
+
+旧版只含数量的 manifest（清单），或没有清单但已含 JSON 的目录，不会被自动认领。迁移时先使用空的临时 `--out` 目录生成并审核，再显式替换目标目录。
 
 ## Git 跟踪范围:只跟踪 curated 白名单闭包
 

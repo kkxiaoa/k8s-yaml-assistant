@@ -8,13 +8,17 @@ import {
   ANSWER_MODEL,
 } from '../server/agent-contract';
 import {
+  ASK_MAX_TOKENS,
+  ASK_SYSTEM,
+  buildAskUserMessage,
+} from '../server/pipeline';
+import {
   buildCorpusManifest,
   SCHEMA_CORPUS_PROVIDER,
 } from '../knowledge/corpus';
 import { computeIndexHash } from '../retrieval/index-store';
 import { RetrievalPipelineError } from '../retrieval/retrieve';
 import { VALIDATION_LOGIC_REVISION } from '../validation/validate';
-import { ANSWER_SYSTEM, MODEL } from './answer';
 import {
   FAITH_JUDGE_ATTEMPT_LIMIT,
   JUDGE_MODEL,
@@ -31,6 +35,7 @@ import {
   buildRetrievalEvalTracePayload,
   faithMetricsRecord,
   faithDatasetIdentity,
+  faithTraceDatasetIdentity,
   faithEvalConfig,
   fixDatasetIdentity,
   fixEvalConfig,
@@ -45,6 +50,7 @@ import {
   retrievalExecutionError,
   retrievalEvalConfig,
   retrievalMetricsRecord,
+  selectEvalSuiteCases,
   selectFaithCases,
   selectRetrievalCases,
   toPersistedPayload,
@@ -52,8 +58,9 @@ import {
 import type { GroundedAnswerCase } from './cases/grounded-answer-cases';
 import type { SemanticRetrievalCase } from './cases/retrieval-cases';
 import type { GenerationEvalCase } from './cases/generation-cases';
-import type { FixCase } from './cases/fix-cases';
+import { FIX_CASES, type FixCase } from './cases/fix-cases';
 import type { JudgeCalibrationCase } from './metrics/judge-metrics';
+import { decodeFaithTrace, type FaithTrace } from './faith-store';
 import {
   EvalCaseExecutionError,
   EvalRunExecutionError,
@@ -88,10 +95,14 @@ async function checkAsync(name: string, fn: () => Promise<void>): Promise<void> 
 
 const SEMANTIC_CASE: SemanticRetrievalCase = {
   id: 'semantic',
+  governance: {
+    task: 'field_explanation',
+    origin: 'human',
+    role: 'development',
+  },
   question: 'How?',
   expectedChunkIds: ['Chunk::b', 'Chunk::a'],
   target: { kind: 'Pod' },
-  source: 'human',
 };
 const GROUNDED_REFERENCE: GroundedAnswerCase = {
   id: 'semantic',
@@ -99,14 +110,61 @@ const GROUNDED_REFERENCE: GroundedAnswerCase = {
   expectedBehavior: 'answer_with_sources',
   sourceExpectation: { mode: 'required', types: ['schema'] },
 };
+const HOLDOUT_RETRIEVAL_CASE: SemanticRetrievalCase = {
+  ...SEMANTIC_CASE,
+  id: 'holdout-semantic',
+  governance: { ...SEMANTIC_CASE.governance, role: 'holdout' },
+};
+const REGRESSION_RETRIEVAL_CASE: SemanticRetrievalCase = {
+  ...SEMANTIC_CASE,
+  id: 'regression-semantic',
+  governance: { ...SEMANTIC_CASE.governance, role: 'regression' },
+};
+const GROUNDED_HOLDOUT_REFERENCE: GroundedAnswerCase = {
+  id: HOLDOUT_RETRIEVAL_CASE.id,
+  input: {
+    kind: 'retrieval_case',
+    retrievalCaseId: HOLDOUT_RETRIEVAL_CASE.id,
+  },
+  expectedBehavior: 'answer_with_sources',
+};
 const STANDALONE_REFUSAL: GroundedAnswerCase = {
   id: 'refusal',
+  governance: {
+    task: 'refusal',
+    origin: 'human',
+    role: 'development',
+  },
   input: { kind: 'standalone_question', question: 'Unknown?' },
   expectedBehavior: 'refuse_insufficient_context',
+};
+const VALIDATION_ERROR_GROUNDED: GroundedAnswerCase = {
+  id: 'error-deployment-replicas-type',
+  governance: {
+    task: 'error_explanation',
+    origin: 'human',
+    role: 'development',
+  },
+  input: {
+    kind: 'validation_error',
+    fixCaseId: 'fix-type-replicas',
+    question:
+      'Deployment 的 spec.replicas 为什么提示类型错误，应该怎么修复？',
+    expectedChunkIds: [
+      'schema::apps/v1::Deployment::spec.replicas',
+    ],
+  },
+  expectedBehavior: 'answer_with_sources',
+  sourceExpectation: { mode: 'required', types: ['schema'] },
 };
 
 const GENERATION_CASE: GenerationEvalCase = {
   id: 'gen-1',
+  governance: {
+    task: 'generation',
+    origin: 'human',
+    role: 'development',
+  },
   requirement: 'Create a Pod',
   expectedResources: [
     {
@@ -120,6 +178,11 @@ const GENERATION_CASE: GenerationEvalCase = {
 
 const FIX_CASE: FixCase = {
   id: 'fix-1',
+  governance: {
+    task: 'fix',
+    origin: 'human',
+    role: 'development',
+  },
   defectType: 'type_error',
   brokenYaml:
     'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: "2"',
@@ -132,6 +195,7 @@ const FIX_CASE: FixCase = {
 
 const JUDGE_CASE: JudgeCalibrationCase = {
   id: 'judge-1',
+  governance: SEMANTIC_CASE.governance,
   category: 'faithful',
   sourceFaithRunId: 'faith-run-1',
   sourceFaithTraceId: 'faith-run-1:judge-1',
@@ -154,13 +218,45 @@ const JUDGE_CASE: JudgeCalibrationCase = {
 console.log('runner-protocol:');
 
 check('semantic retrieval dataset contains only Recall/MRR cases', () => {
-  const selected = selectRetrievalCases([SEMANTIC_CASE]);
-  const identity = retrievalDatasetIdentity(selected);
+  const selection = selectRetrievalCases([], [SEMANTIC_CASE]);
+  const identity = retrievalDatasetIdentity(selection.cases);
 
-  assert.deepEqual(selected.map((item) => item.id), ['semantic']);
-  assert.deepEqual(identity.caseIds, ['semantic']);
+  assert.equal(selection.scope, 'tuning');
+  assert.equal(selection.k, 3);
+  assert.deepEqual(selection.cases.map((item) => item.id), ['semantic']);
+  assert.deepEqual(identity.cases, [
+    { id: 'semantic', governance: SEMANTIC_CASE.governance },
+  ]);
   assert.equal(identity.caseCount, 1);
   assert.equal(identity.id, 'retrieval/semantic');
+});
+
+check('retrieval defaults to tuning and only explicit flags select holdout or full', () => {
+  const cases = [
+    HOLDOUT_RETRIEVAL_CASE,
+    SEMANTIC_CASE,
+    REGRESSION_RETRIEVAL_CASE,
+  ];
+  const tuning = selectRetrievalCases([], cases);
+  const holdout = selectRetrievalCases(['--holdout'], cases);
+  const full = selectRetrievalCases(['5', '--full'], cases);
+
+  assert.equal(tuning.scope, 'tuning');
+  assert.deepEqual(tuning.cases.map((item) => item.id), [
+    'semantic',
+    'regression-semantic',
+  ]);
+  assert.equal(holdout.scope, 'holdout');
+  assert.deepEqual(holdout.cases.map((item) => item.id), [
+    'holdout-semantic',
+  ]);
+  assert.equal(full.scope, 'full');
+  assert.equal(full.k, 5);
+  assert.deepEqual(full.cases.map((item) => item.id), [
+    'holdout-semantic',
+    'semantic',
+    'regression-semantic',
+  ]);
 });
 
 check('dataset hashes ignore case declaration order but change with semantics', () => {
@@ -174,23 +270,44 @@ check('dataset hashes ignore case declaration order but change with semantics', 
 
   assert.equal(ordered.hash, reversed.hash);
   assert.notEqual(ordered.hash, changed.hash);
+  assert.notEqual(
+    retrievalDatasetIdentity([
+      {
+        ...SEMANTIC_CASE,
+        governance: { ...SEMANTIC_CASE.governance, role: 'regression' },
+      },
+      second,
+    ]).hash,
+    ordered.hash,
+  );
 });
 
 check('faith selection includes explicit referenced and standalone cases', () => {
   const grounded = [GROUNDED_REFERENCE, STANDALONE_REFUSAL];
-  const full = selectFaithCases(undefined, grounded);
-  const smoke = selectFaithCases('1', grounded);
-  const prepared = prepareFaithDataset(full.cases, [SEMANTIC_CASE]);
-  const identity = faithDatasetIdentity(full.cases, [SEMANTIC_CASE]);
+  const full = selectFaithCases(['--full'], grounded, [SEMANTIC_CASE]);
+  const smoke = selectFaithCases(['1'], grounded, [SEMANTIC_CASE]);
+  const prepared = prepareFaithDataset(grounded, [SEMANTIC_CASE]);
+  const identity = full.identity;
 
   assert.equal(full.scope, 'full');
   assert.equal(smoke.scope, 'smoke');
-  assert.deepEqual(identity.caseIds, ['semantic', 'refusal']);
+  assert.deepEqual(identity.cases, [
+    { id: 'semantic', governance: SEMANTIC_CASE.governance },
+    { id: 'refusal', governance: STANDALONE_REFUSAL.governance },
+  ]);
   assert.deepEqual(prepared.identity, identity);
   assert.equal(prepared.cases[0]?.question, SEMANTIC_CASE.question);
   assert.deepEqual(
     prepared.cases[0]?.expectedChunkIds,
     SEMANTIC_CASE.expectedChunkIds,
+  );
+  assert.deepEqual(
+    prepared.cases[0]?.governance,
+    SEMANTIC_CASE.governance,
+  );
+  assert.deepEqual(
+    prepared.cases[1]?.governance,
+    STANDALONE_REFUSAL.governance,
   );
   assert.equal(prepared.cases[1]?.question, 'Unknown?');
   assert.equal(identity.id, 'faith/grounded-answer-selection');
@@ -199,7 +316,7 @@ check('faith selection includes explicit referenced and standalone cases', () =>
     retrievalDatasetIdentity([SEMANTIC_CASE]).hash,
   );
   assert.notEqual(
-    faithDatasetIdentity(full.cases, [
+    faithDatasetIdentity(grounded, [
       { ...SEMANTIC_CASE, question: 'Changed?' },
     ]).hash,
     identity.hash,
@@ -220,29 +337,203 @@ check('faith selection includes explicit referenced and standalone cases', () =>
     ).hash,
     identity.hash,
   );
+  assert.notEqual(
+    faithDatasetIdentity(grounded, [
+      {
+        ...SEMANTIC_CASE,
+        governance: { ...SEMANTIC_CASE.governance, role: 'regression' },
+      },
+    ]).hash,
+    identity.hash,
+  );
 });
 
-check('faith full, policy, and smoke select only grounded-answer cases', () => {
+check('validation-error faith identity snapshots the resolved real fixture', () => {
+  const fixCase = FIX_CASES.find(
+    (candidate) => candidate.id === 'fix-type-replicas',
+  )!;
+  const prepared = prepareFaithDataset(
+    [VALIDATION_ERROR_GROUNDED],
+    [],
+    [fixCase],
+  );
+  const resolved = prepared.cases[0]!;
+
+  assert.deepEqual(resolved.target, fixCase.target);
+  assert.equal(resolved.editorContext?.yaml, fixCase.brokenYaml);
+  assert.equal(resolved.editorContext?.kind, 'Deployment');
+  assert.ok((resolved.editorContext?.errors.length ?? 0) > 0);
+
+  const trace: FaithTrace = {
+    id: resolved.id,
+    governance: resolved.governance,
+    input: resolved.input,
+    question: resolved.question,
+    expectedBehavior: resolved.expectedBehavior,
+    sourceExpectation: resolved.sourceExpectation,
+    target: resolved.target,
+    editorContext: resolved.editorContext,
+    retrieval: {
+      expectedChunkIds: resolved.expectedChunkIds,
+      topIds: [],
+      foundCount: 0,
+      fullRecall: false,
+      queryExpansionConfig: {
+        enabled: false,
+        registryHash: null,
+        reviewedAliasCount: 0,
+      },
+    },
+    answer: '',
+    judgeAttempts: [],
+    verdict: null,
+    outcome: 'error',
+    errorPhase: 'retrieval',
+  };
+  assert.deepEqual(decodeFaithTrace(trace).editorContext, resolved.editorContext);
+  const { editorContext: _editorContext, ...withoutEditorContext } = trace;
+  assert.throws(
+    () => decodeFaithTrace(withoutEditorContext),
+    /validation-error.*editor context/i,
+  );
+  assert.equal(
+    faithTraceDatasetIdentity([trace]).hash,
+    prepared.identity.hash,
+  );
+  assert.notEqual(
+    faithDatasetIdentity(
+      [VALIDATION_ERROR_GROUNDED],
+      [],
+      [
+        {
+          ...fixCase,
+          brokenYaml: fixCase.brokenYaml.replace('replicas: "3"', 'replicas: "4"'),
+        },
+      ],
+    ).hash,
+    prepared.identity.hash,
+  );
+});
+
+check('grounded and persisted faith snapshots share governance identity', () => {
+  const prepared = prepareFaithDataset([GROUNDED_REFERENCE], [SEMANTIC_CASE]);
+  const trace: FaithTrace = {
+    id: SEMANTIC_CASE.id,
+    governance: SEMANTIC_CASE.governance,
+    input: GROUNDED_REFERENCE.input,
+    question: SEMANTIC_CASE.question,
+    expectedBehavior: GROUNDED_REFERENCE.expectedBehavior,
+    sourceExpectation: GROUNDED_REFERENCE.sourceExpectation,
+    target: SEMANTIC_CASE.target,
+    retrieval: {
+      expectedChunkIds: SEMANTIC_CASE.expectedChunkIds,
+      topIds: [],
+      foundCount: 0,
+      fullRecall: false,
+      queryExpansionConfig: {
+        enabled: false,
+        registryHash: null,
+        reviewedAliasCount: 0,
+      },
+    },
+    answer: '',
+    judgeAttempts: [],
+    verdict: null,
+    outcome: 'error',
+    errorPhase: 'retrieval',
+  };
+
+  assert.equal(faithTraceDatasetIdentity([trace]).hash, prepared.identity.hash);
+  assert.notEqual(
+    faithTraceDatasetIdentity([
+      {
+        ...trace,
+        governance: { ...trace.governance, role: 'regression' },
+      },
+    ]).hash,
+    prepared.identity.hash,
+  );
+});
+
+check('faith suite and diagnostic selections exclude holdout unless explicitly requested', () => {
   const grounded: GroundedAnswerCase[] = [
     GROUNDED_REFERENCE,
     {
       ...GROUNDED_REFERENCE,
       id: 'policy-semantic',
     },
+    GROUNDED_HOLDOUT_REFERENCE,
+    {
+      ...GROUNDED_HOLDOUT_REFERENCE,
+      id: 'policy-holdout-semantic',
+    },
     STANDALONE_REFUSAL,
   ];
+  const retrievalCases = [SEMANTIC_CASE, HOLDOUT_RETRIEVAL_CASE];
 
   assert.deepEqual(
-    selectFaithCases(undefined, grounded).cases.map((item) => item.id),
+    selectFaithCases([], grounded, retrievalCases).cases.map((item) => item.id),
     ['semantic', 'policy-semantic', 'refusal'],
   );
   assert.deepEqual(
-    selectFaithCases('--policy', grounded).cases.map((item) => item.id),
+    selectFaithCases(['--holdout'], grounded, retrievalCases).cases.map(
+      (item) => item.id,
+    ),
+    ['holdout-semantic', 'policy-holdout-semantic'],
+  );
+  assert.deepEqual(
+    selectFaithCases(['--full'], grounded, retrievalCases).cases.map(
+      (item) => item.id,
+    ),
+    [
+      'semantic',
+      'policy-semantic',
+      'holdout-semantic',
+      'policy-holdout-semantic',
+      'refusal',
+    ],
+  );
+  assert.deepEqual(
+    selectFaithCases(['--policy'], grounded, retrievalCases).cases.map(
+      (item) => item.id,
+    ),
     ['policy-semantic'],
   );
   assert.deepEqual(
-    selectFaithCases('1', grounded).cases.map((item) => item.id),
+    selectFaithCases(['1'], grounded, retrievalCases).cases.map(
+      (item) => item.id,
+    ),
     ['semantic', 'refusal'],
+  );
+  assert.throws(
+    () => selectFaithCases(['--holdout', '--policy'], grounded, retrievalCases),
+    /holdout.*policy|diagnostic.*suite|suite.*diagnostic/i,
+  );
+});
+
+check('generation and fix suite selection uses the shared role rules', () => {
+  const holdoutGeneration: GenerationEvalCase = {
+    ...GENERATION_CASE,
+    id: 'gen-holdout',
+    governance: { ...GENERATION_CASE.governance, role: 'holdout' },
+  };
+  const holdoutFix: FixCase = {
+    ...FIX_CASE,
+    id: 'fix-holdout',
+    governance: { ...FIX_CASE.governance, role: 'holdout' },
+  };
+
+  assert.deepEqual(
+    selectEvalSuiteCases([], [GENERATION_CASE, holdoutGeneration]).cases.map(
+      (item) => item.id,
+    ),
+    ['gen-1'],
+  );
+  assert.deepEqual(
+    selectEvalSuiteCases(['--holdout'], [FIX_CASE, holdoutFix]).cases.map(
+      (item) => item.id,
+    ),
+    ['fix-holdout'],
   );
 });
 
@@ -258,6 +549,13 @@ check('judge dataset hashes question/context/answer and human labels', () => {
       ...JUDGE_CASE,
       human: { ...JUDGE_CASE.human, faithful: false },
     },
+    {
+      ...JUDGE_CASE,
+      governance: {
+        ...JUDGE_CASE.governance,
+        role: 'regression' as const,
+      },
+    },
   ]) {
     assert.notEqual(judgeDatasetIdentity([changed]).hash, original.hash);
   }
@@ -265,6 +563,15 @@ check('judge dataset hashes question/context/answer and human labels', () => {
 
 check('generation and fix hashes cover their full expected contracts', () => {
   const generation = generationDatasetIdentity([GENERATION_CASE]);
+  assert.notEqual(
+    generationDatasetIdentity([
+      {
+        ...GENERATION_CASE,
+        governance: { ...GENERATION_CASE.governance, role: 'regression' },
+      },
+    ]).hash,
+    generation.hash,
+  );
   assert.notEqual(
     generationDatasetIdentity([
       {
@@ -283,6 +590,15 @@ check('generation and fix hashes cover their full expected contracts', () => {
   );
 
   const fix = fixDatasetIdentity([FIX_CASE]);
+  assert.notEqual(
+    fixDatasetIdentity([
+      {
+        ...FIX_CASE,
+        governance: { ...FIX_CASE.governance, role: 'regression' },
+      },
+    ]).hash,
+    fix.hash,
+  );
   assert.notEqual(
     fixDatasetIdentity([{ ...FIX_CASE, brokenYaml: 'changed' }]).hash,
     fix.hash,
@@ -316,8 +632,30 @@ check('faith and judge prompt hashes are derived from actual request inputs', ()
   assert.equal(
     faith.answerPromptHash,
     computeCanonicalHash({
-      system: ANSWER_SYSTEM,
-      request: { model: MODEL, maxTokens: TEXT_MAX_TOKENS },
+      system: ASK_SYSTEM,
+      userMessages: [
+        buildAskUserMessage({
+          question: '<question>',
+          context: '<docs>',
+          mode: 'free',
+        }),
+        buildAskUserMessage({
+          question: '<question>',
+          context: '<docs>',
+          mode: 'explain_error',
+          editorContext: {
+            yaml: '<current_yaml>',
+            kind: '<kind>',
+            apiVersion: '<apiVersion>',
+            cursorPath: '<cursorPath>',
+            selectedText: '<selectedText>',
+            errors: [
+              { path: '<error_path>', message: '<error_message>' },
+            ],
+          },
+        }),
+      ],
+      request: { model: ANSWER_MODEL, maxTokens: ASK_MAX_TOKENS },
     }),
   );
   const judgeHash = computeCanonicalHash({
@@ -326,6 +664,7 @@ check('faith and judge prompt hashes are derived from actual request inputs', ()
   });
   assert.equal(faith.judgePromptHash, judgeHash);
   assert.equal(faith.judgeAttemptLimit, FAITH_JUDGE_ATTEMPT_LIMIT);
+  assert.equal(faith.answerModel, ANSWER_MODEL);
   assert.equal(calibration.promptHash, judgeHash);
   assert.equal(
     calibration.parserSchemaIdentity,
@@ -393,7 +732,7 @@ check('generation/fix identities hash actual system, tool, and validation inputs
         SCHEMA_CORPUS_PROVIDER.manifest().manifestHash,
     }),
   );
-  assert.equal(VALIDATION_LOGIC_REVISION, 'schema-validator-v1');
+  assert.equal(VALIDATION_LOGIC_REVISION, 'schema-validator-v2');
 });
 
 check('retrieval payload preserves retrieval trace and rank diagnostics', () => {

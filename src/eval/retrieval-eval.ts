@@ -1,5 +1,7 @@
-// 用法: npm run eval        (k=3)
-//       npm run eval -- 5   (k=5)
+// 用法: npm run eval                       (tuning, k=3)
+//       npm run eval -- 5                  (tuning, k=5)
+//       npm run eval -- --holdout          (holdout, k=3)
+//       npm run eval -- 5 --full           (full, k=5)
 
 import { config } from 'dotenv';
 import { CORPUS } from '../knowledge/corpus';
@@ -10,7 +12,13 @@ import { toTraceHit, type RetrievalTrace } from '../retrieval/trace';
 import { retrievalMiss, upsertBadCases, type BadCase } from './bad-cases';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
 import type { TraceEnvelope } from './protocol';
+import type { EvalSuite } from './cases/governance';
 import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
+import {
+  buildGovernanceReport,
+  formatGovernanceReport,
+  type GovernanceDisplayMetric,
+} from './governance-report';
 import {
   buildRetrievalEvalTracePayload,
   harnessErrorMetrics,
@@ -19,6 +27,7 @@ import {
   retrievalExecutionError,
   retrievalEvalConfig,
   retrievalMetricsRecord,
+  type RetrievalMetricCounts,
   selectRetrievalCases,
   toPersistedPayload,
 } from './runner-protocol';
@@ -30,26 +39,14 @@ import {
   executeEvalRunStage,
   failEvalRunSession,
   startEvalRun,
+  type EvalHarnessError,
   type EvalRunSession,
 } from './run-session';
 
-interface Result {
-  recallNumerator: number;
-  mrrNumerator: number;
-  caseCount: number;
-}
-
-function result(recallNumerator: number, mrrNumerator: number, n: number): Result {
-  return {
-    recallNumerator,
-    mrrNumerator,
-    caseCount: n,
-  };
-}
-
-interface SemanticResult extends Result {
+interface SemanticResult {
+  caseResults: SemanticCaseResult[];
   misses: BadCase[];
-  harnessErrorCount: number;
+  harnessErrors: EvalHarnessError[];
 }
 
 interface SemanticCaseResult {
@@ -60,15 +57,58 @@ interface SemanticCaseResult {
     'retrieval',
     ReturnType<typeof buildRetrievalEvalTracePayload>
   >;
+  miss?: BadCase;
+}
+
+function retrievalMetricCounts(
+  results: readonly SemanticCaseResult[],
+): RetrievalMetricCounts {
+  return {
+    recallNumerator: results.reduce(
+      (sum, value) => sum + value.payload.ranking.recall,
+      0,
+    ),
+    mrrNumerator: results.reduce(
+      (sum, value) => sum + value.payload.ranking.reciprocalRank,
+      0,
+    ),
+    caseCount: results.length,
+    retrievalMissCount: results.filter(
+      (value) => value.miss?.failure.type === 'retrieval_miss',
+    ).length,
+    rerankMissCount: results.filter(
+      (value) => value.miss?.failure.type === 'rerank_miss',
+    ).length,
+  };
+}
+
+function retrievalGovernanceMetrics(
+  results: readonly SemanticCaseResult[],
+  k: number,
+): GovernanceDisplayMetric[] {
+  const metrics = retrievalMetricsRecord(retrievalMetricCounts(results));
+  return [
+    {
+      label: `Recall@${k}`,
+      unit: 'ratio',
+      observation: metrics['retrieval.semantic.recall'],
+    },
+    {
+      label: `MRR@${k}`,
+      unit: 'ratio',
+      observation: metrics['retrieval.semantic.mrr'],
+    },
+  ];
 }
 
 async function evaluateSemanticSearch(params: {
   cases: readonly SemanticRetrievalCase[];
   k: number;
+  scope: EvalSuite;
   runId: string;
   session: EvalRunSession;
 }): Promise<SemanticResult> {
-  const { cases, k, runId, session } = params;
+  const { cases, k, scope, runId, session } = params;
   const batch = await executeEvalCases({
     cases,
     evaluate: async (evalCase): Promise<SemanticCaseResult> => {
@@ -111,6 +151,7 @@ async function evaluateSemanticSearch(params: {
           const envelope = createTraceEnvelope({
             runId,
             evalCaseId: evalCase.id,
+            governance: evalCase.governance,
             kind: 'retrieval',
             outcome: payload.ranking.recall === 1 ? 'success' : 'failed',
             payload,
@@ -126,6 +167,7 @@ async function evaluateSemanticSearch(params: {
         createErrorTraceEnvelope({
           runId,
           evalCaseId: evalCase.id,
+          governance: evalCase.governance,
           kind: 'retrieval',
           payload:
             failure.payload ?? {
@@ -138,33 +180,31 @@ async function evaluateSemanticSearch(params: {
     },
   });
 
-  let recallSum = 0;
-  let mrrSum = 0;
-  const misses: BadCase[] = [];
-  for (const value of batch.results) {
-    recallSum += value.payload.ranking.recall;
-    mrrSum += value.payload.ranking.reciprocalRank;
-    if (value.payload.ranking.recall < 1) {
-      misses.push(
-        retrievalMiss({
-          evalCaseId: value.evalCase.id,
-          runId,
-          traceId: value.envelope.traceId,
-          question: value.evalCase.question,
-          resource: value.evalCase.target.kind,
-          expectedChunkIds: value.evalCase.expectedChunkIds,
-          actualTopIds: value.payload.ranking.topKIds,
-          rankedIds: value.rankedIds,
-          k,
-        }),
-      );
-    }
-  }
+  const caseResults = batch.results.map((value): SemanticCaseResult => {
+    if (value.payload.ranking.recall === 1) return value;
+    return {
+      ...value,
+      miss: retrievalMiss({
+        evalCaseId: value.evalCase.id,
+        runId,
+        traceId: value.envelope.traceId,
+        question: value.evalCase.question,
+        resource: value.evalCase.target.kind,
+        expectedChunkIds: value.evalCase.expectedChunkIds,
+        actualTopIds: value.payload.ranking.topKIds,
+        rankedIds: value.rankedIds,
+        k,
+        scope,
+      }),
+    };
+  });
 
   return {
-    ...result(recallSum, mrrSum, batch.results.length),
-    misses,
-    harnessErrorCount: batch.harnessErrors.length,
+    caseResults,
+    misses: caseResults.flatMap((value) =>
+      value.miss === undefined ? [] : [value.miss],
+    ),
+    harnessErrors: batch.harnessErrors,
   };
 }
 
@@ -177,22 +217,21 @@ function formatMrr(value: number | null): string {
 }
 
 async function main(): Promise<void> {
-  const k = Number(process.argv[2]) || 3;
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
   const setup = await executeEvalRunStage('dataset_preflight', () => {
-    const cases = selectRetrievalCases();
+    const selection = selectRetrievalCases(process.argv.slice(2));
     return {
-      cases,
-      dataset: retrievalDatasetIdentity(cases),
-      config: retrievalEvalConfig(k),
+      selection,
+      dataset: retrievalDatasetIdentity(selection.cases),
+      config: retrievalEvalConfig(selection.k),
     };
   });
-  const { cases } = setup;
+  const { cases, k, scope } = setup.selection;
   const session = await executeEvalRunStage('artifact_write', () =>
     startEvalRun({
       id: runId,
       kind: 'retrieval',
-      scope: 'full',
+      scope,
       dataset: setup.dataset,
       metricDefinitionVersion: METRIC_DEFINITION_VERSION,
       config: setup.config,
@@ -204,22 +243,19 @@ async function main(): Promise<void> {
 
   try {
     console.error(
-      `评估(k=${k},语料 ${CORPUS.length} 段,语义检索标注 ${cases.length} 条)\n`,
+      `评估(scope=${scope},k=${k},语料 ${CORPUS.length} 段,语义检索标注 ${cases.length} 条)\n`,
     );
-    semantic = await evaluateSemanticSearch({ cases, k, runId, session });
+    semantic = await evaluateSemanticSearch({
+      cases,
+      k,
+      scope,
+      runId,
+      session,
+    });
+    const retrievalCounts = retrievalMetricCounts(semantic.caseResults);
     const metrics = await executeEvalRunStage('metric_aggregation', () => ({
-      ...retrievalMetricsRecord({
-        recallNumerator: semantic.recallNumerator,
-        mrrNumerator: semantic.mrrNumerator,
-        caseCount: semantic.caseCount,
-        retrievalMissCount: semantic.misses.filter(
-          (miss) => miss.failure.type === 'retrieval_miss',
-        ).length,
-        rerankMissCount: semantic.misses.filter(
-          (miss) => miss.failure.type === 'rerank_miss',
-        ).length,
-      }),
-      ...harnessErrorMetrics('retrieval', semantic.harnessErrorCount),
+      ...retrievalMetricsRecord(retrievalCounts),
+      ...harnessErrorMetrics('retrieval', semantic.harnessErrors.length),
     }));
 
     console.error('━━━━━━ 语义检索汇总 ━━━━━━');
@@ -227,10 +263,21 @@ async function main(): Promise<void> {
       `Recall@${k}=${formatRate(metrics['retrieval.semantic.recall'].value)}  MRR@${k}=${formatMrr(metrics['retrieval.semantic.mrr'].value)}`,
     );
     console.error(
-      `quality fail=${semantic.misses.length} 条；skipped=0 条；harness error=${semantic.harnessErrorCount} 条；质量分母=${semantic.caseCount}/${cases.length}`,
+      `quality fail=${semantic.misses.length} 条；skipped=0 条；harness error=${semantic.harnessErrors.length} 条；质量分母=${retrievalCounts.caseCount}/${cases.length}`,
     );
     console.error(
       'EditorContext exact-field 分流由独立确定性测试覆盖。',
+    );
+    console.error(
+      formatGovernanceReport(
+        buildGovernanceReport({
+          cases,
+          results: semantic.caseResults,
+          harnessErrors: semantic.harnessErrors,
+          resultCaseId: (value) => value.evalCase.id,
+          aggregate: (values) => retrievalGovernanceMetrics(values, k),
+        }),
+      ),
     );
 
     added = await executeEvalRunStage('artifact_write', () =>

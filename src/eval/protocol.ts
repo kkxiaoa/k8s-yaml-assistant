@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { canonicalHash, canonicalJson, type JsonValue } from '../shared/json';
 import {
-  canonicalHash,
-  canonicalJson,
-  type JsonValue,
-} from '../shared/json';
+  EvalCaseGovernanceSchema,
+  type EvalCaseGovernance,
+} from './cases/governance';
 
 export type { JsonValue } from '../shared/json';
 
-export const EVAL_SCHEMA_VERSION = 1 as const;
+export const EVAL_SCHEMA_VERSION = 2 as const;
 
 const NonEmptyStringSchema = z
   .string()
@@ -34,6 +34,8 @@ export const EvalKindSchema = z.enum([
 ]);
 
 export const EvalScopeSchema = z.enum([
+  'tuning',
+  'holdout',
   'full',
   'policy',
   'smoke',
@@ -157,26 +159,36 @@ export function ratioObservation(
   );
 }
 
+export const EvalDatasetCaseIdentitySchema = z.strictObject({
+  id: NonEmptyStringSchema,
+  governance: EvalCaseGovernanceSchema,
+});
+
+export type EvalDatasetCaseIdentity = z.infer<
+  typeof EvalDatasetCaseIdentitySchema
+>;
+
 export const EvalDatasetIdentitySchema = z
   .strictObject({
     id: NonEmptyStringSchema,
     hash: Sha256Schema,
-    caseIds: z.array(NonEmptyStringSchema),
+    cases: z.array(EvalDatasetCaseIdentitySchema),
     caseCount: NonNegativeIntegerSchema,
   })
   .superRefine((dataset, context) => {
-    if (new Set(dataset.caseIds).size !== dataset.caseIds.length) {
+    const caseIds = dataset.cases.map((evalCase) => evalCase.id);
+    if (new Set(caseIds).size !== caseIds.length) {
       context.addIssue({
         code: 'custom',
-        path: ['caseIds'],
-        message: 'caseIds must be unique',
+        path: ['cases'],
+        message: 'dataset case IDs must be unique',
       });
     }
-    if (dataset.caseCount !== dataset.caseIds.length) {
+    if (dataset.caseCount !== dataset.cases.length) {
       context.addIssue({
         code: 'custom',
         path: ['caseCount'],
-        message: 'caseCount must equal caseIds length',
+        message: 'caseCount must equal cases length',
       });
     }
   });
@@ -420,6 +432,7 @@ export const TraceEnvelopeSchema = z
     traceId: NonEmptyStringSchema,
     runId: NonEmptyStringSchema,
     evalCaseId: NonEmptyStringSchema,
+    governance: EvalCaseGovernanceSchema,
     kind: EvalKindSchema,
     createdAt: IsoDateTimeSchema,
     outcome: z.enum(['success', 'failed', 'error', 'skipped']),
@@ -457,6 +470,8 @@ export type TraceEnvelope<
   payload: TPayload;
 };
 
+export type { EvalCaseGovernance };
+
 export function decodeEvalRun(value: unknown): EvalRun {
   return EvalRunSchema.parse(value);
 }
@@ -477,9 +492,7 @@ export function computeDatasetHash(
   canonicalCaseSnapshots: readonly unknown[],
 ): string {
   const serializedCases = canonicalCaseSnapshots
-    .map((snapshot, index) =>
-      canonicalJson(snapshot, `case[${index}]`),
-    )
+    .map((snapshot, index) => canonicalJson(snapshot, `case[${index}]`))
     .sort();
 
   // Only case declaration order is set-like; nested array order remains semantic.

@@ -1,8 +1,8 @@
 # Eval Artifact Protocol 实施计划
 
-> 状态：已实施并完成 review。
+> 状态：已实施并完成逐 Task（任务）审核。
 > 对应设计：`docs/superpowers/specs/2026-07-12-eval-artifact-protocol-design.md`。
-> 顺序：纠偏计划 1/4，已完成；后续执行 Knowledge Provenance/Corpus Identity。
+> 顺序：纠偏计划 1/4；四份纠偏计划均已完成。
 
 ## Goal
 

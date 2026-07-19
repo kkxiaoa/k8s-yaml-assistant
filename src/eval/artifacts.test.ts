@@ -36,6 +36,12 @@ function check(name: string, fn: () => void): void {
 
 console.log('eval-artifacts:');
 
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
+
 function traceFixture(
   traceId = 'trace-1',
   evalCaseId = 'case-1',
@@ -45,6 +51,7 @@ function traceFixture(
     traceId,
     runId: 'run-1',
     evalCaseId,
+    governance: GOVERNANCE,
     kind: 'faith',
     createdAt: '2026-07-12T01:00:00.000Z',
     outcome: 'success',

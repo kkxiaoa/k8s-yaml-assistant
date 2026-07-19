@@ -89,6 +89,8 @@ function searchTrace(question: string, chunkId: string) {
     score: 0.9,
   };
   return {
+    question,
+    mode: 'free' as const,
     queryText: question,
     queryExpansion: {
       enabled: false,
@@ -98,10 +100,13 @@ function searchTrace(question: string, chunkId: string) {
       matchedAliases: [],
       expansionTerms: [],
     },
+    path: 'search' as const,
     coarseHits: [hit],
     rerankHits: [hit],
+    finalHits: [hit],
     latencyMs: { total: 1 },
     cache: { index: { status: 'hit' as const }, embeddingHit: false },
+    createdAt: '2026-07-12T00:00:00.000Z',
   };
 }
 
@@ -114,17 +119,25 @@ const QUERY_EXPANSION_CONFIG = {
 const MINI_RETRIEVAL_CASES: SemanticRetrievalCase[] = [
   {
     id: 'case-a',
+    governance: {
+      task: 'field_explanation',
+      origin: 'human',
+      role: 'development',
+    },
     question: '问题 A',
     expectedChunkIds: ['Chunk::a'],
     target: { kind: 'Pod' },
-    source: 'human',
   },
   {
     id: 'case-b',
+    governance: {
+      task: 'field_explanation',
+      origin: 'human',
+      role: 'development',
+    },
     question: '问题 B',
     expectedChunkIds: ['Chunk::b'],
     target: { kind: 'Deployment' },
-    source: 'human',
   },
 ];
 
@@ -193,6 +206,7 @@ function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
   const resolved = resolveGroundedAnswerCase(evalCase, MINI_RETRIEVAL_CASES);
   return {
     id: evalCase.id,
+    governance: resolved.governance,
     input: evalCase.input,
     question: resolved.question,
     expectedBehavior: evalCase.expectedBehavior,
@@ -252,6 +266,7 @@ function writeInput(params: {
         ? createErrorTraceEnvelope({
             runId: run.id,
             evalCaseId: trace.id,
+            governance: trace.governance,
             kind: 'faith',
             payload: trace,
             stage: 'answer_model',
@@ -260,6 +275,7 @@ function writeInput(params: {
         : createTraceEnvelope({
             runId: run.id,
             evalCaseId: trace.id,
+            governance: trace.governance,
             kind: 'faith',
             outcome: faithEnvelopeOutcome(trace),
             payload: trace,
@@ -276,6 +292,13 @@ function trace(
 ): FaithTrace {
   const isRefusal =
     outcome === 'refused_correctly' || outcome === 'refused_wrong';
+  const governance = isRefusal
+    ? {
+        task: 'refusal' as const,
+        origin: 'human' as const,
+        role: 'development' as const,
+      }
+    : MINI_RETRIEVAL_CASES[0]!.governance;
   const judgedVerdict =
     outcome === 'judge_failed' || outcome === 'error'
       ? null
@@ -330,6 +353,7 @@ function trace(
     outcome,
     ...(outcome === 'error' ? { errorPhase: 'answer_model' } : {}),
     ...overrides,
+    governance: overrides.governance ?? governance,
   };
 }
 
@@ -492,6 +516,7 @@ check('rejects payload/envelope identity mismatch', () => {
       createTraceEnvelope({
         runId: run.id,
         evalCaseId: 'case-a',
+        governance: MINI_RETRIEVAL_CASES[0]!.governance,
         kind: 'faith',
         outcome: 'success',
         payload: inputTrace('case-b'),
@@ -505,6 +530,36 @@ check('rejects payload/envelope identity mismatch', () => {
           evalRoot,
         }),
       /faith payload id mismatch/,
+    );
+  });
+});
+
+check('rejects payload governance that differs from the envelope', () => {
+  withEvalRoot((evalRoot) => {
+    const run = faithRun({
+      id: 'governance-mismatch',
+      cases: [MINI_GROUNDED_CASES[0]!],
+    });
+    writeJsonAtomic(runPath(run.id, evalRoot), run);
+    const payload = inputTrace('case-a');
+    appendTraceEnvelope(
+      evalArtifactPath(run.artifactPaths.trace, evalRoot),
+      createTraceEnvelope({
+        runId: run.id,
+        evalCaseId: payload.id,
+        governance: MINI_RETRIEVAL_CASES[0]!.governance,
+        kind: 'faith',
+        outcome: 'success',
+        payload: {
+          ...payload,
+          governance: { ...payload.governance, role: 'regression' },
+        },
+      }),
+    );
+
+    assert.throws(
+      () => readFaithBadCaseInput({ runId: run.id, evalRoot }),
+      /governance mismatch/i,
     );
   });
 });
@@ -527,7 +582,7 @@ check('rejects run dataset identity that disagrees with trace snapshots', () => 
           runId: 'run-1',
           evalRoot,
         }),
-      /dataset hash mismatch/,
+      /dataset identity mismatch/,
     );
   });
 });
@@ -551,6 +606,7 @@ check('rejects legacy faith payloads without captured context/search snapshots',
       createTraceEnvelope({
         runId: run.id,
         evalCaseId: current.id,
+        governance: current.governance,
         kind: 'faith',
         outcome: 'success',
         payload: { ...rest, retrieval: legacyRetrieval },
@@ -655,6 +711,37 @@ check('maps faithful, hallucination, refusal, judge, and runtime outcomes', () =
     );
     assert.equal(candidate.action, action, outcome);
   }
+});
+
+check('full and holdout runs never turn holdout traces into bad-case candidates', () => {
+  const holdoutTrace = trace('hallucination', {
+    governance: {
+      task: 'field_explanation',
+      origin: 'human',
+      role: 'holdout',
+    },
+  });
+
+  assert.deepEqual(
+    buildFaithBadCaseCandidates({
+      observations: [observation(holdoutTrace)],
+      existingBadCases: [],
+      run: RUN,
+      scope: 'full',
+      now: '2026-07-10T00:00:00.000Z',
+    }),
+    [],
+  );
+  assert.deepEqual(
+    buildFaithBadCaseCandidates({
+      observations: [observation(holdoutTrace)],
+      existingBadCases: [],
+      run: { ...RUN, scope: 'holdout' },
+      scope: 'holdout',
+      now: '2026-07-10T00:00:00.000Z',
+    }),
+    [],
+  );
 });
 
 check('links dual-cause evidence to an existing retrieval issue', () => {

@@ -1,14 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import {
-  appendFileSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import {
-  basename,
   dirname,
   isAbsolute,
   join,
@@ -24,6 +15,7 @@ import {
   type EvalKind,
   type TraceEnvelope,
 } from './protocol';
+export { writeJsonAtomic } from '../shared/json';
 
 const SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const WINDOWS_DRIVE_PREFIX = /^[A-Za-z]:/;
@@ -95,30 +87,6 @@ export function baselinePath(
 ): string {
   assertEvalKind(kind);
   return evalArtifactPath(`baselines/${kind}.json`, evalRoot);
-}
-
-export function writeJsonAtomic(path: string, value: unknown): void {
-  const serialized = JSON.stringify(value, null, 2);
-  if (serialized === undefined) {
-    throw new TypeError('value is not JSON-serializable');
-  }
-
-  const directory = dirname(path);
-  mkdirSync(directory, { recursive: true });
-  const tempPath = join(
-    directory,
-    `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`,
-  );
-
-  try {
-    writeFileSync(tempPath, `${serialized}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
-    renameSync(tempPath, path);
-  } finally {
-    rmSync(tempPath, { force: true });
-  }
 }
 
 export function appendTraceEnvelope(

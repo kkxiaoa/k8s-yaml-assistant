@@ -36,6 +36,11 @@ function check(name: string, fn: () => void): void {
 
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
 
 function runFixture(
   id: string,
@@ -52,7 +57,7 @@ function runFixture(
     dataset: {
       id: 'retrieval/semantic',
       hash: HASH_A,
-      caseIds: ['case-1'],
+      cases: [{ id: 'case-1', governance: GOVERNANCE }],
       caseCount: 1,
     },
     artifactPaths: { trace: `traces/${id}.retrieval.jsonl` },

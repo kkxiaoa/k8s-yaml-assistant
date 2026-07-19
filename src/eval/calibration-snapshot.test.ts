@@ -3,7 +3,13 @@ import {
   buildJudgeCalibrationCaseFromFaith,
   type JudgeCalibrationLabel,
 } from './calibration-snapshot';
-import type { FaithTrace } from './faith-store';
+import { decodeFaithTrace, type FaithTrace } from './faith-store';
+
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
 
 const SNAPSHOT_CHUNK = {
   id: 'Chunk::actual',
@@ -37,6 +43,7 @@ const SNAPSHOT_CONTEXT = {
 
 const BASE_TRACE: FaithTrace = {
   id: 'case-1',
+  governance: GOVERNANCE,
   input: { kind: 'retrieval_case', retrievalCaseId: 'case-1' },
   question: 'question',
   expectedBehavior: 'answer_with_sources',
@@ -53,6 +60,8 @@ const BASE_TRACE: FaithTrace = {
       reviewedAliasCount: 0,
     },
     searchTrace: {
+      question: 'question',
+      mode: 'free',
       queryText: 'question',
       queryExpansion: {
         enabled: false,
@@ -62,10 +71,13 @@ const BASE_TRACE: FaithTrace = {
         matchedAliases: [],
         expansionTerms: [],
       },
+      path: 'search',
       coarseHits: [SNAPSHOT_HIT],
       rerankHits: [SNAPSHOT_HIT],
+      finalHits: [SNAPSHOT_HIT],
       latencyMs: { total: 1 },
       cache: { index: { status: 'hit' }, embeddingHit: false },
+      createdAt: '2026-07-12T00:00:00.000Z',
     },
   },
   answer: 'answer',
@@ -95,6 +107,12 @@ const LABEL = {
   human: { faithful: false, note: 'human label' },
 } satisfies JudgeCalibrationLabel;
 
+const { governance: _governance, ...TRACE_WITHOUT_GOVERNANCE } = BASE_TRACE;
+assert.throws(
+  () => decodeFaithTrace(TRACE_WITHOUT_GOVERNANCE),
+  /governance/i,
+);
+
 assert.throws(
   () =>
     buildJudgeCalibrationCaseFromFaith({
@@ -115,6 +133,7 @@ const calibrationCase = buildJudgeCalibrationCaseFromFaith({
 
 assert.deepEqual(calibrationCase, {
   id: LABEL.id,
+  governance: GOVERNANCE,
   category: LABEL.category,
   question: BASE_TRACE.question,
   context: SNAPSHOT_CONTEXT.text,
@@ -158,4 +177,4 @@ assert.throws(
   /missing answer snapshot/i,
 );
 
-console.log('calibration-snapshot: 5 checks passed');
+console.log('calibration-snapshot: 6 checks passed');

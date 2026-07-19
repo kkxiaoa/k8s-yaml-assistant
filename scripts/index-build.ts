@@ -1,5 +1,5 @@
-// §4.3 3b:构建并持久化全量 CORPUS 索引。唯一花 Voyage 额度的一步(嵌入 CORPUS.length 条)。
-// 产出 data/index/{manifest.json, chunks.jsonl, embeddings.f32};之后 eval/serving 只嵌 query。
+// 构建并持久化全量 CORPUS 索引。索引身份命中时跳过；失效时调用 Voyage 嵌入全量语料。
+// 默认写入 data/index/{manifest.json, chunks.jsonl, embeddings.f32}，INDEX_DIR 可改写目录。
 // 用法:npm run index:build
 
 import { config } from 'dotenv';

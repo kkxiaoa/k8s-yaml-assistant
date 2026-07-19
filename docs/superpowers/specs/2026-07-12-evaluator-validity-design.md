@@ -1,6 +1,6 @@
 # Evaluator Validity 纠偏设计
 
-> 状态：已自审，对应 implementation plan 已落盘，待执行。
+> 状态：已实施；对应实施计划已完成逐 Task（任务）审核。
 > 用途：定义 retrieval、faith、judge、generation、fix 的单 case 判定有效性；不负责 artifact 路径和通用指标比较。
 > 对应计划：`docs/superpowers/plans/2026-07-12-evaluator-validity.md`。
 > 顺序：第三项实施。依赖 Artifact Protocol 和最终 knowledge identity，产出 Metric Semantics 所需的稳定指标集合。

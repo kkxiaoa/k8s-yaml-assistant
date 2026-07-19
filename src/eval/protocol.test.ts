@@ -41,6 +41,15 @@ const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
 const HASH_D = 'd'.repeat(64);
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
+
+function datasetCases(...ids: string[]) {
+  return ids.map((id) => ({ id, governance: GOVERNANCE }));
+}
 
 const RETRIEVAL_CONFIG = {
   corpusContentHash: HASH_A,
@@ -104,7 +113,7 @@ function runFixture(
     dataset: {
       id: `${kind}-cases`,
       hash: HASH_A,
-      caseIds: ['case-a', 'case-b'],
+      cases: datasetCases('case-a', 'case-b'),
       caseCount: 2,
     },
     artifactPaths: { trace: `traces/run-${kind}.${kind}.jsonl` },
@@ -140,6 +149,7 @@ function traceFixture(): Record<string, unknown> {
     traceId: 'trace-1',
     runId: 'run-retrieval',
     evalCaseId: 'case-a',
+    governance: GOVERNANCE,
     kind: 'retrieval',
     createdAt: CREATED_AT,
     outcome: 'success',
@@ -184,30 +194,41 @@ check('EvalRun rejects every required common field when absent', () => {
   assert.throws(() => decodeEvalRun(withoutTrace), 'artifactPaths.trace');
 });
 
-check('dataset identity rejects duplicate case IDs and a mismatched count', () => {
+check('dataset identity requires governance and rejects duplicate IDs or count mismatch', () => {
   const missingHash = {
     ...runFixture(),
     dataset: omit(runFixture().dataset as Record<string, unknown>, 'hash'),
   };
   assert.throws(() => decodeEvalRun(missingHash), 'missing dataset hash');
 
+  const missingGovernance = {
+    ...runFixture(),
+    dataset: {
+      id: 'retrieval-cases',
+      hash: HASH_A,
+      cases: [{ id: 'case-a' }],
+      caseCount: 1,
+    },
+  };
+  assert.throws(() => decodeEvalRun(missingGovernance), 'missing governance');
+
   const duplicateIds = {
     ...runFixture(),
     dataset: {
       id: 'retrieval-cases',
       hash: HASH_A,
-      caseIds: ['case-a', 'case-a'],
+      cases: datasetCases('case-a', 'case-a'),
       caseCount: 2,
     },
   };
-  assert.throws(() => decodeEvalRun(duplicateIds), 'duplicate caseIds');
+  assert.throws(() => decodeEvalRun(duplicateIds), 'duplicate case IDs');
 
   const wrongCount = {
     ...runFixture(),
     dataset: {
       id: 'retrieval-cases',
       hash: HASH_A,
-      caseIds: ['case-a', 'case-b'],
+      cases: datasetCases('case-a', 'case-b'),
       caseCount: 1,
     },
   };
@@ -243,6 +264,18 @@ check('dataset hash changes when case semantics change but IDs do not', () => {
     ]),
     computeDatasetHash(pathsReordered),
   );
+});
+
+check('dataset hash changes when only the governance role changes', () => {
+  const before = [{ id: 'a', question: 'question', governance: GOVERNANCE }];
+  const after = [
+    {
+      ...before[0],
+      governance: { ...GOVERNANCE, role: 'regression' as const },
+    },
+  ];
+
+  assert.notEqual(computeDatasetHash(before), computeDatasetHash(after));
 });
 
 check('dataset hash rejects values that stable JSON cannot preserve', () => {
@@ -378,7 +411,8 @@ check('zero denominator has exactly the 0/0 => null structure', () => {
 });
 
 check('run schema version and timestamps are validated', () => {
-  assert.throws(() => decodeEvalRun({ ...runFixture(), schemaVersion: 2 }));
+  assert.equal(EVAL_SCHEMA_VERSION, 2);
+  assert.throws(() => decodeEvalRun({ ...runFixture(), schemaVersion: 1 }));
   assert.throws(() => decodeEvalRun({ ...runFixture(), createdAt: 'yesterday' }));
   assert.throws(() =>
     decodeEvalRun({ ...runFixture(), completedAt: '2026-02-30T00:00:00Z' }),
@@ -452,7 +486,7 @@ check('baseline is portable and rejects every run artifact field', () => {
     decodeEvalBaseline({ ...baselineFixture(), status: 'completed' }),
   );
   assert.throws(() =>
-    decodeEvalBaseline({ ...baselineFixture(), schemaVersion: 2 }),
+    decodeEvalBaseline({ ...baselineFixture(), schemaVersion: 1 }),
   );
   assert.throws(() =>
     decodeEvalBaseline({ ...baselineFixture(), promotedAt: 'tomorrow' }),
@@ -476,6 +510,7 @@ check('TraceEnvelope requires all identity, outcome, and payload fields', () => 
     'traceId',
     'runId',
     'evalCaseId',
+    'governance',
     'kind',
     'createdAt',
     'outcome',
@@ -490,7 +525,7 @@ check('TraceEnvelope requires all identity, outcome, and payload fields', () => 
 
 check('TraceEnvelope validates schema version and timestamp', () => {
   assert.throws(() =>
-    decodeTraceEnvelope({ ...traceFixture(), schemaVersion: 2 }),
+    decodeTraceEnvelope({ ...traceFixture(), schemaVersion: 1 }),
   );
   assert.throws(() =>
     decodeTraceEnvelope({ ...traceFixture(), createdAt: 'not-an-instant' }),

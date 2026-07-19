@@ -1,4 +1,4 @@
-// A2:voyage-3 vs voyage-4 A/B。对真实 bad-case + policy conflict 统计 Recall/MRR。
+// 对比 voyage-3 与 voyage-4 在 retrieval bad cases 和 policy conflict cases 上的 Recall/MRR。
 // 前置:VOYAGE_EMBEDDING_MODEL=voyage-4 INDEX_DIR=data/index-ab npm run index:build
 // 用法:npm run voyage:ab
 

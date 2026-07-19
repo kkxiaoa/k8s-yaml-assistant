@@ -1,18 +1,24 @@
 // 生成层评估:Faithfulness(忠于检索 context / 防幻觉)。Stage 5(§7.2)。
-// 用法: npm run eval:faith             全量
+// 用法: npm run eval:faith             tuning 套件
+//       npm run eval:faith -- --holdout Holdout 留出集
+//       npm run eval:faith -- --full    完整集
 //       npm run eval:faith -- 2        冒烟:检索引用/独立拒答各前 2 条
-//       npm run eval:faith -- --policy 只跑 Stage 6 policy 用例
+//       npm run eval:faith -- --policy 只跑非 Holdout policy 用例
 
 import { config } from 'dotenv';
 import type Anthropic from '@anthropic-ai/sdk';
-import { searchCorpusTraced } from '../retrieval/retrieve';
-import { formatSources, selectContextHits } from '../retrieval/sources';
 import { inferResource } from '../retrieval/router';
+import {
+  ANSWER_MODEL,
+  prepareAsk,
+  type AskMode,
+} from '../server/pipeline';
 import { judge, JUDGE_MODEL } from './judge';
 import type { JudgeAttempt } from './judge-votes';
-import { MODEL, generateAnswer } from './answer';
+import { textOfRequest } from './llm';
 import {
   evaluateSourceExpectation,
+  groundedAnswerAskMode,
   type ResolvedGroundedAnswerCase,
 } from './cases/grounded-answer-cases';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
@@ -28,16 +34,21 @@ import {
 import type { FaithEvalConfig } from './protocol';
 import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
 import {
+  buildGovernanceReport,
+  formatGovernanceReport,
+  type GovernanceDisplayMetric,
+} from './governance-report';
+import {
   FAITH_CONTEXT_K,
   faithMetricsRecord,
   faithEnvelopeOutcome,
   faithEvalConfig,
   harnessErrorMetrics,
   isDirectExecution,
-  prepareFaithDataset,
   retrievalExecutionError,
   selectFaithCases,
   toPersistedPayload,
+  type FaithMetricCounts,
 } from './runner-protocol';
 import {
   EvalRunExecutionError,
@@ -84,12 +95,14 @@ function errorTrace(params: FaithErrorTraceInput): FaithTrace {
   return decodeFaithTrace(
     toPersistedPayload({
       id: resolved.id,
+      governance: resolved.governance,
       input: resolved.input,
       question: resolved.question,
       expectedBehavior: resolved.expectedBehavior,
       sourceExpectation: resolved.sourceExpectation,
       sourceCoverage: context === undefined ? undefined : sourceCoverage,
       target: resolved.target,
+      editorContext: resolved.editorContext,
       context,
       retrieval: {
         routed,
@@ -118,26 +131,36 @@ async function processCase(
 ): Promise<FaithTrace> {
   const isRefusal =
     resolved.expectedBehavior === 'refuse_insufficient_context';
-  const routed = inferResource(resolved.question) ?? undefined;
-  let hits: Awaited<ReturnType<typeof searchCorpusTraced>>['hits'];
-  let rawSearchTrace: Awaited<ReturnType<typeof searchCorpusTraced>>['trace'];
+  const mode: AskMode = groundedAnswerAskMode(resolved.input);
+  let prepared: Awaited<ReturnType<typeof prepareAsk>>;
   try {
-    ({ hits, trace: rawSearchTrace } = await searchCorpusTraced(
-      resolved.question,
-      {
-        boostResource: routed,
+    prepared = await prepareAsk({
+      question: resolved.question,
+      k: runConfig.k,
+      editorContext: resolved.editorContext,
+      mode,
+      retrievalOptions: {
         queryExpansion: runConfig.queryExpansion.enabled,
       },
-    ));
+    });
   } catch (error) {
     throw retrievalExecutionError(error, (phase) =>
-      ({ resolved, runConfig, phase, routed } satisfies FaithErrorTraceInput),
+      ({
+        resolved,
+        runConfig,
+        phase,
+        routed:
+          resolved.editorContext?.kind ??
+          inferResource(resolved.question) ??
+          undefined,
+      } satisfies FaithErrorTraceInput),
     );
   }
 
+  const routed = prepared.trace.resourceHint;
   const searchTrace = await executeEvalCaseStage(
     'trace_payload',
-    () => FaithSearchTraceSchema.parse(rawSearchTrace),
+    () => FaithSearchTraceSchema.parse(prepared.trace),
     {
       resolved,
       runConfig,
@@ -148,22 +171,22 @@ async function processCase(
   const contextResult = await executeEvalCaseStage(
     'context_selection',
     () => {
-      const top = selectContextHits(hits, {
-        k: runConfig.k,
-        taskType: 'faith',
-      });
-      const contextChunks = top.map((hit) => hit.chunk);
-      const { context, sources } = formatSources(contextChunks);
-      const topIds = top.map((hit) => hit.chunk.id);
+      const contextChunks = prepared.hits.map(({ score: _score, ...chunk }) =>
+        chunk,
+      );
+      const userMessage = prepared.request.messages[0]?.content;
+      if (typeof userMessage !== 'string') {
+        throw new TypeError('Ask user message must be text');
+      }
+      const topIds = contextChunks.map((chunk) => chunk.id);
       const foundCount = !isRefusal
         ? resolved.expectedChunkIds.filter((id) => topIds.includes(id)).length
         : 0;
       return {
-        context,
         contextSnapshot: {
-          text: context,
+          text: userMessage,
           chunks: contextChunks,
-          sources,
+          sources: prepared.sources,
         } satisfies FaithContextSnapshot,
         topIds,
         foundCount,
@@ -184,7 +207,6 @@ async function processCase(
     } satisfies FaithErrorTraceInput,
   );
   const {
-    context,
     contextSnapshot,
     topIds,
     foundCount,
@@ -194,7 +216,7 @@ async function processCase(
 
   const answer = await executeEvalCaseStage(
     'answer_model',
-    () => generateAnswer(client, context, resolved.question),
+    () => textOfRequest(client, prepared.request),
     {
       resolved,
       runConfig,
@@ -209,7 +231,7 @@ async function processCase(
     () =>
       judge(
         client,
-        context,
+        contextSnapshot.text,
         answer,
         runConfig.judgeAttemptLimit,
       ),
@@ -244,12 +266,14 @@ async function processCase(
       decodeFaithTrace(
         toPersistedPayload({
           id: resolved.id,
+          governance: resolved.governance,
           input: resolved.input,
           question: resolved.question,
           expectedBehavior: resolved.expectedBehavior,
           sourceExpectation: resolved.sourceExpectation,
           sourceCoverage,
           target: resolved.target,
+          editorContext: resolved.editorContext,
           context: contextSnapshot,
           retrieval: {
             routed,
@@ -299,14 +323,84 @@ async function withRetry<T>(
   throw lastError;
 }
 
+function faithMetricCounts(traces: readonly FaithTrace[]): FaithMetricCounts {
+  let faithfulCount = 0;
+  let judgedCount = 0;
+  let refusedCorrectlyCount = 0;
+  let refusalJudgedCount = 0;
+  let hallucinationCount = 0;
+  let dualCauseCount = 0;
+  let judgeIndeterminateCount = 0;
+  let judgeInvalidAttemptCount = 0;
+  let judgeErrorAttemptCount = 0;
+
+  for (const trace of traces) {
+    judgeInvalidAttemptCount += trace.judgeAttempts.filter(
+      (attempt) => attempt.status === 'invalid',
+    ).length;
+    judgeErrorAttemptCount += trace.judgeAttempts.filter(
+      (attempt) => attempt.status === 'error',
+    ).length;
+    if (trace.verdict === null) {
+      judgeIndeterminateCount++;
+      continue;
+    }
+
+    judgedCount++;
+    if (trace.verdict.faithful) faithfulCount++;
+    if (trace.expectedBehavior === 'refuse_insufficient_context') {
+      refusalJudgedCount++;
+      if (trace.verdict.faithful) refusedCorrectlyCount++;
+    } else if (!trace.verdict.faithful) {
+      if (trace.retrieval.fullRecall) hallucinationCount++;
+      else dualCauseCount++;
+    }
+  }
+
+  return {
+    faithfulCount,
+    judgedCount,
+    refusedCorrectlyCount,
+    refusalJudgedCount,
+    hallucinationCount,
+    dualCauseCount,
+    judgeIndeterminateCount,
+    judgeInvalidAttemptCount,
+    judgeErrorAttemptCount,
+    caseCount: traces.length,
+  };
+}
+
+function faithGovernanceMetrics(
+  traces: readonly FaithTrace[],
+): GovernanceDisplayMetric[] {
+  const metrics = faithMetricsRecord(faithMetricCounts(traces));
+  return [
+    {
+      label: 'faithful',
+      unit: 'ratio',
+      observation: metrics['faith.faithful_rate'],
+    },
+    {
+      label: 'refusal-correct',
+      unit: 'ratio',
+      observation: metrics['faith.refusal_correct_rate'],
+    },
+    {
+      label: 'judge-indeterminate',
+      unit: 'count',
+      observation: metrics['faith.judge_indeterminate'],
+    },
+  ];
+}
+
 async function main(): Promise<void> {
   const setup = await executeEvalRunStage('dataset_preflight', () => {
-    const selection = selectFaithCases(process.argv[2]);
-    const prepared = prepareFaithDataset(selection.cases);
+    const selection = selectFaithCases(process.argv.slice(2));
     return {
       selection,
-      cases: prepared.cases,
-      dataset: prepared.identity,
+      cases: selection.cases,
+      dataset: selection.identity,
       config: faithEvalConfig(FAITH_CONTEXT_K),
     };
   });
@@ -349,6 +443,7 @@ async function main(): Promise<void> {
           createTraceEnvelope({
             runId,
             evalCaseId: evalCase.id,
+            governance: evalCase.governance,
             kind: 'faith',
             outcome: faithEnvelopeOutcome(trace),
             payload: trace,
@@ -362,7 +457,10 @@ async function main(): Promise<void> {
             resolved: evalCase,
             runConfig,
             phase: 'trace_payload',
-            routed: inferResource(evalCase.question) ?? undefined,
+            routed:
+              evalCase.editorContext?.kind ??
+              inferResource(evalCase.question) ??
+              undefined,
           };
         } else {
           traceInput = failure.payload as FaithErrorTraceInput;
@@ -372,6 +470,7 @@ async function main(): Promise<void> {
           createErrorTraceEnvelope({
             runId,
             evalCaseId: evalCase.id,
+            governance: evalCase.governance,
             kind: 'faith',
             payload,
             stage: failure.stage,
@@ -382,26 +481,23 @@ async function main(): Promise<void> {
       },
     });
 
-    let faithfulCount = 0;
-    let judgedCount = 0;
-    let hallucination = 0;
-    let dualCause = 0;
-    let refusalTotal = 0;
-    let refusedCorrectly = 0;
-    let judgeFailed = 0;
-    let judgeInvalidAttempts = 0;
-    let judgeErrorAttempts = 0;
+    const faithCounts = faithMetricCounts(batch.results);
+    const {
+      faithfulCount,
+      judgedCount,
+      hallucinationCount: hallucination,
+      dualCauseCount: dualCause,
+      refusalJudgedCount: refusalTotal,
+      refusedCorrectlyCount: refusedCorrectly,
+      judgeIndeterminateCount: judgeFailed,
+      judgeInvalidAttemptCount: judgeInvalidAttempts,
+      judgeErrorAttemptCount: judgeErrorAttempts,
+    } = faithCounts;
     for (const trace of batch.results) {
       const isRefusal =
         trace.expectedBehavior === 'refuse_insufficient_context';
       const tag = isRefusal ? '[应拒答]' : '[应回答]';
       const { verdict, retrieval } = trace;
-      judgeInvalidAttempts += trace.judgeAttempts.filter(
-        (attempt) => attempt.status === 'invalid',
-      ).length;
-      judgeErrorAttempts += trace.judgeAttempts.filter(
-        (attempt) => attempt.status === 'error',
-      ).length;
       const { fullRecall, foundCount, expectedChunkIds } = retrieval;
       const retrievalLabel = !isRefusal
         ? ` 检索${fullRecall ? '✓' : '✗'}${expectedChunkIds.length > 1 ? ` ${foundCount}/${expectedChunkIds.length}` : ''}`
@@ -409,7 +505,6 @@ async function main(): Promise<void> {
       const answer = trace.answer.replace(/\s+/g, ' ').slice(0, 90);
 
       if (verdict === null) {
-        judgeFailed++;
         const invalidAttempts = trace.judgeAttempts.filter(
           (attempt) => attempt.status === 'invalid',
         ).length;
@@ -421,16 +516,6 @@ async function main(): Promise<void> {
         );
         console.error(`   回答: ${answer}...`);
         continue;
-      }
-
-      judgedCount++;
-      if (verdict.faithful) faithfulCount++;
-      if (isRefusal) {
-        refusalTotal++;
-        if (verdict.faithful) refusedCorrectly++;
-      } else if (!verdict.faithful) {
-        if (fullRecall) hallucination++;
-        else dualCause++;
       }
 
       console.error(
@@ -445,18 +530,7 @@ async function main(): Promise<void> {
     }
 
     const metrics = await executeEvalRunStage('metric_aggregation', () => ({
-      ...faithMetricsRecord({
-        faithfulCount,
-        judgedCount,
-        refusedCorrectlyCount: refusedCorrectly,
-        refusalJudgedCount: refusalTotal,
-        hallucinationCount: hallucination,
-        dualCauseCount: dualCause,
-        judgeIndeterminateCount: judgeFailed,
-        judgeInvalidAttemptCount: judgeInvalidAttempts,
-        judgeErrorAttemptCount: judgeErrorAttempts,
-        caseCount: batch.results.length,
-      }),
+      ...faithMetricsRecord(faithCounts),
       ...harnessErrorMetrics('faith', batch.harnessErrors.length),
     }));
     const faithfulRate = metrics['faith.faithful_rate'].value;
@@ -479,7 +553,18 @@ async function main(): Promise<void> {
       `quality fail=${judgedCount - faithfulCount} 条；harness error=${batch.harnessErrors.length} 条；质量分母=${judgedCount}；已完成 case=${batch.results.length}/${cases.length}`,
     );
     console.error(
-      `注:被测=${MODEL}(flash),裁判=${JUDGE_MODEL}(pro)。Faithfulness=只忠于检索 context,不等于事实正确。`,
+      `注:被测=${ANSWER_MODEL}(flash),裁判=${JUDGE_MODEL}(pro)。Faithfulness=只忠于 Ask 输入证据,不等于事实正确。`,
+    );
+    console.error(
+      formatGovernanceReport(
+        buildGovernanceReport({
+          cases,
+          results: batch.results,
+          harnessErrors: batch.harnessErrors,
+          resultCaseId: (trace) => trace.id,
+          aggregate: faithGovernanceMetrics,
+        }),
+      ),
     );
 
     await executeEvalRunStage('artifact_write', () => session.complete(metrics));

@@ -8,6 +8,11 @@ import {
   SUBMIT_YAML_TOOL,
 } from '../server/agent-contract';
 import {
+  ASK_MAX_TOKENS,
+  ASK_SYSTEM,
+  buildAskUserMessage,
+} from '../server/pipeline';
+import {
   buildCorpusManifest,
   SCHEMA_CORPUS_PROVIDER,
 } from '../knowledge/corpus';
@@ -21,7 +26,6 @@ import { RERANK_MODEL } from '../retrieval/rerank';
 import { RetrievalPipelineError } from '../retrieval/retrieve';
 import type { RetrievalTrace } from '../retrieval/trace';
 import { VALIDATION_LOGIC_REVISION } from '../validation/validate';
-import { ANSWER_SYSTEM, MODEL } from './answer';
 import {
   FIX_CASES,
   type FixCase,
@@ -40,6 +44,13 @@ import {
   RETRIEVAL_CASES,
   type SemanticRetrievalCase,
 } from './cases/retrieval-cases';
+import {
+  parseEvalSuiteArgs,
+  selectCasesForSuite,
+  type EvalCaseGovernance,
+  type EvalSuite,
+  type GovernedEvalCase,
+} from './cases/governance';
 import type { FaithTrace } from './faith-store';
 import {
   FAITH_JUDGE_ATTEMPT_LIMIT,
@@ -68,6 +79,7 @@ import {
   ratioObservation,
   type EvalDatasetIdentity,
   type EvalKind,
+  type EvalScope,
   type FaithEvalConfig,
   type FixEvalConfig,
   type GenerationEvalConfig,
@@ -193,10 +205,22 @@ export function retrievalExecutionError<TPayload>(
 type EnvelopeOutcome = TraceEnvelope['outcome'];
 
 export interface FaithCaseSelection {
-  cases: GroundedAnswerCase[];
-  suffix: '' | '-smoke' | '-policy';
+  cases: ResolvedGroundedAnswerCase[];
+  identity: EvalDatasetIdentity;
+  suffix: '' | '-holdout' | '-full' | '-smoke' | '-policy';
   label: string;
-  scope: 'full' | 'policy' | 'smoke';
+  scope: EvalScope;
+}
+
+export interface EvalSuiteCaseSelection<T> {
+  cases: T[];
+  suite: EvalSuite;
+  scope: EvalSuite;
+}
+
+export interface RetrievalCaseSelection
+  extends EvalSuiteCaseSelection<SemanticRetrievalCase> {
+  k: number;
 }
 
 export interface RetrievalEvalTracePayload {
@@ -237,16 +261,20 @@ export function toPersistedPayload<T>(value: T): T {
   return JSON.parse(serialized) as T;
 }
 
-function datasetIdentity<T>(
+function datasetIdentity<
+  T extends { id: string; governance: EvalCaseGovernance },
+>(
   id: string,
   cases: readonly T[],
-  caseId: (evalCase: T) => string,
   snapshot: (evalCase: T) => unknown,
 ): EvalDatasetIdentity {
   return EvalDatasetIdentitySchema.parse({
     id,
     hash: computeDatasetHash(cases.map(snapshot)),
-    caseIds: cases.map(caseId),
+    cases: cases.map((evalCase) => ({
+      id: evalCase.id,
+      governance: evalCase.governance,
+    })),
     caseCount: cases.length,
   });
 }
@@ -257,7 +285,7 @@ function retrievalCaseSnapshot(evalCase: SemanticRetrievalCase): unknown {
     question: evalCase.question,
     expectedChunkIds: [...evalCase.expectedChunkIds].sort(),
     target: evalCase.target,
-    source: evalCase.source,
+    governance: evalCase.governance,
   };
 }
 
@@ -279,6 +307,8 @@ function groundedAnswerCaseSnapshot(
     question: resolved.question,
     expectedChunkIds: [...resolved.expectedChunkIds].sort(),
     target: resolved.target ?? null,
+    editorContext: resolved.editorContext ?? null,
+    governance: resolved.governance,
   };
 }
 
@@ -297,6 +327,8 @@ function faithTraceCaseSnapshot(trace: FaithTrace): unknown {
     question: trace.question,
     expectedChunkIds: [...trace.retrieval.expectedChunkIds].sort(),
     target: trace.target ?? null,
+    editorContext: trace.editorContext ?? null,
+    governance: trace.governance,
   };
 }
 
@@ -306,6 +338,7 @@ function generationCaseSnapshot(evalCase: GenerationEvalCase): unknown {
     requirement: evalCase.requirement,
     expectedResources: evalCase.expectedResources,
     relations: evalCase.relations ?? [],
+    governance: evalCase.governance,
   };
 }
 
@@ -317,6 +350,7 @@ function fixCaseSnapshot(evalCase: FixCase): unknown {
     target: evalCase.target,
     preserve: evalCase.preserve,
     expectedCorrections: evalCase.expectedCorrections,
+    governance: evalCase.governance,
   };
 }
 
@@ -331,43 +365,122 @@ function judgeCaseSnapshot(evalCase: JudgeCalibrationCase): unknown {
     sources: evalCase.sources,
     answer: evalCase.answer,
     human: evalCase.human,
+    governance: evalCase.governance,
+  };
+}
+
+export function selectEvalSuiteCases<T extends GovernedEvalCase>(
+  argv: readonly string[],
+  cases: readonly T[],
+): EvalSuiteCaseSelection<T> {
+  const parsed = parseEvalSuiteArgs(argv);
+  if (parsed.remainingArgs.length > 0) {
+    throw new Error(
+      `unexpected eval arguments: ${parsed.remainingArgs.join(' ')}`,
+    );
+  }
+  return {
+    cases: selectCasesForSuite(cases, parsed.suite),
+    suite: parsed.suite,
+    scope: parsed.suite,
   };
 }
 
 export function selectRetrievalCases(
+  argv: readonly string[] = [],
   cases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
-): SemanticRetrievalCase[] {
-  return [...cases];
+): RetrievalCaseSelection {
+  const parsed = parseEvalSuiteArgs(argv);
+  if (parsed.remainingArgs.length > 1) {
+    throw new Error(
+      '用法: npm run eval -- [<k>] [--tuning|--holdout|--full]',
+    );
+  }
+  const rawK = parsed.remainingArgs[0];
+  const k = rawK === undefined ? 3 : Number(rawK);
+  if (!Number.isInteger(k) || k <= 0) {
+    throw new Error(
+      '用法: npm run eval -- [<k>] [--tuning|--holdout|--full]',
+    );
+  }
+  return {
+    cases: selectCasesForSuite(cases, parsed.suite),
+    suite: parsed.suite,
+    scope: parsed.suite,
+    k,
+  };
 }
 
 export function selectFaithCases(
-  arg: string | undefined,
+  argv: readonly string[] = [],
   cases: readonly GroundedAnswerCase[] = GROUNDED_ANSWER_CASES,
+  retrievalCases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
+  fixCases: readonly FixCase[] = FIX_CASES,
 ): FaithCaseSelection {
-  if (arg === '--policy') {
+  const parsed = parseEvalSuiteArgs(argv);
+  const prepared = prepareFaithDataset(cases, retrievalCases, fixCases);
+  if (parsed.remainingArgs.length > 0 && parsed.explicit) {
+    throw new Error(
+      'faith diagnostic mode cannot be combined with a suite flag',
+    );
+  }
+  if (parsed.remainingArgs.length > 1) {
+    throw new Error(
+      '用法: npm run eval:faith -- [<N>|--policy|--tuning|--holdout|--full]',
+    );
+  }
+
+  const diagnosticArg = parsed.remainingArgs[0];
+  const tuningCases = selectCasesForSuite(prepared.cases, 'tuning');
+  if (diagnosticArg === '--policy') {
+    const selected = tuningCases.filter((evalCase) =>
+      evalCase.id.startsWith('policy-'),
+    );
     return {
-      cases: cases.filter((evalCase) => evalCase.id.startsWith('policy-')),
+      cases: selected,
+      identity: resolvedFaithDatasetIdentity(selected),
       suffix: '-policy',
       label: ',policy 子集',
       scope: 'policy',
     };
   }
-  if (!arg) {
-    return { cases: [...cases], suffix: '', label: '', scope: 'full' };
+  if (diagnosticArg === undefined) {
+    const selected = selectCasesForSuite(prepared.cases, parsed.suite);
+    return {
+      cases: selected,
+      identity: resolvedFaithDatasetIdentity(selected),
+      suffix:
+        parsed.suite === 'tuning'
+          ? ''
+          : parsed.suite === 'holdout'
+            ? '-holdout'
+            : '-full',
+      label:
+        parsed.suite === 'tuning'
+          ? ',tuning 套件'
+          : parsed.suite === 'holdout'
+            ? ',Holdout 留出集'
+            : ',full 完整集',
+      scope: parsed.suite,
+    };
   }
 
-  const smokeN = Number(arg);
-  if (!Number.isFinite(smokeN) || smokeN <= 0) {
-    throw new Error('用法: npm run eval:faith [-- <N>|--policy]');
+  const smokeN = Number(diagnosticArg);
+  if (!Number.isInteger(smokeN) || smokeN <= 0) {
+    throw new Error(
+      '用法: npm run eval:faith -- [<N>|--policy|--tuning|--holdout|--full]',
+    );
   }
-  const referenced = cases
+  const referenced = tuningCases
     .filter((evalCase) => evalCase.input.kind === 'retrieval_case')
     .slice(0, smokeN);
-  const standalone = cases
+  const standalone = tuningCases
     .filter((evalCase) => evalCase.input.kind === 'standalone_question')
     .slice(0, smokeN);
+  const selected = [...referenced, ...standalone];
   return {
-    cases: [...referenced, ...standalone],
+    cases: selected,
+    identity: resolvedFaithDatasetIdentity(selected),
     suffix: '-smoke',
     label: `,冒烟:检索引用/独立拒答各 ${smokeN}`,
     scope: 'smoke',
@@ -380,7 +493,6 @@ export function retrievalDatasetIdentity(
   return datasetIdentity(
     'retrieval/semantic',
     cases,
-    (evalCase) => evalCase.id,
     retrievalCaseSnapshot,
   );
 }
@@ -388,28 +500,35 @@ export function retrievalDatasetIdentity(
 export function faithDatasetIdentity(
   cases: readonly GroundedAnswerCase[],
   retrievalCases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
+  fixCases: readonly FixCase[] = FIX_CASES,
 ): EvalDatasetIdentity {
-  return prepareFaithDataset(cases, retrievalCases).identity;
+  return prepareFaithDataset(cases, retrievalCases, fixCases).identity;
+}
+
+function resolvedFaithDatasetIdentity(
+  cases: readonly ResolvedGroundedAnswerCase[],
+): EvalDatasetIdentity {
+  return datasetIdentity(
+    'faith/grounded-answer-selection',
+    cases,
+    groundedAnswerCaseSnapshot,
+  );
 }
 
 export function prepareFaithDataset(
   cases: readonly GroundedAnswerCase[],
   retrievalCases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
+  fixCases: readonly FixCase[] = FIX_CASES,
 ): {
   cases: ResolvedGroundedAnswerCase[];
   identity: EvalDatasetIdentity;
 } {
   const resolvedCases = cases.map((evalCase) =>
-    resolveGroundedAnswerCase(evalCase, retrievalCases),
+    resolveGroundedAnswerCase(evalCase, retrievalCases, fixCases),
   );
   return {
     cases: resolvedCases,
-    identity: datasetIdentity(
-      'faith/grounded-answer-selection',
-      resolvedCases,
-      (evalCase) => evalCase.id,
-      groundedAnswerCaseSnapshot,
-    ),
+    identity: resolvedFaithDatasetIdentity(resolvedCases),
   };
 }
 
@@ -419,7 +538,6 @@ export function faithTraceDatasetIdentity(
   return datasetIdentity(
     'faith/grounded-answer-selection',
     traces,
-    (trace) => trace.id,
     faithTraceCaseSnapshot,
   );
 }
@@ -430,7 +548,6 @@ export function judgeDatasetIdentity(
   return datasetIdentity(
     'judge/calibration',
     cases,
-    (evalCase) => evalCase.id,
     judgeCaseSnapshot,
   );
 }
@@ -441,7 +558,6 @@ export function generationDatasetIdentity(
   return datasetIdentity(
     'generation/cases',
     cases,
-    (evalCase) => evalCase.id,
     generationCaseSnapshot,
   );
 }
@@ -452,7 +568,6 @@ export function fixDatasetIdentity(
   return datasetIdentity(
     'fix/cases',
     cases,
-    (evalCase) => evalCase.id,
     fixCaseSnapshot,
   );
 }
@@ -489,8 +604,30 @@ function retrievalConfigShape(k: number) {
 
 function answerPromptHash(): string {
   return computeCanonicalHash({
-    system: ANSWER_SYSTEM,
-    request: { model: MODEL, maxTokens: TEXT_MAX_TOKENS },
+    system: ASK_SYSTEM,
+    userMessages: [
+      buildAskUserMessage({
+        question: '<question>',
+        context: '<docs>',
+        mode: 'free',
+      }),
+      buildAskUserMessage({
+        question: '<question>',
+        context: '<docs>',
+        mode: 'explain_error',
+        editorContext: {
+          yaml: '<current_yaml>',
+          kind: '<kind>',
+          apiVersion: '<apiVersion>',
+          cursorPath: '<cursorPath>',
+          selectedText: '<selectedText>',
+          errors: [
+            { path: '<error_path>', message: '<error_message>' },
+          ],
+        },
+      }),
+    ],
+    request: { model: ANSWER_MODEL, maxTokens: ASK_MAX_TOKENS },
   });
 }
 
@@ -531,7 +668,7 @@ export function retrievalEvalConfig(k: number): RetrievalEvalConfig {
 export function faithEvalConfig(k = FAITH_CONTEXT_K): FaithEvalConfig {
   return {
     ...retrievalConfigShape(k),
-    answerModel: MODEL,
+    answerModel: ANSWER_MODEL,
     judgeModel: JUDGE_MODEL,
     answerPromptHash: answerPromptHash(),
     judgePromptHash: judgePromptHash(),

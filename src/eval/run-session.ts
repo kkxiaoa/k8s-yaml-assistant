@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import {
   appendTraceEnvelope,
   evalArtifactPath,
@@ -284,7 +285,12 @@ export function startEvalRun(
   });
   writeJsonAtomic(runFilePath, currentRun);
 
-  const expectedCaseIds = new Set(currentRun.dataset.caseIds);
+  const expectedCases = new Map(
+    currentRun.dataset.cases.map((evalCase) => [
+      evalCase.id,
+      evalCase.governance,
+    ]),
+  );
   const appendedCaseIds = new Set<string>();
   const appendedTraceIds = new Set<string>();
 
@@ -309,9 +315,15 @@ export function startEvalRun(
         `trace kind ${envelope.kind} does not match session ${currentRun.kind}`,
       );
     }
-    if (!expectedCaseIds.has(envelope.evalCaseId)) {
+    const expectedGovernance = expectedCases.get(envelope.evalCaseId);
+    if (expectedGovernance === undefined) {
       throw new Error(
         `evalCaseId ${envelope.evalCaseId} is not in dataset ${currentRun.dataset.id}`,
+      );
+    }
+    if (!isDeepStrictEqual(envelope.governance, expectedGovernance)) {
+      throw new Error(
+        `trace governance for ${envelope.evalCaseId} does not match dataset`,
       );
     }
     if (appendedCaseIds.has(envelope.evalCaseId)) {
@@ -345,8 +357,14 @@ export function startEvalRun(
           `traceId ${envelope.traceId} has kind ${envelope.kind}`,
         );
       }
-      if (!expectedCaseIds.has(envelope.evalCaseId)) {
+      const expectedGovernance = expectedCases.get(envelope.evalCaseId);
+      if (expectedGovernance === undefined) {
         throw traceCoverageError(`unexpected ${envelope.evalCaseId}`);
+      }
+      if (!isDeepStrictEqual(envelope.governance, expectedGovernance)) {
+        throw traceCoverageError(
+          `governance mismatch for ${envelope.evalCaseId}`,
+        );
       }
       if (actualCaseIds.has(envelope.evalCaseId)) {
         throw traceCoverageError(`duplicate ${envelope.evalCaseId}`);
@@ -354,8 +372,8 @@ export function startEvalRun(
       actualCaseIds.add(envelope.evalCaseId);
     }
 
-    const missing = currentRun.dataset.caseIds.filter(
-      (evalCaseId) => !actualCaseIds.has(evalCaseId),
+    const missing = currentRun.dataset.cases.flatMap((evalCase) =>
+      actualCaseIds.has(evalCase.id) ? [] : [evalCase.id],
     );
     if (missing.length > 0) {
       throw traceCoverageError(`missing ${missing.join(', ')}`);

@@ -1,9 +1,23 @@
 import type { GenerationCaseContract } from '../assertions';
+import type { EvalCaseGovernance } from './governance';
 
 export type GenerationEvalCase = GenerationCaseContract;
 
+const GENERATION_DEVELOPMENT = {
+  task: 'generation',
+  origin: 'human',
+  role: 'development',
+} as const satisfies EvalCaseGovernance;
+
+const GENERATION_HOLDOUT = {
+  task: 'generation',
+  origin: 'human',
+  role: 'holdout',
+} as const satisfies EvalCaseGovernance;
+
 export const GENERATION_CASES: GenerationEvalCase[] = [
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'deploy-basic',
     requirement: '名为 web 的 Deployment,3 副本,镜像 nginx:1.27,容器端口 80',
     expectedResources: [
@@ -34,6 +48,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'sts-basic',
     requirement:
       '名为 db 的 StatefulSet,关联 headless service db,3 副本,镜像 postgres:16,每副本 10Gi 存储',
@@ -76,6 +91,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'svc-clusterip',
     requirement: '名为 web 的 ClusterIP Service,选择 app=web,端口 80 转发到 8080',
     expectedResources: [
@@ -98,6 +114,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'configmap-basic',
     requirement: '名为 app-config 的 ConfigMap,包含 LOG_LEVEL=info、TIMEOUT=30',
     expectedResources: [
@@ -112,6 +129,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'secret-basic',
     requirement: '名为 db-secret 的 Opaque Secret,stringData 里 password=s3cr3t',
     expectedResources: [
@@ -130,6 +148,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'pvc-basic',
     requirement: '名为 data 的 PVC,访问模式 ReadWriteOnce,申请 10Gi',
     expectedResources: [
@@ -156,6 +175,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'job-basic',
     requirement: '名为 migrate 的 Job,镜像 busybox 执行迁移,完成 1 次,失败重试 3 次',
     expectedResources: [
@@ -180,6 +200,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     rationale: ['“执行迁移”没有给出稳定的命令或参数文本，因此不猜测具体 command。'],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'cronjob-basic',
     requirement: '每天 0 点执行的 CronJob,名为 report,镜像 busybox 打印 hello',
     expectedResources: [
@@ -204,6 +225,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'hpa-basic',
     requirement:
       '对名为 web 的 Deployment 做 HPA,副本 2 到 10,CPU 利用率目标 80%',
@@ -239,6 +261,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     rationale: ['要求没有指定 HPA 自身的 metadata.name。'],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'ingress-basic',
     requirement:
       '名为 web 的 Ingress,host example.com,Prefix 路径 / 转发到 service web 的 80 端口',
@@ -277,6 +300,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'sa-basic',
     requirement: '名为 ci-runner 的 ServiceAccount,关闭 token 自动挂载',
     expectedResources: [
@@ -294,6 +318,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'netpol-basic',
     requirement:
       '名为 deny-ingress 的 NetworkPolicy,选中 app=web 的 Pod,默认拒绝所有入站',
@@ -322,6 +347,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'pdb-basic',
     requirement:
       '名为 web-pdb 的 PodDisruptionBudget,选中 app=web,至少保留 2 个可用',
@@ -345,6 +371,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'storageclass-basic',
     requirement:
       '名为 fast-ssd 的 StorageClass,provisioner ebs.csi.aws.com,回收策略 Retain,延迟绑定,允许扩容',
@@ -370,6 +397,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'role-basic',
     requirement:
       '名为 pod-reader 的 Role,允许对 pods 执行 get、list、watch',
@@ -399,6 +427,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'multi-deploy-svc',
     requirement:
       '名为 web 的 Deployment(3 副本,镜像 nginx:1.27,容器端口 80,标签 app=web),' +
@@ -462,6 +491,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'multi-deploy-svc-ingress',
     requirement:
       '一套 web 应用:Deployment(2 副本,镜像 myapp:1.0,容器端口 8080,标签 app=myapp),' +
@@ -557,6 +587,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     rationale: ['要求未明确 Deployment、Service 和 Ingress 各自的 metadata.name。'],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'multi-api-deploy-svc',
     requirement:
       '名为 api 的 Deployment(2 副本,镜像 registry/api:1.2,容器端口 9000,标签 app=api、tier=backend),' +
@@ -620,6 +651,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'multi-sts-headless',
     requirement:
       '名为 redis 的 StatefulSet(3 副本,镜像 redis:7,容器端口 6379,标签 app=redis,serviceName 为 redis),' +
@@ -693,6 +725,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'multi-app-configmap',
     requirement:
       '名为 web 的 Deployment(镜像 nginx,标签 app=web)通过 envFrom 引用名为 web-config 的 ConfigMap,' +
@@ -741,6 +774,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'multi-hpa-deploy',
     requirement:
       '名为 web 的 Deployment(2 副本,镜像 nginx:1.27,容器端口 80),' +
@@ -801,6 +835,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     rationale: ['要求没有指定 HPA 自身的 metadata.name。'],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'hard-pod-multi-container',
     requirement:
       '名为 sidecar-pod 的 Pod,两个容器:app(镜像 myapp:1.0,端口 8080)和 log-agent(镜像 fluentd:1.16);restartPolicy 设为 Never',
@@ -840,6 +875,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'hard-deploy-probes-resources',
     requirement:
       '名为 api 的 Deployment,镜像 api:2.0,容器端口 8080;存活探针 HTTP GET /healthz 端口 8080,就绪探针 TCP 8080;资源 limits cpu 500m 内存 256Mi、requests cpu 100m 内存 128Mi',
@@ -878,6 +914,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     ],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'hard-cronjob-full',
     requirement:
       '名为 cleanup 的 CronJob,每 5 分钟执行;concurrencyPolicy 为 Forbid,保留 3 条成功历史、1 条失败历史;镜像 busybox 执行清理,restartPolicy 为 OnFailure',
@@ -917,6 +954,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     rationale: ['“执行清理”没有给出稳定的命令或参数文本，因此不猜测具体 command。'],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'hard-hpa-behavior',
     requirement:
       '对名为 web 的 Deployment 做 HPA(autoscaling/v2),副本 2 到 20,基于 CPU 70% 和内存 80% 两个指标;缩容稳定窗口设为 300 秒',
@@ -971,6 +1009,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     rationale: ['要求没有指定 HPA 自身的 metadata.name。'],
   },
   {
+    governance: GENERATION_DEVELOPMENT,
     id: 'hard-networkpolicy-rules',
     requirement:
       '名为 web-netpol 的 NetworkPolicy,选中 app=web 的 Pod;允许来自 app=frontend 的 Pod 访问 8080 入站;允许出站到 UDP 53(DNS)',
@@ -1010,6 +1049,51 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
             },
           },
         ],
+      },
+    ],
+  },
+  {
+    governance: GENERATION_HOLDOUT,
+    id: 'daemonset-holdout',
+    requirement:
+      '生成名为 node-agent 的 DaemonSet,容器名为 node-agent,镜像 registry.example.com/ops/node-agent:1.0,selector 和 Pod 模板标签均为 app=node-agent',
+    expectedResources: [
+      {
+        ref: 'daemonset',
+        identity: {
+          apiVersion: 'apps/v1',
+          kind: 'DaemonSet',
+          name: 'node-agent',
+        },
+        assertions: [
+          {
+            type: 'equals',
+            path: 'spec.selector.matchLabels.app',
+            value: 'node-agent',
+          },
+          {
+            type: 'equals',
+            path: 'spec.template.metadata.labels.app',
+            value: 'node-agent',
+          },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
+            rule: {
+              name: 'array_contains_object',
+              value: {
+                name: 'node-agent',
+                image: 'registry.example.com/ops/node-agent:1.0',
+              },
+            },
+          },
+        ],
+      },
+    ],
+    relations: [
+      {
+        type: 'workload_selector_matches_template_labels',
+        workloadRef: 'daemonset',
       },
     ],
   },

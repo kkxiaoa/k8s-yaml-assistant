@@ -1,11 +1,24 @@
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { canonicalJson } from '../shared/json';
 
 export const DEFAULT_ALIASES_PATH = join(
   process.cwd(),
   'data',
   'aliases',
   'schema-field-aliases.jsonl',
+);
+
+export const DEFAULT_ALIAS_DRAFT_DIR = join(
+  process.cwd(),
+  'data',
+  'aliases',
+  'drafts',
 );
 
 export interface SchemaFieldAlias {
@@ -46,6 +59,13 @@ export interface QueryExpansionResult {
   expansionTerms: string[];
   aliasSelectedResource: string | undefined;
   resourceSelectionReason: ResourceSelectionReason;
+}
+
+export interface AliasDraftMergeResult {
+  aliases: SchemaFieldAlias[];
+  addedIds: string[];
+  updatedIds: string[];
+  unchangedIds: string[];
 }
 
 type ResourceStrategy = 'routed-only' | 'alias-aware';
@@ -157,6 +177,111 @@ export function parseSchemaFieldAliasesJsonl(
         reviewNote: row.reviewNote,
       };
     });
+}
+
+export function serializeSchemaFieldAliasesJsonl(
+  aliases: readonly SchemaFieldAlias[],
+): string {
+  if (aliases.length === 0) return '';
+  return `${aliases.map((alias) => JSON.stringify(alias)).join('\n')}\n`;
+}
+
+function aliasDraftPath(directory: string, createdAt: Date): string {
+  if (Number.isNaN(createdAt.getTime())) {
+    throw new TypeError('alias draft createdAt 必须是有效日期');
+  }
+  const timestamp = createdAt.toISOString().replace(/[-:.]/g, '');
+  return join(directory, `schema-field-aliases.${timestamp}.jsonl`);
+}
+
+export function writeSchemaFieldAliasDraft(
+  aliases: readonly SchemaFieldAlias[],
+  options: { directory?: string; createdAt?: Date } = {},
+): string {
+  if (aliases.length === 0) {
+    throw new Error('alias draft 不能为空');
+  }
+  const serialized = serializeSchemaFieldAliasesJsonl(aliases);
+  const decoded = parseSchemaFieldAliasesJsonl(serialized);
+  for (const alias of decoded) {
+    if (alias.reviewed || alias.reviewedAt !== null) {
+      throw new Error(`alias draft ${alias.id} 必须保持 reviewed=false`);
+    }
+  }
+
+  const directory = options.directory ?? DEFAULT_ALIAS_DRAFT_DIR;
+  const path = aliasDraftPath(directory, options.createdAt ?? new Date());
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(path, serialized, { encoding: 'utf8', flag: 'wx' });
+  return path;
+}
+
+function aliasIdentity(alias: SchemaFieldAlias): string {
+  return canonicalJson({
+    resource: alias.resource,
+    path: alias.path,
+    chunkId: alias.chunkId,
+  });
+}
+
+function indexAliasesById(
+  aliases: readonly SchemaFieldAlias[],
+  artifact: string,
+): Map<string, number> {
+  const indices = new Map<string, number>();
+  aliases.forEach((alias, index) => {
+    if (indices.has(alias.id)) {
+      throw new Error(`${artifact} alias id 重复: ${alias.id}`);
+    }
+    indices.set(alias.id, index);
+  });
+  return indices;
+}
+
+export function mergeReviewedAliasDraft(
+  currentAliases: readonly SchemaFieldAlias[],
+  draftAliases: readonly SchemaFieldAlias[],
+): AliasDraftMergeResult {
+  if (draftAliases.length === 0) {
+    throw new Error('alias draft 不能为空');
+  }
+
+  const currentIndices = indexAliasesById(currentAliases, '正式 registry');
+  indexAliasesById(draftAliases, 'draft');
+  const aliases = [...currentAliases];
+  const addedIds: string[] = [];
+  const updatedIds: string[] = [];
+  const unchangedIds: string[] = [];
+
+  for (const draft of draftAliases) {
+    if (!draft.reviewed || !draft.reviewedAt?.trim()) {
+      throw new Error(`alias draft ${draft.id} 尚未完成人工审核`);
+    }
+
+    const currentIndex = currentIndices.get(draft.id);
+    if (currentIndex === undefined) {
+      currentIndices.set(draft.id, aliases.length);
+      aliases.push(draft);
+      addedIds.push(draft.id);
+      continue;
+    }
+
+    const current = aliases[currentIndex];
+    if (!current) {
+      throw new Error(`正式 registry alias 索引无效: ${draft.id}`);
+    }
+    if (aliasIdentity(current) !== aliasIdentity(draft)) {
+      throw new Error(`alias draft ${draft.id} 身份与正式 registry 不一致`);
+    }
+    if (canonicalJson(current) === canonicalJson(draft)) {
+      unchangedIds.push(draft.id);
+      continue;
+    }
+    aliases[currentIndex] = draft;
+    updatedIds.push(draft.id);
+  }
+
+  return { aliases, addedIds, updatedIds, unchangedIds };
 }
 
 export function loadReviewedAliases(path = DEFAULT_ALIASES_PATH): SchemaFieldAlias[] {

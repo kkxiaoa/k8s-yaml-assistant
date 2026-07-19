@@ -20,6 +20,7 @@
     "voyage:ab": "tsx scripts/voyage-ab.ts",
     "aliases:generate": "tsx scripts/generate-schema-aliases.ts",
     "aliases:check": "tsx scripts/check-schema-aliases.ts",
+    "aliases:review": "tsx scripts/check-schema-aliases.ts --review",
     "aliases:ab": "tsx scripts/query-expansion-ab.ts",
     "eval:check": "tsx scripts/eval-check.ts",
     "ingest:schemas": "tsx scripts/ingest-schemas.ts",
@@ -27,31 +28,31 @@
     "corpus:stats": "tsx scripts/corpus-stats.ts",
     "corpus:closure": "tsx scripts/curated-closure.ts",
     "index:build": "tsx scripts/index-build.ts",
-    "test": "tsx src/validation/validate.test.ts && tsx src/server/agent.test.ts && tsx src/server/pipeline-retrieval.test.ts && tsx src/knowledge/identity.test.ts && tsx src/knowledge/provenance.test.ts && tsx src/knowledge/chunk.test.ts && tsx src/knowledge/corpus.test.ts && tsx src/knowledge/policy-corpus.test.ts && tsx src/retrieval/source-policy.test.ts && tsx src/retrieval/boost.test.ts && tsx src/retrieval/sources.test.ts && tsx src/retrieval/router.test.ts && tsx src/retrieval/embeddings.test.ts && tsx src/retrieval/query-expansion.test.ts && tsx src/retrieval/query-expansion-runtime.test.ts && tsx src/retrieval/exact-field.test.ts && tsx src/eval/protocol.test.ts && tsx src/eval/artifacts.test.ts && tsx src/eval/assertions.test.ts && tsx src/eval/cases/case-contracts.test.ts && tsx src/eval/judge-votes.test.ts && tsx src/eval/metrics/definitions.test.ts && tsx src/eval/run-session.test.ts && tsx src/eval/runner-protocol.test.ts && tsx src/eval/run-store.test.ts && tsx src/eval/bad-cases.test.ts && tsx src/eval/faith-bad-cases.test.ts && tsx src/eval/calibration-snapshot.test.ts && tsx src/eval/judge-eval.test.ts && tsx src/eval/metric-format.test.ts && tsx src/eval/metrics/generation-metrics.test.ts && tsx src/eval/metrics/compare.test.ts && tsx src/eval/metrics/promotion.test.ts",
+    "test": "node --import tsx --test --test-concurrency=1",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "latest",
-    "@monaco-editor/react": "latest",
-    "dotenv": "latest",
-    "js-yaml": "latest",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "@anthropic-ai/sdk": "0.104.1",
+    "@monaco-editor/react": "4.7.0",
+    "dotenv": "17.4.2",
+    "js-yaml": "4.2.0",
+    "next": "16.2.9",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.1",
-    "@types/js-yaml": "latest",
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
+    "@types/js-yaml": "4.0.9",
+    "@types/node": "25.9.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
     "tailwindcss": "^4.3.1",
-    "tsx": "latest",
-    "typescript": "latest"
+    "tsx": "4.22.4",
+    "typescript": "6.0.3"
   }
 }

@@ -50,26 +50,27 @@
 - Ask 已有 `[S]` 引用、schema/policy 分层和冲突表达。
 - retrieval/faith bad case 已具备离线沉淀入口。
 
-当前最高优先级不是扩功能，而是修正质量底座。2026-07-10 harness 计划的 Task 1-8 已完成第一轮结构实现，但 correctness review 发现以下契约仍不可信：
+当前最高优先级不是扩功能，而是重建可信质量尺子。2026-07-10 harness（评估框架）计划的 Task 1-8（任务 1-8）完成第一轮结构实现后，correctness review（正确性审核）暴露了以下契约问题：
 
 - EvalRun、trace、baseline 与 bad case 的关联和生命周期。
 - 指标方向、分母、空样本、可比较性和 baseline 晋升门禁。
 - retrieval、faith、judge、generation、fix 的单 case 判定有效性。
 - knowledge provenance、targets、corpus identity 与 index 失效边界。
 
-纠偏完成前，不晋升 baseline，不根据当前指标继续优化 retrieval、prompt 或模型。
+四份 2026-07-12 纠偏计划已经完成结构实现与逐 Task（任务）审核。Case Governance（评估用例治理）也已完成实现和本地门禁，当前仍未重建正式 baseline（基线）；在新版本完整评估完成人工审核前，不晋升 baseline（基线），不根据旧指标继续优化 retrieval、prompt 或模型。
 
 ## 当前执行优先级
 
 唯一执行路线维护在 `docs/AI应用开发能力训练实现方案.md`，Stage 编号只表示能力分类，不表示时序。
 
-1. 按顺序实施四份已自审的 `2026-07-12` corrective plans；Eval Artifact Protocol 已完成并 review，当前执行 Knowledge Provenance / Corpus Identity。
-2. 完成 test runner、命令入口、scripts 和 docs cleanup，建立 eval case 的 task/origin/role 分层和 holdout。
-3. 清理 ignored artifacts、重建 index，重跑 retrieval/faith/judge/generation/fix 并人工审核 baseline。
-4. 贯通 token/usage/cost，在新尺子下复测仍存在的 retrieval/rerank bad case。
-5. 接入 Stage 6.2 official docs，再接 Stage 6.3 examples。
-6. 在多源 provenance 和 judge 稳定后实施 Claim-level Grounding。
-7. 最后成熟化 Stage 7 serving feedback、采纳信号和审核式 eval 回灌。
+1. 已完成四份 `2026-07-12` 纠偏计划的结构实现与逐 Task（任务）审核；尚未执行真实模型完整评估或 baseline（基线）晋升。
+2. 已完成 Phase B（阶段 B）工程清理的 docs cleanup（文档清理）与 Deferred Risk Closure（延期风险收敛）第 1-6 项审核。
+3. 已完成 Case Governance（评估用例治理）：eval case 已建立 `task/origin/role` 分层，并补充 error explanation（错误解释）、真实 CRD（自定义资源定义）和 Holdout（留出集）。
+4. 下一项质量主线是清理 ignored artifacts（被忽略的产物）、重建 index（索引），重跑 retrieval/faith/judge/generation/fix 并人工审核 baseline（基线）。
+5. 贯通 token/usage/cost（令牌 / 用量 / 成本），在新尺子下复测仍存在的 retrieval/rerank bad case（检索 / 重排问题用例）。
+6. 接入 Stage 6.2 official docs（阶段 6.2 官方文档），再接 Stage 6.3 examples（阶段 6.3 示例）。
+7. 在多源 provenance（来源信息）和 judge（裁判）稳定后实施 Claim-level Grounding（声明级依据校验）。
+8. 最后成熟化 Stage 7 serving feedback（阶段 7 在线反馈）、采纳信号和审核式 eval（评估）回灌。
 
 长期约束：
 

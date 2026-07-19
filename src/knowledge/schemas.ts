@@ -71,9 +71,12 @@ function resourceFileNameOf(entry: CuratedEntry): string {
   return `${group}.${version}.${entry.kind}.json`;
 }
 
-function refName(ref: string): string | null {
+function refName(ref: string): string {
   const prefix = '#/components/schemas/';
-  return ref.startsWith(prefix) ? ref.slice(prefix.length) : null;
+  if (!ref.startsWith(prefix) || ref.length === prefix.length) {
+    throw new Error(`不支持的 schema $ref: ${ref}`);
+  }
+  return ref.slice(prefix.length);
 }
 
 function mergeSchemas(items: SchemaNode[]): SchemaNode {
@@ -141,7 +144,7 @@ export const SCHEMA_DEFINITIONS = loadDefinitionRegistry();
  *
  * 为什么懒解析:解析随遍历发生 —— 切片只到 MAX_SCHEMA_DEPTH、校验只到用户 YAML 出现的字段,
  * 都不会解析用不到的深层子树,也不会对已解析节点重复解析(此前的深解析是 O(树²) 且预展开整棵树)。
- * $ref 环:单次调用内沿 $ref/allOf 链累积 seen 截断;跨层由调用方的深度上限 / 数据深度天然收敛。
+ * 单次调用内的缺失、非法或直接成环引用会明确失败；跨属性层的递归结构由调用方的数据深度收敛。
  * 需要看 items 内部(数组元素的 enum / properties)的调用方,对 items 再调一次本函数即可。
  */
 export function resolveSchemaNode(
@@ -150,9 +153,15 @@ export function resolveSchemaNode(
 ): SchemaNode {
   if (node.$ref) {
     const name = refName(node.$ref);
-    if (!name || seen.has(name)) return mergeSiblingKeywords({}, node);
+    if (seen.has(name)) {
+      throw new Error(
+        `schema $ref 直接成环: ${[...seen, name].join(' -> ')}`,
+      );
+    }
     const target = SCHEMA_DEFINITIONS.get(name);
-    if (!target) return mergeSiblingKeywords({}, node);
+    if (!target) {
+      throw new Error(`schema definition 不存在: ${name}`);
+    }
     const resolved = resolveSchemaNode(target, new Set([...seen, name]));
     return mergeSiblingKeywords(resolved, node);
   }

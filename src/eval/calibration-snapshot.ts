@@ -36,6 +36,7 @@ export function buildJudgeCalibrationCaseFromFaith(params: {
 
   return JudgeCalibrationCaseSchema.parse({
     id: label.id,
+    governance: trace.governance,
     category: label.category,
     question: trace.question,
     context: trace.context.text,

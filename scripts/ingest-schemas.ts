@@ -1,7 +1,11 @@
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadAll } from 'js-yaml';
+import {
+  writeSchemaArtifacts,
+  type SchemaIngestionSource,
+} from '../src/knowledge/schema-artifacts';
 
 interface SchemaNode {
   $ref?: string;
@@ -86,31 +90,28 @@ function definitionFileNameOf(name: string): string {
   return `${name}.json`.replace(/\//g, '.');
 }
 
-function writeBundle(bundle: IngestBundle, outDir: string): void {
-  const resourcesDir = join(outDir, 'resources');
-  const definitionsDir = join(outDir, 'definitions');
-  mkdirSync(resourcesDir, { recursive: true });
-  mkdirSync(definitionsDir, { recursive: true });
-
+function writeBundle(
+  bundle: IngestBundle,
+  outDir: string,
+  source: SchemaIngestionSource,
+): { resources: number; definitions: number; removed: number } {
+  const resources = new Map<string, SchemaDoc>();
   for (const doc of bundle.docs) {
-    writeFileSync(join(resourcesDir, resourceFileNameOf(doc)), `${JSON.stringify(doc, null, 2)}\n`);
+    resources.set(resourceFileNameOf(doc), doc);
   }
-  for (const [name, schema] of Object.entries(bundle.definitions).sort(([a], [b]) => a.localeCompare(b))) {
-    writeFileSync(join(definitionsDir, definitionFileNameOf(name)), `${JSON.stringify(schema, null, 2)}\n`);
+  const definitions = new Map<string, SchemaNode>();
+  for (const [name, schema] of Object.entries(bundle.definitions)) {
+    definitions.set(definitionFileNameOf(name), schema);
   }
-  writeFileSync(
-    join(outDir, 'manifest.json'),
-    `${JSON.stringify(
-      {
-        generatedAt: new Date().toISOString(),
-        resources: bundle.docs.length,
-        definitions: Object.keys(bundle.definitions).length,
-        layout: 'resources+definitions',
-      },
-      null,
-      2,
-    )}\n`,
+  const result = writeSchemaArtifacts(
+    { source, resources, definitions },
+    outDir,
   );
+  return {
+    resources: resources.size,
+    definitions: definitions.size,
+    removed: result.removedFiles.length,
+  };
 }
 
 function fromSchemaDir(input: string): IngestBundle {
@@ -233,25 +234,31 @@ function main(): void {
   const outDir = arg('out') ?? join('data', 'schemas', 'generated');
   const input = arg('input') ?? process.argv[process.argv.length - 1]!;
   let bundle: IngestBundle;
+  let ingestionSource: SchemaIngestionSource;
 
   if (source === 'dir') {
+    ingestionSource = 'dir';
     bundle = fromSchemaDir(requireArg('input'));
   } else if (source === 'crd') {
+    ingestionSource = 'crd';
     bundle = fromCrdFile(input);
   } else if (source === 'kubernetes') {
+    ingestionSource = 'kubernetes';
     bundle = fromOpenApiFile(requireArg('input'), 'builtin');
   } else if (source === 'cluster') {
+    ingestionSource = 'cluster';
     bundle = fromOpenApiFile(requireArg('input'), 'cluster');
   } else if (source === 'cluster-discovery') {
+    ingestionSource = 'cluster-discovery';
     bundle = fromClusterDiscovery();
   } else {
     throw new Error(`Unsupported --source ${source}. Use dir, crd, kubernetes, cluster, or cluster-discovery.`);
   }
 
   if (bundle.docs.length === 0) throw new Error(`No schema docs generated from ${input}`);
-  writeBundle(bundle, outDir);
+  const written = writeBundle(bundle, outDir, ingestionSource);
   console.error(
-    `Generated ${bundle.docs.length} schema doc(s) and ${Object.keys(bundle.definitions).length} definition(s) into ${outDir}`,
+    `Generated ${written.resources} resource file(s) and ${written.definitions} definition file(s) into ${outDir}; removed ${written.removed} stale owned file(s)`,
   );
 }
 

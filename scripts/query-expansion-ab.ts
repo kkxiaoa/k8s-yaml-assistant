@@ -1,5 +1,5 @@
-// A3:targeted query expansion 归因 A/B。显式对比共享 search 的 expansion off/on,
-// 只读 reviewed alias,不写 bad-cases/baseline。
+// 对 target gate 通过的非 Holdout retrieval cases 比较 alias 变体。
+// 会调用 Voyage embedding/rerank；只读 alias 和 eval 数据，不写 bad-cases/baseline。
 
 import { config } from 'dotenv';
 config({ override: true });
@@ -9,6 +9,10 @@ import {
   RETRIEVAL_CASES,
   type SemanticRetrievalCase,
 } from '../src/eval/cases/retrieval-cases';
+import {
+  resolveTuningEligibleCasesById,
+  selectCasesForSuite,
+} from '../src/eval/cases/governance';
 import { inferResource } from '../src/retrieval/router';
 import { searchCorpusTraced } from '../src/retrieval/retrieve';
 import {
@@ -74,13 +78,16 @@ function readTargets(): AliasTarget[] {
 }
 
 function loadABCases(): ABCase[] {
-  const evalById = new Map(RETRIEVAL_CASES.map((ec) => [ec.id, ec]));
   const byEvalId = new Map<string, ABCase>();
 
   for (const target of readTargets()) {
-    for (const evalCaseId of target.evalCaseIds) {
-      const evalCase = evalById.get(evalCaseId);
-      if (!evalCase) throw new Error(`eval case 不存在: ${evalCaseId}`);
+    const targetCases = resolveTuningEligibleCasesById(
+      target.evalCaseIds,
+      RETRIEVAL_CASES,
+      `alias target ${target.id}`,
+    );
+    for (const evalCase of targetCases) {
+      const evalCaseId = evalCase.id;
       const existing = byEvalId.get(evalCaseId);
       if (existing) {
         existing.metric ||= target.metric;
@@ -460,8 +467,8 @@ async function runTargeted(): Promise<void> {
 }
 
 async function runAll(): Promise<void> {
-  const cases = RETRIEVAL_CASES;
-  console.error(`A3 full eval A/B semantic cases: ${cases.length} 条`);
+  const cases = selectCasesForSuite(RETRIEVAL_CASES, 'tuning');
+  console.error(`A3 tuning eval A/B semantic cases: ${cases.length} 条`);
 
   const results: AllABResult[] = [];
   for (const evalCase of cases) {

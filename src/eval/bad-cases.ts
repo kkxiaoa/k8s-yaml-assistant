@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import {
   evalArtifactPath,
   readTraceEnvelopes,
 } from './artifacts';
 import { FaithOutcomeSchema } from './faith-store';
+import type { EvalSuite } from './cases/governance';
+import type { EvalRun, TraceEnvelope } from './protocol';
 import { readRun } from './run-store';
 
 const NonEmptyStringSchema = z
@@ -91,6 +94,14 @@ const ModelsSchema = z.strictObject({
   judge: NonEmptyStringSchema.optional(),
 });
 
+const BadCaseEvalScopeSchema = z.enum([
+  'tuning',
+  'holdout',
+  'full',
+  'policy',
+  'smoke',
+]);
+
 export const BadCaseTrackingSchema = z
   .strictObject({
     evalCaseId: NonEmptyStringSchema,
@@ -101,7 +112,7 @@ export const BadCaseTrackingSchema = z
     lastSeenRunId: NonEmptyStringSchema.optional(),
     observedRunIds: z.array(NonEmptyStringSchema),
     occurrenceCount: z.int().positive(),
-    scope: z.enum(['full', 'policy', 'smoke']).optional(),
+    scope: BadCaseEvalScopeSchema.optional(),
     models: ModelsSchema.optional(),
   })
   .superRefine((tracking, context) => {
@@ -201,7 +212,7 @@ const ActualSchema = z.strictObject({
   evaluation: z
     .strictObject({
       runId: NonEmptyStringSchema,
-      scope: z.enum(['full', 'policy', 'smoke']),
+      scope: BadCaseEvalScopeSchema,
       outcome: FaithOutcomeSchema,
       unsupportedClaims: z.array(z.string()),
       judgeReason: z.string().optional(),
@@ -508,7 +519,7 @@ export function writeBadCases(
 export function verifyBadCaseLatestEvidence(
   value: unknown,
   options: BadCaseEvidenceOptions = {},
-): void {
+): { run: EvalRun; envelope: TraceEnvelope } {
   const badCase = decodeBadCase(value);
   const evidence = badCase.latestEvidence;
   if (!evidence) {
@@ -548,6 +559,20 @@ export function verifyBadCaseLatestEvidence(
       `bad case ${badCase.id} evidence trace ${evidence.traceId} has evalCaseId ${envelope.evalCaseId}, expected ${badCase.tracking.evalCaseId}`,
     );
   }
+  const datasetCase = run.dataset.cases.find(
+    (evalCase) => evalCase.id === envelope.evalCaseId,
+  );
+  if (datasetCase === undefined) {
+    throw new Error(
+      `bad case ${badCase.id} evidence case ${envelope.evalCaseId} is missing from run dataset`,
+    );
+  }
+  if (!isDeepStrictEqual(datasetCase.governance, envelope.governance)) {
+    throw new Error(
+      `bad case ${badCase.id} evidence governance does not match run dataset`,
+    );
+  }
+  return { run, envelope };
 }
 
 export function upsertBadCases(
@@ -555,15 +580,19 @@ export function upsertBadCases(
   options: BadCaseUpsertOptions = {},
 ): number {
   const decodedIncoming = normalizeCanonicalBadCases(incoming);
-  for (const badCase of decodedIncoming) {
-    verifyBadCaseLatestEvidence(badCase, { evalRoot: options.evalRoot });
-  }
+  const eligibleIncoming = decodedIncoming.filter((badCase) => {
+    const { envelope } = verifyBadCaseLatestEvidence(badCase, {
+      evalRoot: options.evalRoot,
+    });
+    return envelope.governance.role !== 'holdout';
+  });
+  if (eligibleIncoming.length === 0) return 0;
 
   const repositoryOptions = { path: options.path };
   const existing = readBadCases(repositoryOptions);
   const seen = new Set(existing.map((badCase) => badCase.id));
-  writeBadCases([...existing, ...decodedIncoming], repositoryOptions);
-  return decodedIncoming.filter((badCase) => !seen.has(badCase.id)).length;
+  writeBadCases([...existing, ...eligibleIncoming], repositoryOptions);
+  return eligibleIncoming.filter((badCase) => !seen.has(badCase.id)).length;
 }
 
 export function retrievalMiss(params: {
@@ -576,6 +605,7 @@ export function retrievalMiss(params: {
   actualTopIds: string[];
   rankedIds: string[];
   k: number;
+  scope: EvalSuite;
 }): BadCase {
   const {
     evalCaseId,
@@ -587,6 +617,7 @@ export function retrievalMiss(params: {
     actualTopIds,
     rankedIds,
     k,
+    scope,
   } = params;
   if (!evalCaseId) throw new Error('retrievalMiss requires evalCaseId');
   if (!runId) throw new Error('retrievalMiss requires runId');
@@ -642,6 +673,7 @@ export function retrievalMiss(params: {
       lastSeenRunId: runId,
       observedRunIds: [runId],
       occurrenceCount: 1,
+      scope,
     },
     latestEvidence: { runId, traceId },
   });

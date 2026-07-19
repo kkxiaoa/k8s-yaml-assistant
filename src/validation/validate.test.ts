@@ -105,4 +105,50 @@ check('PVC 嵌套字段枚举非法(spec.accessModes)', () => {
   assert.ok(e.some((x) => x.path.startsWith('spec.accessModes')));
 });
 
+check('IntOrString 联合类型接受整数或字符串并拒绝 boolean', () => {
+  const service = (targetPort: unknown) => ({
+    apiVersion: 'v1',
+    kind: 'Service',
+    metadata: { name: 'web' },
+    spec: { ports: [{ port: 80, targetPort }] },
+  });
+
+  assert.equal(has(validateResource(service(8080)), 'spec.ports[0].targetPort'), false);
+  assert.equal(has(validateResource(service('http')), 'spec.ports[0].targetPort'), false);
+  const errors = validateResource(service(true));
+  assert.ok(
+    errors.some(
+      (error) =>
+        error.path === 'spec.ports[0].targetPort' &&
+        error.message.includes('联合类型'),
+    ),
+  );
+});
+
+check('Quantity 联合类型接受字符串或数字并拒绝对象', () => {
+  const pvc = (storage: unknown) => ({
+    apiVersion: 'v1',
+    kind: 'PersistentVolumeClaim',
+    metadata: { name: 'my-pvc' },
+    spec: { resources: { requests: { storage } } },
+  });
+
+  assert.equal(
+    has(validateResource(pvc('1Gi')), 'spec.resources.requests.storage'),
+    false,
+  );
+  assert.equal(
+    has(validateResource(pvc(1)), 'spec.resources.requests.storage'),
+    false,
+  );
+  const errors = validateResource(pvc({ value: '1Gi' }));
+  assert.ok(
+    errors.some(
+      (error) =>
+        error.path === 'spec.resources.requests.storage' &&
+        error.message.includes('联合类型'),
+    ),
+  );
+});
+
 console.log(`\n通过 ${passed} 项`);

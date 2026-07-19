@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
+import type Anthropic from '@anthropic-ai/sdk';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CORPUS } from '../knowledge/corpus';
+import {
+  GROUNDED_ANSWER_CASES,
+  resolveGroundedAnswerCase,
+} from '../eval/cases/grounded-answer-cases';
+import { textOfRequest } from '../eval/llm';
 import {
   appendServingTrace,
   appendTraceToPath,
@@ -11,7 +17,14 @@ import {
   toTraceHit,
   SERVING_TRACES_PATH,
 } from '../retrieval/trace';
-import { retrieveContext, type RetrieveContextOptions } from './pipeline';
+import {
+  ANSWER_MODEL,
+  ASK_MAX_TOKENS,
+  ASK_SYSTEM,
+  prepareAsk,
+  retrieveContext,
+  type RetrieveContextOptions,
+} from './pipeline';
 
 let passed = 0;
 async function check(
@@ -277,5 +290,69 @@ await check('exact path 未命中时回到 search path', async () => {
     ['schema::v1::Service::spec.type'],
   );
 });
+
+await check(
+  '错误解释复用真实 fixture、Ask 检索和共享模型请求',
+  async () => {
+    const evalCase = GROUNDED_ANSWER_CASES.find(
+      (candidate) => candidate.id === 'error-deployment-replicas-type',
+    );
+    assert.ok(evalCase);
+    const resolved = resolveGroundedAnswerCase(evalCase);
+    assert.ok(resolved.editorContext);
+
+    let searchCalled = false;
+    const search: RetrieveContextOptions['search'] = async () => {
+      searchCalled = true;
+      throw new Error('exact error path must not call search');
+    };
+    const prepared = await prepareAsk({
+      question: resolved.question,
+      k: 3,
+      editorContext: resolved.editorContext,
+      mode: 'explain_error',
+      retrievalOptions: { search, queryExpansion: false },
+    });
+
+    assert.equal(searchCalled, false);
+    assert.equal(prepared.trace.mode, 'explain_error');
+    assert.equal(prepared.trace.fieldPathHint, 'spec.replicas');
+    assert.match(prepared.trace.queryText, /spec\.replicas/);
+    assert.match(prepared.trace.queryText, /错误:/);
+    assert.deepEqual(
+      prepared.hits.map((hit) => hit.id),
+      [
+        'schema::apps/v1::Deployment::spec.replicas',
+        'policy.deployment.replicas.min-two',
+      ],
+    );
+    assert.equal(prepared.request.system, ASK_SYSTEM);
+    assert.equal(prepared.request.model, ANSWER_MODEL);
+    assert.equal(prepared.request.max_tokens, ASK_MAX_TOKENS);
+    const userMessage = prepared.request.messages[0]?.content;
+    assert.equal(typeof userMessage, 'string');
+    assert.match(userMessage as string, /<ask_mode>\nexplain_error/);
+    assert.match(userMessage as string, /<current_yaml>/);
+    assert.match(userMessage as string, /replicas: "3"/);
+    assert.match(userMessage as string, /spec\.replicas/);
+
+    const requests: unknown[] = [];
+    const client = {
+      messages: {
+        create: async (request: unknown) => {
+          requests.push(request);
+          return {
+            content: [{ type: 'text', text: 'replicas 应使用整数。' }],
+          };
+        },
+      },
+    } as unknown as Anthropic;
+    assert.equal(
+      await textOfRequest(client, prepared.request),
+      'replicas 应使用整数。',
+    );
+    assert.deepEqual(requests, [prepared.request]);
+  },
+);
 
 console.log(`\n通过 ${passed} 项`);

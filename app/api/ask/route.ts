@@ -1,9 +1,6 @@
 import {
   getClient,
-  retrieveContext,
-  ASK_SYSTEM,
-  ANSWER_MODEL,
-  formatEditorContext,
+  prepareAsk,
   type AskMode,
   type EditorContext,
 } from '@/server/pipeline';
@@ -34,13 +31,12 @@ export async function POST(req: Request): Promise<Response> {
     body.mode === 'explain_field' || body.mode === 'explain_error'
       ? body.mode
       : 'free';
-  const { context, hits, sources } = await retrieveContext(
+  const { hits, sources, request } = await prepareAsk({
     question,
-    3,
     editorContext,
     mode,
-    { traceSink: appendServingTrace },
-  );
+    retrievalOptions: { traceSink: appendServingTrace },
+  });
   // 合并引用编号和 formatSources 规范化后的 provenance。
   const cited = hits.map((h, i) => ({
     ...h,
@@ -49,17 +45,7 @@ export async function POST(req: Request): Promise<Response> {
   }));
   const client = getClient();
 
-  const stream = client.messages.stream({
-    model: ANSWER_MODEL,
-    max_tokens: 2048,
-    system: ASK_SYSTEM,
-    messages: [
-      {
-        role: 'user',
-        content: `参考以下上下文和 K8s 字段文档片段回答问题。\n\n<ask_mode>\n${mode}\n</ask_mode>\n\n${formatEditorContext(editorContext)}\n\n<current_yaml>\n${editorContext?.yaml ?? '无'}\n</current_yaml>\n\n<docs>\n${context}\n</docs>\n\n问题:${question}`,
-      },
-    ],
-  });
+  const stream = client.messages.stream(request);
 
   const readable = new ReadableStream<Uint8Array>({
     async start(controller) {

@@ -14,6 +14,8 @@ data/schemas/generated/
 # 持久化索引:派生自 CORPUS + 嵌入模型,体积大(~33MB f32)。由 index:build / CI 重建,不入 git。
 data/index/
 data/index-ab/
+# 未审核 alias 草稿只用于本地人工审核；正式注册表单独提交。
+data/aliases/drafts/
 # eval run 与逐 case trace 是可重建的本地证据，不入 Git。
 data/eval/runs/
 data/eval/traces/

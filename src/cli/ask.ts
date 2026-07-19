@@ -1,15 +1,8 @@
-// 迭代0 主流程:检索 → 拼上下文 → 流式作答。
-// 跑通它,你就同时摸到了 RAG 的四个点:切片(corpus)/ 向量库(retrieve)/ 检索(cosine)/ 流式(下面)。
-//
-
-// 用法: npm run ask -- "reclaimPolicy 能填哪些值?默认是什么?"
-
 import { config } from 'dotenv';
 config({ override: true }); // 用 .env 覆盖继承的同名环境变量
+import { pathToFileURL } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
-import { buildIndex, retrieve } from '../retrieval/retrieve';
-import { inferResource } from '../retrieval/router';
-import { rerank, COARSE_N } from '../retrieval/rerank';
+import { retrieveContext } from '../server/pipeline';
 
 const SYSTEM_PROMPT = `你是一位精通 Kubernetes 资源模型的助手,服务于一个容器云平台控制台。
 你的任务是基于给定的 K8s 字段文档片段,准确回答用户关于资源配置的问题。
@@ -19,6 +12,20 @@ const SYSTEM_PROMPT = `你是一位精通 Kubernetes 资源模型的助手,服�
 - 如果片段不足以回答,明确说"提供的文档片段中没有相关信息",不要猜。
 - 回答简洁、准确,涉及枚举值时把合法取值列全。
 - 用中文回答。`;
+
+type AskRetrievalResult = Awaited<ReturnType<typeof retrieveContext>>;
+
+export type AskRetriever = (
+  question: string,
+  k: number,
+) => Promise<AskRetrievalResult>;
+
+export function retrieveAskDocuments(
+  question: string,
+  retriever: AskRetriever = retrieveContext,
+): Promise<AskRetrievalResult> {
+  return retriever(question, 3);
+}
 
 async function main(): Promise<void> {
   const question = process.argv.slice(2).join(' ').trim();
@@ -37,45 +44,35 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 用 Anthropic SDK 接 DeepSeek:只换 baseURL + key。
-  // 以后换回真 Claude:baseURL 删掉(走官方),apiKey 换 ANTHROPIC_API_KEY,模型名照常即可。
   const client = new Anthropic({
     baseURL: 'https://api.deepseek.com/anthropic',
     apiKey: process.env.DEEPSEEK_API_KEY,
   });
 
-  console.error('[1/3] 构建向量索引(embedding 语料)...');
-  const index = await buildIndex();
-
-  // ② 路由+软加权做粗召回;④ rerank 精排
-  const routed = inferResource(question);
+  console.error('[1/2] 共享检索：校验持久化索引 → 粗召回 → 重排...');
+  const { context, hits, trace } = await retrieveAskDocuments(question);
+  const indexCache = trace.cache?.index;
+  let indexState = '状态未知';
+  if (indexCache?.status === 'hit') indexState = '命中';
+  if (indexCache?.status === 'rebuilt') {
+    indexState = `已重建（${indexCache.reason}）`;
+  }
+  if (indexCache?.status === 'not_used') indexState = '未使用';
   console.error(
-    `[2/3] 路由 → ${routed ?? '(未识别)'};粗召回 top-${COARSE_N} → rerank 精排 top-3...`,
+    `      索引：${indexState}；路由：${trace.resourceHint ?? '未识别'}；路径：${trace.path === 'exact' ? '精确字段' : '语义检索'}`,
   );
-  const coarse = await retrieve(question, index, COARSE_N, routed ?? undefined);
-  const reranked = await rerank(
-    question,
-    coarse.map((h) => h.chunk.text),
-    3,
-  );
-  const hits = reranked.map((r) => ({
-    chunk: coarse[r.index]!.chunk,
-    score: r.score,
-  }));
   for (const h of hits) {
-    console.error(`      · ${h.chunk.title}  (rerank ${h.score.toFixed(3)})`);
+    console.error(
+      `      · ${h.title}${h.score === undefined ? '' : `  （分数 ${h.score.toFixed(3)}）`}`,
+    );
   }
 
-  const context = hits
-    .map((h) => `## ${h.chunk.title}\n${h.chunk.text}`)
-    .join('\n\n');
-
-  console.error('\n[3/3] 流式作答(DeepSeek via Anthropic 兼容端点):\n');
+  console.error('\n[2/2] 通过 DeepSeek 兼容端点流式作答：\n');
   const stream = client.messages.stream({
-    // claude-sonnet* → DeepSeek 映射到 deepseek-v4-flash(便宜);要更强可用 claude-opus-4-8 → deepseek-v4-pro
+    // DeepSeek 兼容端点将该模型名映射到 deepseek-v4-flash。
     model: 'claude-sonnet-4-6',
     max_tokens: 2048,
-    // 注意:DeepSeek 兼容端点不支持 cache_control,所以这里不加(换回真 Claude 时再加上以省钱)
+    // DeepSeek 兼容端点不支持 cache_control。
     system: SYSTEM_PROMPT,
     messages: [
       {
@@ -93,7 +90,10 @@ async function main(): Promise<void> {
   console.error(`[usage] input=${u.input_tokens} output=${u.output_tokens}`);
 }
 
-main().catch((e: unknown) => {
-  console.error('\n错误:', e instanceof Error ? e.message : String(e));
-  process.exit(1);
-});
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
+  void main().catch((e: unknown) => {
+    console.error('\n错误:', e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  });
+}

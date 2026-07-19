@@ -31,6 +31,11 @@ function check(name: string, fn: () => void): void {
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
 
 function retrievalMetrics() {
   return {
@@ -55,7 +60,10 @@ function retrievalRun(): Extract<EvalRun, { kind: 'retrieval' }> {
     dataset: {
       id: 'retrieval/semantic',
       hash: HASH_A,
-      caseIds: ['case-1', 'case-2'],
+      cases: [
+        { id: 'case-1', governance: GOVERNANCE },
+        { id: 'case-2', governance: GOVERNANCE },
+      ],
       caseCount: 2,
     },
     artifactPaths: { trace: 'traces/current-run.retrieval.jsonl' },
@@ -114,7 +122,7 @@ function generationBaseline(): Extract<EvalBaseline, { kind: 'generation' }> {
     dataset: {
       id: 'generation/full',
       hash: HASH_A,
-      caseIds: ['case-1'],
+      cases: [{ id: 'case-1', governance: GOVERNANCE }],
       caseCount: 1,
     },
     metricDefinitionVersion: METRIC_DEFINITION_VERSION,
@@ -224,7 +232,7 @@ check('comparison identity rejects kind, dataset, version, and retrieval k chang
         ...baseline,
         dataset: {
           ...baseline.dataset,
-          caseIds: ['case-1'],
+          cases: [{ id: 'case-1', governance: GOVERNANCE }],
           caseCount: 1,
         },
       },

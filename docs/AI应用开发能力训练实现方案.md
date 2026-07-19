@@ -1,7 +1,7 @@
 # AI 应用开发能力训练实现方案
 
 > 状态：当前执行依据。
-> 最近核对：2026-07-16。
+> 最近核对：2026-07-19。
 > 用途：维护当前能力状态、质量门禁和唯一执行顺序。具体数据契约由已确认的 design/spec 定义，不在本文重复维护。
 
 ## 1. 项目目标
@@ -45,7 +45,7 @@
 
 ## 3. 当前事实快照
 
-以下数字只是 2026-07-12 的工作区快照，不是永久规格。若与命令输出冲突，以命令输出为准。
+以下数字只是 2026-07-19 的工作区快照，不是永久规格。若与命令输出冲突，以命令输出为准。
 
 ### 3.1 Corpus
 
@@ -57,28 +57,32 @@ npm run corpus:stats
 
 当前结果：
 
-- `8,127` chunks。
-- `26` 个 curated resources。
-- `8,085` schema chunks。
+- `8,410` chunks。
+- `28` 个 curated resources。
+- `8,368` schema chunks。
 - `42` policy chunks。
 - 已注册 provider：`schema`、`policy`。
 - 尚未注册真实数据 provider：`docs`、`example`。
-- `data/schemas/curated.json` 的显式 `crd` 集合仍为空，真实 CRD 训练样本尚未形成独立覆盖层。
+- `data/schemas/curated.json` 显式包含 2 个真实集群 CRD（自定义资源定义）：`gateway.networking.k8s.io/v1 HTTPRoute` 和 `cert-manager.io/v1 Certificate`。
+- corpus content hash（语料内容哈希）为 `ae509a3b469ce6c8d6da078901eb72c4976e1a04f6ad59dc5294378d25c5042e`，manifest hash（清单哈希）为 `a8a8cfb843289b7b66b37e6864221e887942f6183da97c9848ea93ea6b689daa`。
+- 现有 `data/index` 仍对应 `8,127` chunks，当前读取结果为 `corpus_count_mismatch`；默认 `voyage-3` 的新 index expectation hash（索引期望哈希）为 `4edcbaf350ef50e8a2d0c8a8dc25ba3cf435fe7d6d974749470c132fa01e6274`，尚未重建。
 
 ### 3.2 Eval 数据
 
-当前检索与 Grounded Answer 数据集：
+当前数据集由 `npm run eval:check` 核对：
 
-- Semantic Retrieval 为 81 条 self-contained 可答 case，只测 semantic retrieval pipeline。
-- Grounded Answer 为 86 条 case，其中 81 条显式引用 retrieval case，5 条为独立拒答案例。
-- 主要覆盖字段解释，尚缺系统化的错误解释、真实 CRD 和 holdout。
-- 当前 case 尚未形成 task/origin/role 与 development/regression/holdout 用途分层。
+| 数据集 | 数量 | task（任务） | origin（来源） | role（角色） |
+|---|---:|---|---|---|
+| Semantic Retrieval（语义检索） | 83 | field_explanation=74，policy_explanation=9 | human=83 | development=71，regression=11，holdout=1 |
+| Grounded Answer（有依据回答） | 88 | field_explanation=74，policy_explanation=9，error_explanation=2，refusal=3 | human=88 | development=76，regression=11，holdout=1 |
+| Generation（生成） | 27 | generation=27 | human=27 | development=26，holdout=1 |
+| Fix（修复） | 9 | fix=9 | human=9 | development=8，holdout=1 |
 
-当前生成数据集：
-
-- Generation 26 条，其中多资源 case 6 条。
-- Fix 8 条。
-- 资源值断言、跨资源关系、修复保留/副作用检查和 fixture preflight 已进入 evaluator；正式指标仍待新版本 full run 验证。
+- Grounded Answer 由 83 条 retrieval 引用、2 条真实 validation error（校验错误）解释和 3 条独立拒答组成。
+- Retrieval/Grounded Answer 的 Holdout（留出集）是 `Certificate.spec.issuerRef`；Generation 是 DaemonSet；Fix 是 HPA `spec.maxReplicas` 类型修复。
+- 当前 origin 仍缺 `schema_generated` 和 `bad_case` 样本。这是实际分布，不为填满分桶新增送分题。
+- 错误解释自动门禁覆盖真实 Fix fixture（修复夹具）、validator（校验器）、Ask 检索与 Faithfulness（忠实度）；correctness（正确性）和完整性尚未完整自动覆盖，首次 full trace（完整集轨迹）必须人工审核。
+- 资源值断言、跨资源关系、修复保留/副作用检查和 fixture preflight（夹具预检）已进入 evaluator（评估器）；正式指标仍待新版本 full run（完整集运行）验证。
 
 ### 3.3 能力状态
 
@@ -274,11 +278,11 @@ Stage 是能力分类，不代表执行时序。
 
 | Stage | 能力主题 | 当前状态 | 未完成出口 |
 |---|---|---|---|
-| 0 | Scope 与评估代表性 | curated 26 resources 已落地 | 增加真实 CRD 样本；建立 origin/role/task 分层和 holdout |
+| 0 | Scope 与评估代表性 | curated 28 resources、治理分层和首批 Holdout 已落地 | 用新版本 full run 验证代表性并人工审核错误解释 |
 | 1 | YAML Copilot 工作流 | 基础闭环完成 | 持续保持 editor-context 场景，不扩张产品叙事 |
-| 2 | 质量工程底座 | 第一轮已实现，correctness 待纠偏 | 完成 artifact/metric/evaluator/provenance 契约；贯通 usage/cost |
+| 2 | 质量工程底座 | artifact/metric/evaluator/provenance/governance 契约已纠偏 | 重建正式 baseline；贯通 usage/cost |
 | 3 | 检索优化 | query expansion 已落地，Hybrid 未触发 | 新 baseline 下复测 rerank；证据触发后再选方案 |
-| 4 | Generate/Fix | agentic repair loop 和 eval runner 已有 | 修正 case contract、关系断言、fixture preflight 和指标语义 |
+| 4 | Generate/Fix | case contract、关系断言、fixture preflight 和指标语义已纠偏 | 执行新版本 full eval 并审核 baseline |
 | 5 | Grounding/Judge | `[S]` 引用和 policy judge 基础已有 | judge 重新校准；answer quality 分维度；Claim-level Grounding |
 | 6.1 | Policy | Ask 侧已完成 | Generate/Fix policy lint 需独立设计 |
 | 6.2 | Official Docs | 未开始 | provider、版本化 ingestion、behavior eval |
@@ -290,21 +294,22 @@ Stage 是能力分类，不代表执行时序。
 
 ### Phase A：质量底座纠偏（结构实现完成）
 
-1. 已完成：四份 2026-07-12 corrective specs 及其一对一 implementation plans 已交叉自审并落盘。
-2. 已完成：Eval Artifact Protocol 已实施并完成 review。
-3. 已完成：Knowledge Provenance/Corpus Identity 与 Evaluator Validity 已实施并完成逐 Task review。
-4. 已实现：Metric Semantics registry、N/A/分母、compare、promotion 和全 harness 本地门禁；正式 baseline 重建不属于结构实现完成条件。
-5. 当前边界：未执行真实模型 eval，未晋升任何 baseline，不根据旧指标优化 retrieval/prompt/model。
-6. 已完成提交数据的一次性 canonical identity 迁移；ignored runs/traces 不兼容读取，正式 eval 前按当前 identity 清理重建。
+1. 已完成：四份 2026-07-12 纠偏设计及其一对一实施计划已交叉自审并落盘。
+2. 已完成：Eval Artifact Protocol（评估产物协议）已实施并完成审核。
+3. 已完成：Knowledge Provenance / Corpus Identity（知识来源 / 语料身份）与 Evaluator Validity（评估器有效性）已实施并完成逐任务审核。
+4. 已完成：Metric Semantics（指标语义）注册表、N/A（不适用）/ 分母、比较、晋升和全评估框架本地门禁已经实施并完成逐任务审核；正式 baseline（基线）重建不属于结构实现完成条件。
+5. 当前边界：未执行真实模型评估，未晋升任何 baseline（基线），不根据旧指标优化检索、提示词或模型。
+6. 已完成提交数据的一次性 canonical identity（规范身份）迁移；ignored runs/traces（被忽略的运行 / 轨迹产物）不兼容读取，正式评估前按当前身份清理重建。
 
 ### Phase B：工程收尾与重建尺子（当前）
 
-1. 收敛 test runner、根 README 命令入口和 scripts inventory，删除有证据证明无引用的历史脚本；不新增平行 CLI 文档。
-2. 完成 docs 状态和引用清理，不让历史文档覆盖当前路线。
-3. 迁移现有 eval case contract，增加 task/origin/role 元数据。
-4. 补第一批错误解释、真实 CRD 和 holdout case；规模以代表性为目标，不以凑数为目标。
-5. 重建 index 和 run artifacts，依次运行 retrieval、faith、judge、generation、fix。
-6. 只在人工审核指标、trace 和 bad case 后晋升各 kind baseline。
+1. 已完成：收敛 test runner（测试运行器）、根 README 命令入口和 scripts inventory（脚本清单）；当前没有证据支持删除脚本，不新增平行 CLI（命令行界面）文档。
+2. 已完成：清理 docs（文档）状态和引用，不让历史文档覆盖当前路线。
+3. 已完成：工程清理登记的 Deferred Risk Closure（延期风险收敛）第 1-6 项均已核对、处理并完成审核。
+4. 已完成：Case Governance（评估用例治理）已贯通 case contract、artifact、suite、泄漏门禁和分桶报告。
+5. 已完成：补入 2 条真实错误解释、2 个真实 CRD（自定义资源定义）主题和 Retrieval/Grounded Answer、Generation、Fix 的首批 Holdout（留出集）。
+6. 当前下一项：清理 ignored artifacts（被忽略的产物），重建 index（索引）和 run artifacts（运行产物），依次运行 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）评估。
+7. 首次 full（完整集）评估必须人工审核错误解释 trace（轨迹）的 correctness（正确性）和完整性；只在人工审核指标、trace 和 bad case（问题用例）后晋升各 kind baseline（类别基线）。
 
 ### Phase C：剩余质量债
 

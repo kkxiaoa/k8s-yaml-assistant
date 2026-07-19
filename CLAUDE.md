@@ -4,22 +4,11 @@
 训练重点:**RAG 问答 / YAML 校验 / Generate-Fix 生成修复 / Eval / Trace / Feedback**。
 执行前先读 `AGENTS.md`。项目定位见 `docs/AI应用开发训练方案-K8s-YAML-Copilot.md`,唯一实施路线见 `docs/AI应用开发能力训练实现方案.md`。
 
-当前质量闸:先修正 eval artifact、指标语义、evaluator 有效性和 knowledge provenance。纠偏完成前不晋升 baseline,不根据旧指标继续优化 retrieval/prompt/model。
+四份 2026-07-12 质量纠偏计划、Phase B（阶段 B）工程清理和 Deferred Risk Closure（延期风险收敛）第 1-6 项已完成审核。Case Governance（评估用例治理）已完成实现和本地门禁；完成新版本完整评估前，不晋升 baseline（基线），不根据旧指标优化 retrieval、prompt 或模型。
 
-## 命令
+## 命令入口
 
-| 命令                           | 作用                                                                  |
-| ------------------------------ | --------------------------------------------------------------------- |
-| `npm run ask -- "<问题>"`      | RAG 问答(CLI,流式)                                                    |
-| `npm run check -- <file.yaml>` | 校验任意资源(schema 驱动,Tool Use)                                    |
-| `npm run gen -- "<需求>"`      | 生成 YAML + 自检修正闭环                                              |
-| `npm run eval`                 | Semantic retrieval 评估:Recall@k / MRR                               |
-| `npm run eval:faith`           | Grounded answer / Faithfulness 评估                                   |
-| `npm run eval:judge`           | Judge calibration                                                     |
-| `npm run eval:gen`             | Generation 评估                                                        |
-| `npm run eval:fix`             | Fix 评估                                                               |
-| `npm test`                     | 本地确定性测试集合                                                      |
-| `npm run dev`                  | Next.js Web(Monaco 编辑器 + RAG 问答 + 校验)                          |
+面向使用者的完整命令、外部调用、费用和写盘边界只维护在根 `README.md`；`scripts/README.md` 只记录维护者级 scripts inventory（脚本清单），不作为平行 CLI（命令行界面）文档。
 
 ## 目录结构(分层)
 
@@ -44,7 +33,7 @@ data/schemas/    generated registry + curated 白名单(知识源)
 数据流:`data/schemas/generated/{resources,definitions} + data/schemas/curated.json
 → knowledge/schemas(本地 ref registry + curated 加载)
 → knowledge/schema-corpus(schema→chunk)→ knowledge/corpus
-→ retrieval/retrieve(向量+余弦)+ router(软路由)+ rerank(精排)→ server/pipeline → CLI / Web`
+→ retrieval/retrieve(向量+余弦)+ router(软路由)+ rerank(精排)→ server/pipeline → Web / API`
 
 ## 设计基因:三大支柱(意图不可预知 → 押注这三个)
 
@@ -65,8 +54,8 @@ data/schemas/    generated registry + curated 白名单(知识源)
 - **前端分层(Next.js 最佳实践)**:`app/` 只放路由(page/layout/route);**`app/ui/` = UI 层**(展示组件,纯展示、状态与副作用都在 `page.tsx` 这个薄组合根里);`app/lib/` = 前端逻辑/工具。跨层访问后端用 `@/` 别名(`@/server/pipeline`),不写 `../../../`。新建展示组件放 `app/ui/`,新建前端纯逻辑放 `app/lib/`。**与 `/api/*` 的通信封装在 `app/lib/api.ts`,组件/page 不直接 `fetch`**(page 只做状态编排)。
 - **前端栈**:Tailwind v4(`@theme` token + `app/globals.css`)+ IBM Plex Mono/Sans(next/font),经典 VSCode Dark 风格(中性灰黑底 + VSCode 蓝 #3f9dff 强调,极淡中性网格);资源感知(从 YAML 解析 kind/apiVersion)+ Monaco 内联报错标记(path→行)。UI 用 `frontend-design` 技能。
 - **知识库 schema 驱动**:资源/CRD 应通过 ingestion pipeline 进入 `data/schemas/generated/{resources,definitions}`,不要靠手工 import 或 `data/schemas/*.json` fixture 扩覆盖。`resources` 存资源入口,`definitions` 存 OpenAPI `$ref` registry,运行时本地解析引用。
-- **单一 semantic retrieval 实现**:CLI / Web / eval 共用 query expansion、软加权、dense retrieval 和 rerank。Editor exact-field 分流由独立 pipeline 测试验证,不混入 semantic retrieval Recall/MRR。当前约束见实现方案的“当前质量契约”和“Retrieval 决策”。
-- **测量驱动**:改了切片/检索/路由/模型,必须与同 kind、同 dataset hash、同 metric definition version 的 baseline 对比。当前 baseline 在 correctness 纠偏完成前不得晋升。
+- **共享 semantic retrieval（语义检索）实现**:CLI（命令行界面）、Web serving（在线服务）与 eval（评估）共用 query expansion（查询扩展）、软加权、dense retrieval（稠密检索）、rerank（重排）和持久化索引身份协议。Editor exact-field（编辑器精确字段）分流由独立 pipeline（管线）测试验证，不混入 semantic retrieval Recall/MRR（语义检索召回率 / 平均倒数排名）。
+- **测量驱动**:改了切片、检索、路由或模型，必须与同 kind、同 dataset hash（数据集哈希）、同 metric definition version（指标定义版本）的 baseline（基线）对比。当前尚无新口径 baseline（基线），不得用旧指标证明收益。
 
 - **注释与文档精简**:注释只解释"为什么/非显然意图",不复述代码,不写对话上下文(决策过程、方案对比、"这轮/之前/收回"、历史演变——那些进 commit / PR)。文档少写铺垫,提示用简短 tips。长对话易积累上下文注释、污染阅读与模型,发现即精简为合理注释或删除。
 
@@ -74,11 +63,11 @@ data/schemas/    generated registry + curated 白名单(知识源)
 
 - `.env` 含真实 API key,已 gitignore,**绝不提交**;`.env.example` 是模板。
 - Voyage 限流和计费以当前账号配置为准。运行全量 model eval 或重建 embedding index 前先说明调用范围和成本。
-- LLM-as-judge 有 ~5-10% 噪声:Faithfulness 数字异常时**先验证裁判判得对不对**,别急着改模型(教训见 `docs/RAG-复盘-03`)。
+- LLM-as-judge（大模型裁判）有 ~5-10% 噪声：Faithfulness（忠实度）数字异常时**先验证裁判判得对不对**，别急着改模型（教训见 `docs/RAG-复盘-03-生成层评估与修尺子.md`）。
 - DeepSeek 兼容端点**不支持** `cache_control`、图片、结构化输出;只用文本 + tool use。
 
 ## 复盘文档(面试素材 + 决策依据)
 
-- `docs/RAG-复盘-01`:检索原理 + 切片 + 定位故障层决策树
-- `docs/RAG-复盘-02`:检索硬化(元数据过滤/路由/软加权/rerank),全程评估驱动
-- `docs/RAG-复盘-03`:生成层评估 + "修尺子"(发现并修复评估工具自身缺陷)
+- `docs/RAG-复盘-01-检索原理与工程难点.md`：检索原理、切片和定位故障层决策树。
+- `docs/RAG-复盘-02-检索硬化与评估驱动.md`：检索硬化（元数据过滤、路由、软加权、重排）和评估驱动过程。
+- `docs/RAG-复盘-03-生成层评估与修尺子.md`：生成层评估和“修尺子”复盘。

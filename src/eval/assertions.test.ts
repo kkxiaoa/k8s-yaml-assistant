@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import {
+  assertFixCaseContract,
   assertGenerationCaseContract,
   assertGenerationCasesContract,
+  evaluateExpectedResource,
   evaluateFixResourceSet,
   evaluateGenerationAssertions,
   preflightFixCases,
@@ -13,6 +15,17 @@ import {
 } from './assertions';
 import { FIX_CASES } from './cases/fix-cases';
 import { GENERATION_CASES } from './cases/generation-cases';
+
+const GENERATION_DEVELOPMENT = {
+  task: 'generation',
+  origin: 'human',
+  role: 'development',
+} as const;
+const FIX_DEVELOPMENT = {
+  task: 'fix',
+  origin: 'human',
+  role: 'development',
+} as const;
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -75,6 +88,7 @@ const webDeployment: KubernetesDocument = {
 
 const typeErrorFixCase: FixCase = {
   id: 'fixture-type-error',
+  governance: FIX_DEVELOPMENT,
   brokenYaml: `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -472,6 +486,7 @@ check('invalid case references fail preflight instead of becoming model failures
     () =>
       assertGenerationCaseContract({
         id: 'invalid',
+        governance: GENERATION_DEVELOPMENT,
         requirement: 'invalid relation',
         expectedResources: [
           resource('deployment', 'Deployment', 'web', [
@@ -492,6 +507,7 @@ check('invalid case references fail preflight instead of becoming model failures
     () =>
       assertGenerationCaseContract({
         id: 'wrong-types',
+        governance: GENERATION_DEVELOPMENT,
         requirement: 'invalid relation endpoint types',
         expectedResources: [
           resource('deployment', 'Deployment', 'web', [
@@ -510,6 +526,41 @@ check('invalid case references fail preflight instead of becoming model failures
         ],
       }),
     /must identify Service/,
+  );
+});
+
+check('generation and fix governance tasks must match their case family', () => {
+  const {
+    governance: _generationGovernance,
+    ...generationWithoutGovernance
+  } = GENERATION_CASES[0]!;
+  const {
+    governance: _fixGovernance,
+    ...fixWithoutGovernance
+  } = typeErrorFixCase;
+  assert.throws(() =>
+    assertGenerationCaseContract(
+      generationWithoutGovernance as typeof GENERATION_CASES[number],
+    ),
+  );
+  assert.throws(() =>
+    assertFixCaseContract(fixWithoutGovernance as FixCase),
+  );
+  assert.throws(
+    () =>
+      assertGenerationCaseContract({
+        ...GENERATION_CASES[0]!,
+        governance: { ...GENERATION_DEVELOPMENT, task: 'fix' },
+      }),
+    /generation.*task/i,
+  );
+  assert.throws(
+    () =>
+      assertFixCaseContract({
+        ...typeErrorFixCase,
+        governance: { ...FIX_DEVELOPMENT, task: 'generation' },
+      }),
+    /fix.*task/i,
   );
 });
 
@@ -571,6 +622,7 @@ check('fix preflight distinguishes true parse errors and requires a unique targe
 check('parse-error preflight does not claim structural checks on broken YAML', () => {
   const parseOnlyCase: FixCase = {
     id: 'fixture-parse-only',
+    governance: FIX_DEVELOPMENT,
     brokenYaml: 'data: [',
     defectType: 'parse_error',
     target: { apiVersion: 'v1', kind: 'ConfigMap', name: 'declared-target' },
@@ -653,9 +705,152 @@ check('parse-error repair accepts only the declared target resource set', () => 
   ]);
 });
 
-check('all 8 fix fixtures pass full-dataset preflight', () => {
+check('DaemonSet holdout asserts identity, image, and selector-label relation', () => {
+  const evalCase = GENERATION_CASES.find(
+    (candidate) => candidate.id === 'daemonset-holdout',
+  );
+  assert.ok(evalCase);
+  assert.deepEqual(evalCase.governance, {
+    task: 'generation',
+    origin: 'human',
+    role: 'holdout',
+  });
+  assert.deepEqual(evalCase.expectedResources[0]?.identity, {
+    apiVersion: 'apps/v1',
+    kind: 'DaemonSet',
+    name: 'node-agent',
+  });
+  assert.deepEqual(evalCase.relations, [
+    {
+      type: 'workload_selector_matches_template_labels',
+      workloadRef: 'daemonset',
+    },
+  ]);
+
+  const daemonSet: KubernetesDocument = {
+    apiVersion: 'apps/v1',
+    kind: 'DaemonSet',
+    metadata: { name: 'node-agent' },
+    spec: {
+      selector: { matchLabels: { app: 'node-agent' } },
+      template: {
+        metadata: { labels: { app: 'node-agent' } },
+        spec: {
+          containers: [
+            {
+              name: 'node-agent',
+              image: 'registry.example.com/ops/node-agent:1.0',
+            },
+          ],
+        },
+      },
+    },
+  };
+  assert.equal(evaluateGenerationAssertions(evalCase, [daemonSet]).pass, true);
+  assert.equal(
+    evaluateGenerationAssertions(evalCase, [
+      { ...daemonSet, metadata: { name: 'other' } },
+    ]).resourceMatchPass,
+    false,
+  );
+  const wrongImage = structuredClone(daemonSet);
+  const containers = (
+    (wrongImage.spec as Record<string, unknown>).template as Record<
+      string,
+      unknown
+    >
+  ).spec as Record<string, unknown>;
+  (containers.containers as Array<Record<string, unknown>>)[0]!.image =
+    'registry.example.com/ops/node-agent:2.0';
+  assert.equal(
+    evaluateGenerationAssertions(evalCase, [wrongImage])
+      .resourceAssertionPass,
+    false,
+  );
+  const mismatchedLabels = structuredClone(daemonSet);
+  const template = (mismatchedLabels.spec as Record<string, unknown>)
+    .template as Record<string, unknown>;
+  template.metadata = { labels: { app: 'other' } };
+  assert.equal(
+    evaluateGenerationAssertions(evalCase, [mismatchedLabels]).relationPass,
+    false,
+  );
+});
+
+check('HPA holdout preflight and repair contract preserve intent without side effects', () => {
+  const evalCase = FIX_CASES.find(
+    (candidate) => candidate.id === 'fix-holdout-hpa-maxreplicas-type',
+  );
+  assert.ok(evalCase);
+  assert.deepEqual(evalCase.governance, {
+    task: 'fix',
+    origin: 'human',
+    role: 'holdout',
+  });
+  const [fixture] = preflightFixCases([evalCase]);
+  assert.ok(fixture);
+  assert.ok(
+    fixture.validationErrors.some(
+      (error) =>
+        error.path === 'spec.maxReplicas' &&
+        /integer|number|类型|整数/i.test(error.message),
+    ),
+  );
+
+  const repaired: KubernetesDocument = {
+    apiVersion: 'autoscaling/v2',
+    kind: 'HorizontalPodAutoscaler',
+    metadata: { name: 'web-autoscaler' },
+    spec: {
+      scaleTargetRef: {
+        apiVersion: 'apps/v1',
+        kind: 'Deployment',
+        name: 'web',
+      },
+      minReplicas: 2,
+      maxReplicas: 10,
+    },
+  };
+  assert.equal(
+    evaluateExpectedResource(
+      {
+        ref: 'fix-target',
+        identity: evalCase.target,
+        assertions: evalCase.preserve,
+      },
+      [repaired],
+    ).pass,
+    true,
+  );
+  assert.equal(
+    evaluateExpectedResource(
+      {
+        ref: 'fix-target',
+        identity: evalCase.target,
+        assertions: evalCase.expectedCorrections,
+      },
+      [repaired],
+    ).pass,
+    true,
+  );
+  assert.equal(evaluateFixResourceSet(fixture, [repaired]).pass, true);
+  const added = evaluateFixResourceSet(fixture, [
+    repaired,
+    {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: { name: 'web' },
+    },
+  ]);
+  assert.equal(added.pass, false);
+  assert.deepEqual(added.added, [
+    { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
+  ]);
+});
+
+check('all 9 fix fixtures pass full-dataset preflight', () => {
   const fixtures = preflightFixCases(FIX_CASES);
-  assert.equal(FIX_CASES.length, 8);
+  assert.equal(FIX_CASES.length, 9);
   assert.equal(fixtures.length, FIX_CASES.length);
   assert.ok(fixtures.every((fixture) => fixture.validationErrors.length > 0));
   assert.ok(
@@ -666,8 +861,8 @@ check('all 8 fix fixtures pass full-dataset preflight', () => {
   );
 });
 
-check('all 26 generation cases use the resource-bound contract', () => {
-  assert.equal(GENERATION_CASES.length, 26);
+check('all 27 generation cases use the resource-bound contract', () => {
+  assert.equal(GENERATION_CASES.length, 27);
   assert.doesNotThrow(() => assertGenerationCasesContract(GENERATION_CASES));
   assert.ok(
     GENERATION_CASES.every(
