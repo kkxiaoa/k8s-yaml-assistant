@@ -17,7 +17,7 @@ import {
 const FIELD_PATH_BOOST = 0.08;
 
 export interface IndexedChunk extends Chunk {
-  embedding: number[];
+  embedding: number[] | Float32Array;
 }
 
 export type RetrievalPipelineStage =
@@ -56,7 +56,10 @@ async function executeRetrievalStage<T>(
 }
 
 /** 余弦相似度:衡量两个向量方向的接近程度,范围 [-1, 1],越大越相关。 */
-function cosineSimilarity(a: number[], b: number[]): number {
+function cosineSimilarity(
+  a: ArrayLike<number>,
+  b: ArrayLike<number>,
+): number {
   let dot = 0;
   let normA = 0;
   let normB = 0;

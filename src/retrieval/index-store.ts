@@ -221,7 +221,11 @@ function validateIndexForWrite(
     seen.add(chunk.id);
     chunks.push(chunk);
 
-    if (!Array.isArray(item.embedding) || item.embedding.length !== dimension) {
+    if (
+      (!Array.isArray(item.embedding) &&
+        !(item.embedding instanceof Float32Array)) ||
+      item.embedding.length !== dimension
+    ) {
       throw new Error(
         `writeIndex: embedding dimension mismatch at index ${itemIndex}`,
       );
@@ -453,11 +457,9 @@ export function readIndex(
     manifest,
     chunks: chunks.map((chunk, index) => ({
       ...chunk,
-      embedding: Array.from(
-        embeddings.subarray(
-          index * manifest.dimension,
-          (index + 1) * manifest.dimension,
-        ),
+      embedding: embeddings.subarray(
+        index * manifest.dimension,
+        (index + 1) * manifest.dimension,
       ),
     })),
   };
