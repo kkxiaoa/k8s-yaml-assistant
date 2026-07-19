@@ -1,13 +1,26 @@
 import { z } from 'zod';
 import {
+  preflightFixCases,
+  type FixCase,
+  type FixFixturePreflight,
+  type ResourceIdentity,
+} from '../assertions';
+import {
   SourceTypeSchema,
   type SourceType,
 } from '../../knowledge/chunk';
 import { SOURCE_TYPES } from '../../retrieval/source-policy';
+import type { ValidationError } from '../../validation/validate';
+import { FIX_CASES } from './fix-cases';
 import {
+  ExpectedChunkIdsSchema,
   RETRIEVAL_CASES,
   type SemanticRetrievalCase,
 } from './retrieval-cases';
+import {
+  governanceSchemaForCaseFamily,
+  type EvalCaseGovernance,
+} from './governance';
 
 const NonBlankStringSchema = z.string().trim().min(1);
 const RetrievalCaseInputSchema = z.strictObject({
@@ -18,10 +31,17 @@ const StandaloneQuestionInputSchema = z.strictObject({
   kind: z.literal('standalone_question'),
   question: NonBlankStringSchema,
 });
+const ValidationErrorInputSchema = z.strictObject({
+  kind: z.literal('validation_error'),
+  fixCaseId: NonBlankStringSchema,
+  question: NonBlankStringSchema,
+  expectedChunkIds: ExpectedChunkIdsSchema,
+});
 
 export const GroundedAnswerInputSchema = z.union([
   RetrievalCaseInputSchema,
   StandaloneQuestionInputSchema,
+  ValidationErrorInputSchema,
 ]);
 
 export const GroundedAnswerExpectedBehaviorSchema = z.enum([
@@ -136,20 +156,74 @@ const StandaloneGroundedAnswerCaseSchema = z.strictObject({
   id: NonBlankStringSchema,
   input: StandaloneQuestionInputSchema,
   expectedBehavior: z.literal('refuse_insufficient_context'),
+  governance: governanceSchemaForCaseFamily('standalone_grounded_answer'),
+});
+const ValidationErrorGroundedAnswerCaseSchema = z.strictObject({
+  id: NonBlankStringSchema,
+  input: ValidationErrorInputSchema,
+  expectedBehavior: z.literal('answer_with_sources'),
+  sourceExpectation: SourceExpectationSchema.optional(),
+  governance: governanceSchemaForCaseFamily(
+    'validation_error_grounded_answer',
+  ),
 });
 
 export const GroundedAnswerCaseSchema = z.union([
   ReferencedGroundedAnswerCaseSchema,
   StandaloneGroundedAnswerCaseSchema,
+  ValidationErrorGroundedAnswerCaseSchema,
 ]);
 
 export type GroundedAnswerCase = z.infer<typeof GroundedAnswerCaseSchema>;
+export type GroundedAnswerAskMode = 'free' | 'explain_error';
+type StandaloneGroundedAnswerCase = z.infer<
+  typeof StandaloneGroundedAnswerCaseSchema
+>;
+type ValidationErrorGroundedAnswerCase = z.infer<
+  typeof ValidationErrorGroundedAnswerCaseSchema
+>;
+
+function isStandaloneGroundedAnswerCase(
+  evalCase: GroundedAnswerCase,
+): evalCase is StandaloneGroundedAnswerCase {
+  return evalCase.input.kind === 'standalone_question';
+}
+
+function isValidationErrorGroundedAnswerCase(
+  evalCase: GroundedAnswerCase,
+): evalCase is ValidationErrorGroundedAnswerCase {
+  return evalCase.input.kind === 'validation_error';
+}
+
+function preflightValidationErrorFixture(
+  fixCase: FixCase,
+): FixFixturePreflight {
+  const fixture = preflightFixCases([fixCase])[0];
+  if (fixture === undefined || fixture.validationErrors.length === 0) {
+    throw new Error(
+      `fix case ${fixCase.id} preflight produced no validation errors`,
+    );
+  }
+  return fixture;
+}
+
+export function groundedAnswerAskMode(
+  input: GroundedAnswerCase['input'],
+): GroundedAnswerAskMode {
+  return input.kind === 'validation_error' ? 'explain_error' : 'free';
+}
 
 export function decodeGroundedAnswerCases(
   value: unknown,
   retrievalCases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
+  fixCases: readonly FixCase[] = FIX_CASES,
 ): GroundedAnswerCase[] {
-  const retrievalIds = new Set(retrievalCases.map((evalCase) => evalCase.id));
+  const retrievalCasesById = new Map(
+    retrievalCases.map((evalCase) => [evalCase.id, evalCase] as const),
+  );
+  const fixCasesById = new Map(
+    fixCases.map((evalCase) => [evalCase.id, evalCase] as const),
+  );
   return z
     .array(GroundedAnswerCaseSchema)
     .superRefine((cases, context) => {
@@ -166,12 +240,59 @@ export function decodeGroundedAnswerCases(
 
         if (
           evalCase.input.kind === 'retrieval_case' &&
-          !retrievalIds.has(evalCase.input.retrievalCaseId)
+          !retrievalCasesById.has(evalCase.input.retrievalCaseId)
         ) {
           context.addIssue({
             code: 'custom',
             message: `unknown retrieval case id: ${evalCase.input.retrievalCaseId}`,
             path: [index, 'input', 'retrievalCaseId'],
+          });
+        }
+        if (evalCase.input.kind === 'validation_error') {
+          const fixCase = fixCasesById.get(evalCase.input.fixCaseId);
+          if (fixCase === undefined) {
+            context.addIssue({
+              code: 'custom',
+              message: `unknown fix case id: ${evalCase.input.fixCaseId}`,
+              path: [index, 'input', 'fixCaseId'],
+            });
+            continue;
+          }
+          try {
+            preflightValidationErrorFixture(fixCase);
+          } catch (error) {
+            context.addIssue({
+              code: 'custom',
+              message: `fix case ${fixCase.id} preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+              path: [index, 'input', 'fixCaseId'],
+            });
+          }
+        }
+      }
+
+      const answerableQuestions = new Map<string, string>();
+      for (const evalCase of cases) {
+        if (evalCase.input.kind === 'retrieval_case') {
+          const retrievalCase = retrievalCasesById.get(
+            evalCase.input.retrievalCaseId,
+          );
+          if (retrievalCase) {
+            answerableQuestions.set(retrievalCase.question, evalCase.id);
+          }
+        } else if (evalCase.input.kind === 'validation_error') {
+          answerableQuestions.set(evalCase.input.question, evalCase.id);
+        }
+      }
+      for (const [index, evalCase] of cases.entries()) {
+        if (evalCase.input.kind !== 'standalone_question') continue;
+        const answerableCaseId = answerableQuestions.get(
+          evalCase.input.question,
+        );
+        if (answerableCaseId !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            message: `stale refusal duplicates answerable question from ${answerableCaseId}`,
+            path: [index, 'input', 'question'],
           });
         }
       }
@@ -181,23 +302,54 @@ export function decodeGroundedAnswerCases(
 
 export interface ResolvedGroundedAnswerCase {
   id: string;
+  governance: EvalCaseGovernance;
   input: GroundedAnswerCase['input'];
   expectedBehavior: GroundedAnswerCase['expectedBehavior'];
   sourceExpectation?: SourceExpectation;
   question: string;
   expectedChunkIds: string[];
-  target?: SemanticRetrievalCase['target'];
+  target?: SemanticRetrievalCase['target'] | ResourceIdentity;
+  editorContext?: {
+    yaml: string;
+    kind: string;
+    apiVersion: string;
+    errors: ValidationError[];
+  };
 }
 
 export function resolveGroundedAnswerCase(
   evalCase: GroundedAnswerCase,
   retrievalCases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
+  fixCases: readonly FixCase[] = FIX_CASES,
 ): ResolvedGroundedAnswerCase {
-  if (evalCase.input.kind === 'standalone_question') {
+  if (isStandaloneGroundedAnswerCase(evalCase)) {
     return {
       ...evalCase,
       question: evalCase.input.question,
       expectedChunkIds: [],
+    };
+  }
+  if (isValidationErrorGroundedAnswerCase(evalCase)) {
+    const fixCase = fixCases.find(
+      (candidate) => candidate.id === evalCase.input.fixCaseId,
+    );
+    if (fixCase === undefined) {
+      throw new Error(
+        `grounded answer case ${evalCase.id} references unknown fix case ${evalCase.input.fixCaseId}`,
+      );
+    }
+    const fixture = preflightValidationErrorFixture(fixCase);
+    return {
+      ...evalCase,
+      question: evalCase.input.question,
+      expectedChunkIds: [...evalCase.input.expectedChunkIds],
+      target: fixCase.target,
+      editorContext: {
+        yaml: fixCase.brokenYaml,
+        kind: fixCase.target.kind,
+        apiVersion: fixCase.target.apiVersion,
+        errors: fixture.validationErrors,
+      },
     };
   }
 
@@ -212,6 +364,7 @@ export function resolveGroundedAnswerCase(
   }
   return {
     ...evalCase,
+    governance: retrievalCase.governance,
     question: retrievalCase.question,
     expectedChunkIds: retrievalCase.expectedChunkIds,
     target: retrievalCase.target,
@@ -221,6 +374,16 @@ export function resolveGroundedAnswerCase(
 const ANSWER_WITH_SOURCES = 'answer_with_sources' as const;
 const EXPLAIN_SCHEMA_POLICY_CONFLICT =
   'explain_schema_policy_conflict' as const;
+const REFUSAL_DEVELOPMENT = {
+  task: 'refusal',
+  origin: 'human',
+  role: 'development',
+} as const satisfies EvalCaseGovernance;
+const ERROR_DEVELOPMENT = {
+  task: 'error_explanation',
+  origin: 'human',
+  role: 'development',
+} as const satisfies EvalCaseGovernance;
 
 export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
   {
@@ -584,6 +747,22 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     expectedBehavior: ANSWER_WITH_SOURCES,
   },
   {
+    id: 'gateway-httproute-backend-weight',
+    input: {
+      kind: 'retrieval_case',
+      retrievalCaseId: 'gateway-httproute-backend-weight',
+    },
+    expectedBehavior: ANSWER_WITH_SOURCES,
+  },
+  {
+    id: 'certificate-issuer-ref',
+    input: {
+      kind: 'retrieval_case',
+      retrievalCaseId: 'certificate-issuer-ref',
+    },
+    expectedBehavior: ANSWER_WITH_SOURCES,
+  },
+  {
     id: 'policy-deploy-limits',
     input: { kind: 'retrieval_case', retrievalCaseId: 'policy-deploy-limits' },
     expectedBehavior: ANSWER_WITH_SOURCES,
@@ -635,27 +814,49 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     },
   },
   {
+    id: 'error-deployment-replicas-type',
+    governance: ERROR_DEVELOPMENT,
+    input: {
+      kind: 'validation_error',
+      fixCaseId: 'fix-type-replicas',
+      question:
+        'Deployment 的 spec.replicas 为什么提示类型错误，应该怎么修复？',
+      expectedChunkIds: [
+        'schema::apps/v1::Deployment::spec.replicas',
+      ],
+    },
+    expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: { mode: 'required', types: ['schema'] },
+  },
+  {
+    id: 'error-storageclass-missing-provisioner',
+    governance: ERROR_DEVELOPMENT,
+    input: {
+      kind: 'validation_error',
+      fixCaseId: 'fix-missing-provisioner',
+      question: 'StorageClass 为什么提示缺少 provisioner，应该怎么修复？',
+      expectedChunkIds: [
+        'schema::storage.k8s.io/v1::StorageClass::provisioner',
+      ],
+    },
+    expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: { mode: 'required', types: ['schema'] },
+  },
+  {
     id: 'refusal-prometheus-retention',
+    governance: REFUSAL_DEVELOPMENT,
     input: { kind: 'standalone_question', question: 'Prometheus 怎么配置数据保留时间 retention?' },
     expectedBehavior: 'refuse_insufficient_context',
   },
   {
-    id: 'refusal-gateway-httproute',
-    input: { kind: 'standalone_question', question: 'Gateway API 的 HTTPRoute 怎么按权重分流?' },
-    expectedBehavior: 'refuse_insufficient_context',
-  },
-  {
-    id: 'refusal-cert-manager',
-    input: { kind: 'standalone_question', question: 'cert-manager 的 Certificate 怎么指定签发者 issuer?' },
-    expectedBehavior: 'refuse_insufficient_context',
-  },
-  {
     id: 'refusal-nonexistent-field',
+    governance: REFUSAL_DEVELOPMENT,
     input: { kind: 'standalone_question', question: 'Pod 怎么开启 spec.autoHeal 自愈字段?' },
     expectedBehavior: 'refuse_insufficient_context',
   },
   {
     id: 'refusal-cluster-runtime',
+    governance: REFUSAL_DEVELOPMENT,
     input: { kind: 'standalone_question', question: '我的集群现在有几个节点?' },
     expectedBehavior: 'refuse_insufficient_context',
   },

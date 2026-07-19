@@ -4,6 +4,12 @@ import { preflightFixCases } from './assertions';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
 import { FIX_CASES } from './cases/fix-cases';
 import {
+  buildGovernanceReport,
+  formatGovernanceReport,
+  requireGovernanceMetric,
+  type GovernanceDisplayMetric,
+} from './governance-report';
+import {
   buildFixCaseResult,
   computeFixEvalMetrics,
   fixMetricsRecord,
@@ -18,6 +24,7 @@ import {
   generatedResultEvaluationStage,
   harnessErrorMetrics,
   isDirectExecution,
+  selectEvalSuiteCases,
   toPersistedPayload,
 } from './runner-protocol';
 import {
@@ -48,17 +55,59 @@ function reportFixCase(result: FixCaseResult): void {
   );
 }
 
+function fixGovernanceMetrics(
+  results: readonly FixCaseResult[],
+): GovernanceDisplayMetric[] {
+  const metrics = fixMetricsRecord(computeFixEvalMetrics([...results]));
+  return [
+    {
+      label: 'content-pass',
+      unit: 'ratio',
+      observation: requireGovernanceMetric(metrics, 'fix.success_rate'),
+    },
+    {
+      label: 'correction',
+      unit: 'ratio',
+      observation: requireGovernanceMetric(
+        metrics,
+        'fix.expected_correction_pass_rate',
+      ),
+    },
+    {
+      label: 'preserve',
+      unit: 'ratio',
+      observation: requireGovernanceMetric(
+        metrics,
+        'fix.preserve_pass_rate',
+      ),
+    },
+    {
+      label: 'side-effect-free',
+      unit: 'ratio',
+      observation: requireGovernanceMetric(
+        metrics,
+        'fix.side_effect_free_pass_rate',
+      ),
+    },
+  ];
+}
+
 async function main(): Promise<void> {
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-fix`;
-  const setup = await executeEvalRunStage('dataset_preflight', () => ({
-    dataset: fixDatasetIdentity(),
-    config: fixEvalConfig(),
-  }));
+  const setup = await executeEvalRunStage('dataset_preflight', () => {
+    const selection = selectEvalSuiteCases(process.argv.slice(2), FIX_CASES);
+    return {
+      selection,
+      dataset: fixDatasetIdentity(selection.cases),
+      config: fixEvalConfig(),
+    };
+  });
+  const { cases, scope } = setup.selection;
   const session = await executeEvalRunStage('artifact_write', () =>
     startEvalRun({
       id: runId,
       kind: 'fix',
-      scope: 'full',
+      scope,
       dataset: setup.dataset,
       metricDefinitionVersion: METRIC_DEFINITION_VERSION,
       config: setup.config,
@@ -68,11 +117,11 @@ async function main(): Promise<void> {
 
   try {
     const fixturesById = await executeEvalRunStage('dataset_preflight', () => {
-      const fixtures = preflightFixCases(FIX_CASES);
+      const fixtures = preflightFixCases(cases);
       const byId = new Map(
         fixtures.map((fixture) => [fixture.caseId, fixture] as const),
       );
-      for (const evalCase of FIX_CASES) {
+      for (const evalCase of cases) {
         if (!byId.has(evalCase.id)) {
           throw new Error(`missing preflight result for ${evalCase.id}`);
         }
@@ -89,10 +138,12 @@ async function main(): Promise<void> {
         return getClient();
       },
     );
-    console.error(`fix 评估(${FIX_CASES.length} 条坏 YAML,逐条调 DeepSeek,稍候…)\n`);
+    console.error(
+      `fix 评估(scope=${scope},${cases.length} 条坏 YAML,逐条调 DeepSeek,稍候…)\n`,
+    );
 
     const batch = await executeEvalCases({
-      cases: FIX_CASES,
+      cases,
       evaluate: async (evalCase) => {
         const fixture = fixturesById.get(evalCase.id);
         if (!fixture) {
@@ -122,6 +173,7 @@ async function main(): Promise<void> {
           createTraceEnvelope({
             runId,
             evalCaseId: evalCase.id,
+            governance: evalCase.governance,
             kind: 'fix',
             outcome: fixEnvelopeOutcome(result),
             payload: toPersistedPayload(result),
@@ -133,6 +185,7 @@ async function main(): Promise<void> {
           createErrorTraceEnvelope({
             runId,
             evalCaseId: evalCase.id,
+            governance: evalCase.governance,
             kind: 'fix',
             payload: failure.payload ?? { evalCase },
             stage: failure.stage,
@@ -187,7 +240,18 @@ async function main(): Promise<void> {
       `完整修复通过率       : ${countRate(metrics.contentPassCount, metrics.caseCount)}  (${metrics.contentPassCount}/${metrics.caseCount})`,
     );
     console.error(
-      `quality fail=${metrics.caseCount - metrics.contentPassCount} 条；skipped=0 条；harness error=${batch.harnessErrors.length} 条；质量样本=${metrics.caseCount}/${FIX_CASES.length}`,
+      `quality fail=${metrics.caseCount - metrics.contentPassCount} 条；skipped=0 条；harness error=${batch.harnessErrors.length} 条；质量样本=${metrics.caseCount}/${cases.length}`,
+    );
+    console.error(
+      formatGovernanceReport(
+        buildGovernanceReport({
+          cases,
+          results: batch.results,
+          harnessErrors: batch.harnessErrors,
+          resultCaseId: (result) => result.id,
+          aggregate: fixGovernanceMetrics,
+        }),
+      ),
     );
 
     console.error('\n━━━━━━ 按缺陷类型:修复成功率 ━━━━━━');

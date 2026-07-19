@@ -3,7 +3,20 @@
 
 import assert from 'node:assert/strict';
 import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import {
+  DEFAULT_ALIAS_DRAFT_DIR,
+  DEFAULT_ALIASES_PATH,
   expandQueryWithAliases,
+  mergeReviewedAliasDraft,
+  parseSchemaFieldAliasesJsonl,
+  writeSchemaFieldAliasDraft,
   type SchemaFieldAlias,
 } from './query-expansion';
 
@@ -252,6 +265,104 @@ check('无命中时 expandedQueryText === originalQueryText', () => {
   assert.equal(result.expandedQueryText, result.originalQueryText);
   assert.deepEqual(result.matchedAliases, []);
   assert.deepEqual(result.expansionTerms, []);
+});
+
+check('生成草稿独占新文件且不修改正式 registry', () => {
+  assert.notEqual(DEFAULT_ALIAS_DRAFT_DIR, dirname(DEFAULT_ALIASES_PATH));
+  const root = mkdtempSync(join(tmpdir(), 'alias-draft-'));
+  const registryPath = join(root, 'schema-field-aliases.jsonl');
+  const draftDir = join(root, 'drafts');
+  const createdAt = new Date('2026-07-17T08:09:10.123Z');
+  const draft = alias({
+    id: 'image-draft',
+    reviewed: false,
+    reviewedAt: null,
+  });
+  writeFileSync(registryPath, 'reviewed registry\n');
+
+  try {
+    assert.throws(
+      () =>
+        writeSchemaFieldAliasDraft([alias({ id: 'reviewed-draft' })], {
+          directory: draftDir,
+          createdAt,
+        }),
+      /必须保持 reviewed=false/,
+    );
+    const draftPath = writeSchemaFieldAliasDraft([draft], {
+      directory: draftDir,
+      createdAt,
+    });
+
+    assert.equal(dirname(draftPath), draftDir);
+    assert.deepEqual(
+      parseSchemaFieldAliasesJsonl(readFileSync(draftPath, 'utf8')),
+      [draft],
+    );
+    assert.equal(readFileSync(registryPath, 'utf8'), 'reviewed registry\n');
+    assert.throws(
+      () =>
+        writeSchemaFieldAliasDraft([draft], {
+          directory: draftDir,
+          createdAt,
+        }),
+      /EEXIST/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+check('人工审核草稿按 id 合并且保留未覆盖的正式 alias', () => {
+  const existing = alias({ id: 'image', fieldTerms: ['old image'] });
+  const preserved = alias({ id: 'preserved', path: 'spec.replicas' });
+  const reviewedUpdate = alias({
+    id: 'image',
+    fieldTerms: ['image', 'container image'],
+    reviewedAt: '2026-07-17',
+  });
+  const reviewedAddition = alias({
+    id: 'new-alias',
+    path: 'spec.template.spec.containers.resources',
+    chunkId: 'schema::apps/v1::Deployment::spec.template.spec.containers.resources',
+    reviewedAt: '2026-07-17',
+  });
+
+  const result = mergeReviewedAliasDraft(
+    [existing, preserved],
+    [reviewedUpdate, reviewedAddition],
+  );
+
+  assert.deepEqual(result.addedIds, ['new-alias']);
+  assert.deepEqual(result.updatedIds, ['image']);
+  assert.deepEqual(result.unchangedIds, []);
+  assert.deepEqual(
+    result.aliases.map((item) => item.id),
+    ['image', 'preserved', 'new-alias'],
+  );
+  assert.deepEqual(result.aliases[0], reviewedUpdate);
+  assert.deepEqual(result.aliases[1], preserved);
+});
+
+check('未审核草稿和既有 alias 身份漂移不能进入正式 registry', () => {
+  const existing = alias({ id: 'image' });
+
+  assert.throws(
+    () =>
+      mergeReviewedAliasDraft(
+        [existing],
+        [alias({ id: 'image', reviewed: false, reviewedAt: null })],
+      ),
+    /尚未完成人工审核/,
+  );
+  assert.throws(
+    () =>
+      mergeReviewedAliasDraft(
+        [existing],
+        [alias({ id: 'image', resource: 'Pod', reviewedAt: '2026-07-17' })],
+      ),
+    /身份与正式 registry 不一致/,
+  );
 });
 
 console.log(`\n通过 ${passed} 项`);

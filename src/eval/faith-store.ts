@@ -10,7 +10,9 @@ import {
   SourceCoverageSchema,
   SourceExpectationSchema,
   evaluateSourceExpectation,
+  groundedAnswerAskMode,
 } from './cases/grounded-answer-cases';
+import { EvalCaseGovernanceSchema } from './cases/governance';
 import {
   JudgeAttemptSchema,
   JudgeVoteSchema,
@@ -44,6 +46,12 @@ export const FaithErrorPhaseSchema = EvalCaseErrorStageSchema.extract([
 ]);
 
 const NonBlankStringSchema = z.string().trim().min(1);
+const NonBlankContentSchema = z
+  .string()
+  .min(1)
+  .refine((value) => /\S/.test(value), {
+    message: 'must contain a non-whitespace character',
+  });
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const NonNegativeNumberSchema = z.number().nonnegative();
 const FaithKnowledgeTargetSchema = z.strictObject({
@@ -134,10 +142,17 @@ const IndexCacheTraceSchema = z.discriminatedUnion('status', [
 ]);
 
 export const FaithSearchTraceSchema = z.strictObject({
+  question: NonBlankStringSchema,
+  mode: z.enum(['free', 'explain_field', 'explain_error']),
+  resourceHint: NonBlankStringSchema.optional(),
+  apiVersionHint: NonBlankStringSchema.optional(),
+  fieldPathHint: NonBlankStringSchema.optional(),
   queryText: z.string(),
   queryExpansion: QueryExpansionTraceSchema,
+  path: z.enum(['exact', 'search']),
   coarseHits: z.array(TraceHitSchema),
   rerankHits: z.array(TraceHitSchema),
+  finalHits: z.array(TraceHitSchema),
   latencyMs: z.strictObject({
     embed: NonNegativeNumberSchema.optional(),
     dense: NonNegativeNumberSchema.optional(),
@@ -150,6 +165,7 @@ export const FaithSearchTraceSchema = z.strictObject({
     embeddingHit: z.boolean().optional(),
     index: IndexCacheTraceSchema,
   }),
+  createdAt: z.iso.datetime({ offset: true }),
 });
 
 export const FaithContextSourceSchema = z.strictObject({
@@ -188,18 +204,35 @@ export const FaithContextSnapshotSchema = z
     }
   });
 
+export const FaithEditorContextSnapshotSchema = z.strictObject({
+  yaml: NonBlankContentSchema,
+  kind: NonBlankStringSchema,
+  apiVersion: NonBlankStringSchema,
+  errors: z
+    .array(
+      z.strictObject({
+        path: z.string(),
+        message: NonBlankStringSchema,
+      }),
+    )
+    .min(1),
+});
+
 export const FaithTraceSchema = z.strictObject({
   id: z.string().min(1),
+  governance: EvalCaseGovernanceSchema,
   input: GroundedAnswerInputSchema,
   question: z.string().trim().min(1),
   expectedBehavior: GroundedAnswerExpectedBehaviorSchema,
   sourceExpectation: SourceExpectationSchema.optional(),
   sourceCoverage: SourceCoverageSchema.optional(),
   context: FaithContextSnapshotSchema.optional(),
+  editorContext: FaithEditorContextSnapshotSchema.optional(),
   target: z
     .strictObject({
       kind: z.string().trim().min(1),
       apiVersion: z.string().trim().min(1).optional(),
+      name: z.string().trim().min(1).optional(),
     })
     .optional(),
   retrieval: z.strictObject({
@@ -273,6 +306,54 @@ export const FaithTraceSchema = z.strictObject({
         path: ['retrieval', 'expectedChunkIds'],
       });
     }
+  }
+
+  if (trace.input.kind === 'validation_error') {
+    const expectedChunkIds = trace.input.expectedChunkIds;
+    if (trace.question !== trace.input.question) {
+      context.addIssue({
+        code: 'custom',
+        message: 'validation-error faith trace question does not match input',
+        path: ['question'],
+      });
+    }
+    if (
+      trace.retrieval.expectedChunkIds.length !==
+        expectedChunkIds.length ||
+      trace.retrieval.expectedChunkIds.some(
+        (id, index) => id !== expectedChunkIds[index],
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'validation-error faith trace expected chunk ids do not match input',
+        path: ['retrieval', 'expectedChunkIds'],
+      });
+    }
+    if (trace.editorContext === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'validation-error faith trace requires editor context',
+        path: ['editorContext'],
+      });
+    } else if (
+      trace.target === undefined ||
+      trace.target.kind !== trace.editorContext.kind ||
+      trace.target.apiVersion !== trace.editorContext.apiVersion
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'validation-error editor context must match target identity',
+        path: ['editorContext'],
+      });
+    }
+  } else if (trace.editorContext !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'only validation-error faith trace can include editor context',
+      path: ['editorContext'],
+    });
   }
 
   if (trace.expectedBehavior === 'explain_schema_policy_conflict') {
@@ -387,18 +468,32 @@ export const FaithTraceSchema = z.strictObject({
         path: ['context', 'chunks'],
       });
     }
-    const rerankIds = trace.retrieval.searchTrace?.rerankHits.map(
+    const finalHitIds = trace.retrieval.searchTrace?.finalHits.map(
       (hit) => hit.id,
     );
     if (
-      rerankIds !== undefined &&
-      (chunkIds.length > rerankIds.length ||
-        chunkIds.some((id, index) => id !== rerankIds[index]))
+      finalHitIds !== undefined &&
+      (chunkIds.length !== finalHitIds.length ||
+        chunkIds.some((id, index) => id !== finalHitIds[index]))
     ) {
       context.addIssue({
         code: 'custom',
-        message: 'context chunk ids must be a prefix of rerank hit ids',
-        path: ['retrieval', 'searchTrace', 'rerankHits'],
+        message: 'context chunk ids must equal final hit ids',
+        path: ['retrieval', 'searchTrace', 'finalHits'],
+      });
+    }
+  }
+
+  if (trace.retrieval.searchTrace !== undefined) {
+    const expectedMode = groundedAnswerAskMode(trace.input);
+    if (
+      trace.retrieval.searchTrace.question !== trace.question ||
+      trace.retrieval.searchTrace.mode !== expectedMode
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'faith search trace does not match question or Ask mode',
+        path: ['retrieval', 'searchTrace'],
       });
     }
   }
@@ -481,6 +576,9 @@ export type FaithErrorPhase = z.infer<typeof FaithErrorPhaseSchema>;
 export type FaithContextSource = z.infer<typeof FaithContextSourceSchema>;
 export type FaithContextSnapshot = z.infer<
   typeof FaithContextSnapshotSchema
+>;
+export type FaithEditorContextSnapshot = z.infer<
+  typeof FaithEditorContextSnapshotSchema
 >;
 export type FaithSearchTrace = z.infer<typeof FaithSearchTraceSchema>;
 export type FaithTrace = z.infer<typeof FaithTraceSchema>;

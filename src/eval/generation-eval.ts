@@ -6,6 +6,12 @@ import { assertGenerationCasesContract } from './assertions';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
 import { GENERATION_CASES } from './cases/generation-cases';
 import {
+  buildGovernanceReport,
+  formatGovernanceReport,
+  requireGovernanceMetric,
+  type GovernanceDisplayMetric,
+} from './governance-report';
+import {
   buildGenerationCaseResult,
   computeGenerationEvalMetrics,
   generationMetricsRecord,
@@ -20,6 +26,7 @@ import {
   generatedResultEvaluationStage,
   harnessErrorMetrics,
   isDirectExecution,
+  selectEvalSuiteCases,
   toPersistedPayload,
 } from './runner-protocol';
 import {
@@ -58,17 +65,43 @@ function reportGenerationCase(result: GenerationCaseResult): void {
   );
 }
 
+function generationGovernanceMetrics(
+  results: readonly GenerationCaseResult[],
+): GovernanceDisplayMetric[] {
+  const metrics = generationMetricsRecord(
+    computeGenerationEvalMetrics([...results]),
+  );
+  return [
+    {
+      label: 'content-pass',
+      unit: 'ratio',
+      observation: requireGovernanceMetric(
+        metrics,
+        'generation.content_pass_rate',
+      ),
+    },
+  ];
+}
+
 async function main(): Promise<void> {
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-generation`;
-  const setup = await executeEvalRunStage('dataset_preflight', () => ({
-    dataset: generationDatasetIdentity(),
-    config: generationEvalConfig(),
-  }));
+  const setup = await executeEvalRunStage('dataset_preflight', () => {
+    const selection = selectEvalSuiteCases(
+      process.argv.slice(2),
+      GENERATION_CASES,
+    );
+    return {
+      selection,
+      dataset: generationDatasetIdentity(selection.cases),
+      config: generationEvalConfig(),
+    };
+  });
+  const { cases, scope } = setup.selection;
   const session = await executeEvalRunStage('artifact_write', () =>
     startEvalRun({
       id: runId,
       kind: 'generation',
-      scope: 'full',
+      scope,
       dataset: setup.dataset,
       metricDefinitionVersion: METRIC_DEFINITION_VERSION,
       config: setup.config,
@@ -78,7 +111,7 @@ async function main(): Promise<void> {
 
   try {
     await executeEvalRunStage('dataset_preflight', () =>
-      assertGenerationCasesContract(GENERATION_CASES),
+      assertGenerationCasesContract(cases),
     );
     const client = await executeEvalRunStage(
       'runner_initialization',
@@ -91,11 +124,11 @@ async function main(): Promise<void> {
       },
     );
     console.error(
-      `生成评估(${GENERATION_CASES.length} 条用例,逐条调 DeepSeek,稍候…)\n`,
+      `生成评估(scope=${scope},${cases.length} 条用例,逐条调 DeepSeek,稍候…)\n`,
     );
 
     const batch = await executeEvalCases({
-      cases: GENERATION_CASES,
+      cases,
       evaluate: async (evalCase) => {
         const generated = await executeEvalCaseStage(
           'answer_model',
@@ -116,6 +149,7 @@ async function main(): Promise<void> {
           createTraceEnvelope({
             runId,
             evalCaseId: evalCase.id,
+            governance: evalCase.governance,
             kind: 'generation',
             outcome: generationEnvelopeOutcome(result),
             payload: toPersistedPayload(result),
@@ -127,6 +161,7 @@ async function main(): Promise<void> {
           createErrorTraceEnvelope({
             runId,
             evalCaseId: evalCase.id,
+            governance: evalCase.governance,
             kind: 'generation',
             payload: failure.payload ?? { evalCase },
             stage: failure.stage,
@@ -178,7 +213,18 @@ async function main(): Promise<void> {
       `完整内容通过率             : ${countRate(metrics.contentPassCount, metrics.caseCount)}  (${metrics.contentPassCount}/${metrics.caseCount})`,
     );
     console.error(
-      `quality fail=${metrics.caseCount - metrics.contentPassCount} 条；skipped=0 条；harness error=${batch.harnessErrors.length} 条；质量样本=${metrics.caseCount}/${GENERATION_CASES.length}`,
+      `quality fail=${metrics.caseCount - metrics.contentPassCount} 条；skipped=0 条；harness error=${batch.harnessErrors.length} 条；质量样本=${metrics.caseCount}/${cases.length}`,
+    );
+    console.error(
+      formatGovernanceReport(
+        buildGovernanceReport({
+          cases,
+          results: batch.results,
+          harnessErrors: batch.harnessErrors,
+          resultCaseId: (result) => result.id,
+          aggregate: generationGovernanceMetrics,
+        }),
+      ),
     );
 
     const metricRecord = await executeEvalRunStage(

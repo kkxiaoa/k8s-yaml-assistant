@@ -70,6 +70,12 @@ function evalRoot(): string {
   return mkdtempSync(join(tmpdir(), 'kya-run-session-'));
 }
 
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
+
 function definition(
   caseIds: string[] = ['case-1', 'case-2'],
   id = 'run-1',
@@ -81,7 +87,10 @@ function definition(
     dataset: {
       id: 'retrieval-cases',
       hash: 'a'.repeat(64),
-      caseIds,
+      cases: caseIds.map((caseId) => ({
+        id: caseId,
+        governance: GOVERNANCE,
+      })),
       caseCount: caseIds.length,
     },
     metricDefinitionVersion: METRIC_DEFINITION_VERSION,
@@ -132,6 +141,7 @@ function trace(
     ...createTraceEnvelope({
       runId: 'run-1',
       evalCaseId,
+      governance: GOVERNANCE,
       kind: 'retrieval',
       outcome: 'success',
       payload: { rank: 1 },
@@ -253,6 +263,21 @@ check('append rejects mismatched run, kind, and dataset case IDs', () => {
   );
 });
 
+check('append rejects governance that differs from the dataset case', () => {
+  const root = evalRoot();
+  const session = startEvalRun(definition(['case-1']), { evalRoot: root });
+
+  assert.throws(
+    () =>
+      session.appendCase(
+        trace('case-1', {
+          governance: { ...GOVERNANCE, role: 'regression' },
+        }),
+      ),
+    /governance/i,
+  );
+});
+
 check('complete accepts success, skipped, and error outcomes', () => {
   const root = evalRoot();
   const session = startEvalRun(
@@ -265,6 +290,7 @@ check('complete accepts success, skipped, and error outcomes', () => {
     createErrorTraceEnvelope({
       runId: 'run-1',
       evalCaseId: 'case-error',
+      governance: GOVERNANCE,
       kind: 'retrieval',
       payload: { rank: 0 },
       stage: 'rerank',
@@ -379,6 +405,7 @@ check('failed run keeps prior error trace without fabricating missing cases', ()
     createErrorTraceEnvelope({
       runId: 'run-1',
       evalCaseId: 'case-1',
+      governance: GOVERNANCE,
       kind: 'retrieval',
       payload: { rank: 0 },
       stage: 'embedding',
@@ -441,6 +468,7 @@ await checkAsync(
             createTraceEnvelope({
               runId,
               evalCaseId: evalCase.id,
+              governance: GOVERNANCE,
               kind: 'retrieval',
               outcome: 'success',
               payload: result,
@@ -452,6 +480,7 @@ await checkAsync(
             createErrorTraceEnvelope({
               runId,
               evalCaseId: evalCase.id,
+              governance: GOVERNANCE,
               kind: 'retrieval',
               payload: failure.payload ?? {},
               stage: failure.stage,

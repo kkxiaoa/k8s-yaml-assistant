@@ -18,6 +18,17 @@ import {
 import { metricObservation } from '../protocol';
 import { harnessErrorMetrics } from '../runner-protocol';
 
+const GENERATION_DEVELOPMENT = {
+  task: 'generation',
+  origin: 'human',
+  role: 'development',
+} as const;
+const FIX_DEVELOPMENT = {
+  task: 'fix',
+  origin: 'human',
+  role: 'development',
+} as const;
+
 let passed = 0;
 function check(name: string, fn: () => void): void {
   try {
@@ -66,6 +77,7 @@ console.log('generation-metrics:');
 check('buildGenerationCaseResult 生成结构化内容指标', () => {
   const evalCase: GenerationEvalCase = {
     id: 'gen-configmap',
+    governance: GENERATION_DEVELOPMENT,
     requirement: '生成名为 app-config、LOG_LEVEL=info 的 ConfigMap',
     expectedResources: [
       {
@@ -99,6 +111,7 @@ check('buildGenerationCaseResult 生成结构化内容指标', () => {
 check('wrong values fail content even when kind and paths exist', () => {
   const evalCase: GenerationEvalCase = {
     id: 'wrong-value',
+    governance: GENERATION_DEVELOPMENT,
     requirement: '生成 LOG_LEVEL=debug 的 ConfigMap',
     expectedResources: [
       {
@@ -125,6 +138,7 @@ check('wrong values fail content even when kind and paths exist', () => {
 check('computeGenerationEvalMetrics 汇总资源断言、关系和完整内容', () => {
   const okCase: GenerationEvalCase = {
     id: 'ok',
+    governance: GENERATION_DEVELOPMENT,
     requirement: '生成 ConfigMap',
     expectedResources: [
       {
@@ -143,6 +157,7 @@ check('computeGenerationEvalMetrics 汇总资源断言、关系和完整内容',
   };
   const missCase: GenerationEvalCase = {
     id: 'miss',
+    governance: GENERATION_DEVELOPMENT,
     requirement: '生成 Secret',
     expectedResources: [
       {
@@ -259,6 +274,7 @@ check('all generation/fix case errors keep quality N/A and report harness errors
 
 const fixCase: FixCase = {
   id: 'fix-configmap',
+  governance: FIX_DEVELOPMENT,
   defectType: 'unknown_field',
   brokenYaml: `apiVersion: v1
 kind: ConfigMap
@@ -317,6 +333,7 @@ check('buildFixCaseResult requires target-bound corrections and preservation', (
 check('a preserve value on another document cannot satisfy the target', () => {
   const multiDocumentCase: FixCase = {
     id: 'fix-configmap',
+    governance: FIX_DEVELOPMENT,
     defectType: 'unknown_field',
     brokenYaml: `${fixCase.brokenYaml}\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: other\ndata:\n  LOG_LEVEL: debug\n`,
     target: fixCase.target,

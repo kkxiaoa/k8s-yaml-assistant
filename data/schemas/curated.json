@@ -29,5 +29,8 @@
     { "kind": "VolumeSnapshotClass", "apiVersion": "snapshot.storage.k8s.io/v1" },
     { "kind": "VolumeAttributesClass", "apiVersion": "storage.k8s.io/v1beta1" }
   ],
-  "crd": []
+  "crd": [
+    { "kind": "HTTPRoute", "apiVersion": "gateway.networking.k8s.io/v1" },
+    { "kind": "Certificate", "apiVersion": "cert-manager.io/v1" }
+  ]
 }

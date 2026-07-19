@@ -1,13 +1,18 @@
-// A3:离线生成 schema-field alias 草稿。输出必须人工 review 后才可用于 A/B。
+// 调用模型生成 schema-field alias 草稿。草稿必须人工审核后才能合并到正式注册表。
 
 import { config } from 'dotenv';
 config({ override: true });
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { CORPUS } from '../src/knowledge/corpus';
 import { primaryPath, primaryResource } from '../src/knowledge/chunk';
 import { getClient } from '../src/server/pipeline';
 import { textOf } from '../src/eval/llm';
+import {
+  writeSchemaFieldAliasDraft,
+  type SchemaFieldAlias,
+} from '../src/retrieval/query-expansion';
+import { readJsonFile } from '../src/shared/json';
 
 const MODEL = 'claude-sonnet-4-6';
 const TARGETS_PATH = join(
@@ -15,12 +20,6 @@ const TARGETS_PATH = join(
   'data',
   'aliases',
   'schema-field-alias-targets.json',
-);
-const ALIASES_PATH = join(
-  process.cwd(),
-  'data',
-  'aliases',
-  'schema-field-aliases.jsonl',
 );
 
 interface AliasTarget {
@@ -36,20 +35,6 @@ interface ModelAliasDraft {
   strongZhAliases: string[];
 }
 
-interface SchemaFieldAlias {
-  id: string;
-  resource: string;
-  path: string;
-  chunkId: string;
-  fieldTerms: string[];
-  weakZhAliases: string[];
-  strongZhAliases: string[];
-  source: 'llm_offline';
-  reviewed: false;
-  reviewedAt: null;
-  reviewNote: '';
-}
-
 const SYSTEM = `你为 Kubernetes schema 字段生成检索 alias 草稿。
 只根据给定 resource/path/chunk text 生成:
 - fieldTerms: 英文字段术语,只能来自 path、description、enum/type 中出现或直接派生的术语。
@@ -61,7 +46,7 @@ const SYSTEM = `你为 Kubernetes schema 字段生成检索 alias 草稿。
 
 function readTargets(): AliasTarget[] {
   if (!existsSync(TARGETS_PATH)) throw new Error(`target 文件不存在: ${TARGETS_PATH}`);
-  const parsed = JSON.parse(readFileSync(TARGETS_PATH, 'utf8')) as unknown;
+  const parsed = readJsonFile(TARGETS_PATH, 'alias targets');
   if (!Array.isArray(parsed)) throw new Error('target 文件必须是数组');
   return parsed.map((row) => row as AliasTarget);
 }
@@ -150,9 +135,15 @@ async function main(): Promise<void> {
     );
   }
 
-  writeFileSync(ALIASES_PATH, aliases.map((a) => JSON.stringify(a)).join('\n') + '\n');
-  console.error(`\n已写 alias 草稿 ${aliases.length} 条 → ${ALIASES_PATH}`);
-  console.error('注意:全部 reviewed=false,人工审计通过前不会进入 A/B。');
+  const draftPath = writeSchemaFieldAliasDraft(aliases);
+  const displayPath = relative(process.cwd(), draftPath);
+  console.error(`\n已写 alias 草稿 ${aliases.length} 条 → ${displayPath}`);
+  console.error(
+    `先校验草稿: npm run aliases:check -- --draft ${displayPath}`,
+  );
+  console.error('人工审核后删除拒绝项，并为保留项填写 reviewed=true 和 reviewedAt。');
+  console.error(`再预览合并: npm run aliases:review -- ${displayPath}`);
+  console.error('确认预览后显式追加 --apply；生成命令不会修改正式注册表。');
 }
 
 main().catch((e: unknown) => {

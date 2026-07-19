@@ -6,26 +6,36 @@
 ## 当前执行依据
 
 - `AI应用开发训练方案-K8s-YAML-Copilot.md`：当前项目定位与能力地图，不维护动态实现状态。
-- `AI应用开发能力训练实现方案.md`：唯一实施 roadmap，维护当前事实、质量门禁和执行顺序。
+- `AI应用开发能力训练实现方案.md`：唯一实施 roadmap（路线图），维护当前事实、质量门禁和执行顺序。
 - `AGENTS.md`：agent 执行规则和工程铁律。
-- `superpowers/plans/` 中最新且已确认的 plan：当前具体任务拆解。
+- `superpowers/specs/2026-07-17-case-governance-design.md` / `superpowers/plans/2026-07-17-case-governance.md`：Case Governance（评估用例治理）的已实施设计与执行记录。
+- `superpowers/plans/2026-07-16-phase-b-engineering-cleanup.md`：已完成审核的 Phase B（阶段 B）工程清理与 Deferred Risk Closure（延期风险收敛）记录。
+- `doc-inventory.md`：docs lifecycle inventory（文档生命周期清单）。
 
-## 当前纠偏方案
+## 质量纠偏记录
 
-2026-07-10 的 eval harness 计划已完成 Task 1-8 的结构重构，但 correctness review 未通过，旧计划的 Task 9/10 不再执行。以下四组 spec/plan 已完成交叉自审，按顺序逐 Task 实施：
+2026-07-10 的 eval harness（评估框架）计划完成 Task 1-8（任务 1-8）的第一轮结构重构后，correctness review（正确性审核）未通过；旧计划的 Task 9/10（任务 9/10）已废弃。以下四组 spec/plan（设计稿 / 实施计划）均已完成结构实现与逐 Task（任务）审核：
 
-1. `superpowers/specs/2026-07-12-eval-artifact-protocol-design.md` / `superpowers/plans/2026-07-12-eval-artifact-protocol.md`：run、trace、artifact 与 bad case 证据协议。已实施并完成 review。
-2. `superpowers/specs/2026-07-12-knowledge-provenance-corpus-identity-design.md` / `superpowers/plans/2026-07-12-knowledge-provenance-corpus-identity.md`：知识来源、目标资源、corpus 指纹与索引一致性。
-3. `superpowers/specs/2026-07-12-evaluator-validity-design.md` / `superpowers/plans/2026-07-12-evaluator-validity.md`：retrieval 分层、grounded answer、judge、generation/fix 的判定有效性。
-4. `superpowers/specs/2026-07-12-eval-metric-semantics-design.md` / `superpowers/plans/2026-07-12-eval-metric-semantics.md`：指标方向、分母、可比较性与 baseline 晋升门禁。
+1. `superpowers/specs/2026-07-12-eval-artifact-protocol-design.md` / `superpowers/plans/2026-07-12-eval-artifact-protocol.md`：run、trace、artifact 与 bad case（运行、轨迹、产物与问题用例）证据协议。
+2. `superpowers/specs/2026-07-12-knowledge-provenance-corpus-identity-design.md` / `superpowers/plans/2026-07-12-knowledge-provenance-corpus-identity.md`：knowledge provenance / corpus identity（知识来源 / 语料身份）与索引一致性。
+3. `superpowers/specs/2026-07-12-evaluator-validity-design.md` / `superpowers/plans/2026-07-12-evaluator-validity.md`：retrieval、grounded answer、judge、generation/fix（检索、有依据回答、裁判、生成 / 修复）的判定有效性。
+4. `superpowers/specs/2026-07-12-eval-metric-semantics-design.md` / `superpowers/plans/2026-07-12-eval-metric-semantics.md`：metric semantics（指标语义）、可比较性与 baseline（基线）晋升门禁。
 
-当前执行第 2 份 Knowledge Provenance / Corpus Identity plan。四份 plan 不合并成巨型 plan；每个 Task 完成后停止并等待 review，未经明确要求不 commit。
+四份计划完成不代表正式评估完成：当前没有新口径 full eval（完整评估）或 baseline（基线），也没有根据旧指标继续优化模型或检索。
 
-纠偏完成后的恢复顺序统一维护在 `AI应用开发能力训练实现方案.md` 的“唯一执行顺序”中。Stage 6/7、Claim-level Grounding、检索遗留项和工程 cleanup 不在本文件重复维护，避免多份 roadmap 漂移。
+## 当前执行
+
+1. Phase B（阶段 B）工程清理与 Deferred Risk Closure（延期风险收敛）第 1-6 项已完成审核。
+2. Case Governance（评估用例治理）已完成实现和本地门禁。
+3. 下一项质量主线是清理本地旧产物、重建索引和依次运行各类正式评估，并人工审核 baseline（基线）。
+4. 当前仍没有新口径 full eval（完整评估）或 baseline（基线），不得根据旧指标调优模型或检索。
+
+完整顺序只维护在 `AI应用开发能力训练实现方案.md` 的“唯一执行顺序”中。每个 Task（任务）完成后停止等待审核；未经明确要求不暂存、不提交、不晋升 baseline（基线）。
 
 ## 命令入口
 
-- 根目录 `README.md`：唯一面向使用者的命令说明，后续 cleanup 会补齐常用命令、推荐工作流、风险提示和旧 npm scripts 迁移表；不再维护平行 `docs/CLI.md`。
+- 根目录 `README.md`：唯一面向使用者的命令说明，已记录常用命令、外部调用、写盘和成本边界；不维护平行 `docs/CLI.md`。
+- `scripts/README.md`：只面向维护者记录脚本生命周期和保留依据，不承担使用者命令说明。
 
 ## 评估报告
 

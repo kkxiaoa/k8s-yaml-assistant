@@ -35,6 +35,7 @@ import {
   type EvalRun,
 } from './protocol';
 import { createTraceEnvelope } from './run-session';
+import type { EvalCaseGovernance } from './cases/governance';
 
 function tracking(
   evalCaseId: string,
@@ -94,8 +95,21 @@ function badCase(params: {
 
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
+const HOLDOUT_GOVERNANCE = {
+  ...GOVERNANCE,
+  role: 'holdout',
+} as const;
 
-function retrievalRun(id: string, evalCaseId: string): EvalRun {
+function retrievalRun(
+  id: string,
+  evalCaseId: string,
+  governance: EvalCaseGovernance = GOVERNANCE,
+): EvalRun {
   return {
     schemaVersion: EVAL_SCHEMA_VERSION,
     id,
@@ -107,7 +121,7 @@ function retrievalRun(id: string, evalCaseId: string): EvalRun {
     dataset: {
       id: 'retrieval/semantic',
       hash: HASH_A,
-      caseIds: [evalCaseId],
+      cases: [{ id: evalCaseId, governance }],
       caseCount: 1,
     },
     artifactPaths: { trace: traceRelativePath(id, 'retrieval') },
@@ -171,6 +185,7 @@ function withTempDir(fn: (directory: string) => void): void {
     actualTopIds: ['schema::v1::Pod::spec.volumes.projected.sources'],
     rankedIds: ['schema::v1::Pod::spec.volumes.projected.sources'],
     k: 3,
+    scope: 'tuning',
   });
 
   assert.equal(
@@ -207,6 +222,7 @@ function withTempDir(fn: (directory: string) => void): void {
         actualTopIds: [],
         rankedIds: [],
         k: 3,
+        scope: 'tuning',
       }),
     /evalCaseId/,
   );
@@ -225,6 +241,7 @@ function withTempDir(fn: (directory: string) => void): void {
         actualTopIds: [],
         rankedIds: [],
         k: 3,
+        scope: 'tuning',
       }),
     /runId/,
   );
@@ -244,6 +261,7 @@ function withTempDir(fn: (directory: string) => void): void {
     actualTopIds: ['schema::v1::Endpoints::subsets.ports', 'schema::v1::Endpoints::subsets.ports.port'],
     rankedIds: ['schema::v1::Endpoints::subsets.ports', 'schema::v1::Endpoints::subsets.ports.port'],
     k: 3,
+    scope: 'tuning',
   });
 
   assert.equal(miss.failure.layer, 'retrieval');
@@ -270,6 +288,7 @@ function withTempDir(fn: (directory: string) => void): void {
       'schema::v1::PersistentVolumeClaim::spec.resources.requests',
     ],
     k: 3,
+    scope: 'tuning',
   });
 
   assert.equal(miss.failure.layer, 'rerank');
@@ -486,6 +505,7 @@ function withTempDir(fn: (directory: string) => void): void {
     const envelope = createTraceEnvelope({
       runId: run.id,
       evalCaseId: 'case-i',
+      governance: GOVERNANCE,
       kind: 'retrieval',
       outcome: 'failed',
       payload: { ranking: { recall: 0 } },
@@ -523,6 +543,7 @@ function withTempDir(fn: (directory: string) => void): void {
     const wrongCaseEnvelope = createTraceEnvelope({
       runId: run.id,
       evalCaseId: 'other-case',
+      governance: GOVERNANCE,
       kind: 'retrieval',
       outcome: 'failed',
       payload: { ranking: { recall: 0 } },
@@ -557,6 +578,7 @@ function withTempDir(fn: (directory: string) => void): void {
     const envelope = createTraceEnvelope({
       runId: run.id,
       evalCaseId: 'case-j',
+      governance: GOVERNANCE,
       kind: 'retrieval',
       outcome: 'failed',
       payload: { ranking: { recall: 0 } },
@@ -575,9 +597,50 @@ function withTempDir(fn: (directory: string) => void): void {
       actualTopIds: ['Chunk::actual'],
       rankedIds: ['Chunk::actual'],
       k: 1,
+      scope: 'tuning',
     });
 
     assert.equal(upsertBadCases([issue], { path, evalRoot }), 1);
     assert.deepEqual(readBadCases({ path }), [issue]);
+  });
+}
+
+{
+  withTempDir((directory) => {
+    const evalRoot = join(directory, 'eval');
+    const path = join(directory, 'bad-cases.jsonl');
+    const run = retrievalRun(
+      'run-holdout-upsert',
+      'case-holdout',
+      HOLDOUT_GOVERNANCE,
+    );
+    writeJsonAtomic(runPath(run.id, evalRoot), run);
+    const envelope = createTraceEnvelope({
+      runId: run.id,
+      evalCaseId: 'case-holdout',
+      governance: HOLDOUT_GOVERNANCE,
+      kind: 'retrieval',
+      outcome: 'failed',
+      payload: { ranking: { recall: 0 } },
+    });
+    appendTraceEnvelope(
+      evalArtifactPath(run.artifactPaths.trace, evalRoot),
+      envelope,
+    );
+    const issue = retrievalMiss({
+      evalCaseId: 'case-holdout',
+      runId: run.id,
+      traceId: envelope.traceId,
+      question: 'holdout question',
+      resource: 'Pod',
+      expectedChunkIds: ['Chunk::expected'],
+      actualTopIds: [],
+      rankedIds: [],
+      k: 3,
+      scope: 'full',
+    });
+
+    assert.equal(upsertBadCases([issue], { path, evalRoot }), 0);
+    assert.equal(existsSync(path), false);
   });
 }

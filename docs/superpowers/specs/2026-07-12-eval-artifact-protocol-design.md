@@ -1,6 +1,6 @@
 # Eval Artifact Protocol 纠偏设计
 
-> 状态：已实施并完成 review。
+> 状态：已实施；对应实施计划已完成逐 Task（任务）审核。
 > 用途：定义 retrieval、faith、judge、generation、fix 共用的评估证据协议，不定义各任务的指标公式。
 > 对应计划：`docs/superpowers/plans/2026-07-12-eval-artifact-protocol.md`。
 > 顺序：第一项实施。只定义 metric observation 的序列化形态；指标方向、compare 和 promote 由 Metric Semantics plan 负责。

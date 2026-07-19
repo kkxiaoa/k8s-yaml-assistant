@@ -2,6 +2,17 @@ import type Anthropic from '@anthropic-ai/sdk';
 
 export const TEXT_MAX_TOKENS = 1024;
 
+export async function textOfRequest(
+  client: Anthropic,
+  request: Anthropic.MessageCreateParamsNonStreaming,
+): Promise<string> {
+  const response = await client.messages.create(request);
+  return response.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+}
+
 /** 调一次模型,把 text block 拼成纯字符串返回。 */
 export async function textOf(
   client: Anthropic,
@@ -9,14 +20,10 @@ export async function textOf(
   system: string,
   user: string,
 ): Promise<string> {
-  const resp = await client.messages.create({
+  return textOfRequest(client, {
     model,
     max_tokens: TEXT_MAX_TOKENS,
     system,
     messages: [{ role: 'user', content: user }],
   });
-  return resp.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { text: string }).text)
-    .join('');
 }

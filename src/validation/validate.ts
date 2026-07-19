@@ -10,7 +10,7 @@ import {
   type SchemaNode,
 } from '../knowledge/schemas';
 
-export const VALIDATION_LOGIC_REVISION = 'schema-validator-v1';
+export const VALIDATION_LOGIC_REVISION = 'schema-validator-v2';
 
 export interface ValidationError {
   /** 出错字段路径,如 'spec.accessModes';给编辑器定位用 */
@@ -41,8 +41,9 @@ function typeMatches(schemaType: string | undefined, value: unknown): boolean {
     case 'boolean':
       return typeof value === 'boolean';
     case 'integer':
+      return typeof value === 'number' && Number.isInteger(value);
     case 'number':
-      return typeof value === 'number';
+      return typeof value === 'number' && Number.isFinite(value);
     case 'object':
       return (
         typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -52,6 +53,24 @@ function typeMatches(schemaType: string | undefined, value: unknown): boolean {
     default:
       return true;
   }
+}
+
+function unionTypes(branches: readonly SchemaNode[]): string {
+  const types = branches
+    .map((branch) => branch.type)
+    .filter((type): type is string => type !== undefined);
+  return [...new Set(types)].join(' / ') || '声明的 schema 分支';
+}
+
+function matchesSchemaBranch(
+  value: unknown,
+  branch: SchemaNode,
+  path: string,
+  topLevel: boolean,
+): boolean {
+  const branchErrors: ValidationError[] = [];
+  validateNode(value, branch, path, topLevel, branchErrors);
+  return branchErrors.length === 0;
 }
 
 const enumStr = (vals: unknown[]): string =>
@@ -64,7 +83,40 @@ function validateNode(
   topLevel: boolean,
   errors: ValidationError[],
 ): void {
-  const resolved = resolveSchemaNode(node);
+  let resolved: SchemaNode;
+  try {
+    resolved = resolveSchemaNode(node);
+  } catch (error) {
+    errors.push({
+      path,
+      message: `schema 无法解析: ${error instanceof Error ? error.message : String(error)}`,
+    });
+    return;
+  }
+  if (resolved.anyOf && resolved.anyOf.length > 0) {
+    const matched = resolved.anyOf.filter((branch) =>
+      matchesSchemaBranch(value, branch, path, topLevel),
+    );
+    if (matched.length === 0) {
+      errors.push({
+        path,
+        message: `值必须匹配 anyOf 联合类型中的至少一个分支 (${unionTypes(resolved.anyOf)}), 当前为 ${jsTypeName(value)}`,
+      });
+      return;
+    }
+  }
+  if (resolved.oneOf && resolved.oneOf.length > 0) {
+    const matched = resolved.oneOf.filter((branch) =>
+      matchesSchemaBranch(value, branch, path, topLevel),
+    );
+    if (matched.length !== 1) {
+      errors.push({
+        path,
+        message: `值必须匹配 oneOf 联合类型中的恰好一个分支 (${unionTypes(resolved.oneOf)}), 当前为 ${jsTypeName(value)}`,
+      });
+      return;
+    }
+  }
   // 1. 类型
   if (!typeMatches(resolved.type, value)) {
     errors.push({

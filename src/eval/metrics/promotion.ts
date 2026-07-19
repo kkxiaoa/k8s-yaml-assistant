@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import {
   baselinePath,
   evalArtifactPath,
@@ -32,8 +33,7 @@ function sameDatasetIdentity(
     left.id === right.id &&
     left.hash === right.hash &&
     left.caseCount === right.caseCount &&
-    left.caseIds.length === right.caseIds.length &&
-    left.caseIds.every((caseId, index) => caseId === right.caseIds[index])
+    isDeepStrictEqual(left.cases, right.cases)
   );
 }
 
@@ -136,7 +136,12 @@ function assertTraceCoverage(
     );
   }
 
-  const expectedCaseIds = new Set(run.dataset.caseIds);
+  const expectedCases = new Map(
+    run.dataset.cases.map((evalCase) => [
+      evalCase.id,
+      evalCase.governance,
+    ]),
+  );
   const seenCaseIds = new Set<string>();
   let errorTraceCount = 0;
 
@@ -146,9 +151,15 @@ function assertTraceCoverage(
         `run ${run.id} trace ${trace.traceId} has mismatched run or kind`,
       );
     }
-    if (!expectedCaseIds.has(trace.evalCaseId)) {
+    const expectedGovernance = expectedCases.get(trace.evalCaseId);
+    if (expectedGovernance === undefined) {
       throw new Error(
         `run ${run.id} trace ${trace.traceId} has unexpected case ${trace.evalCaseId}`,
+      );
+    }
+    if (!isDeepStrictEqual(trace.governance, expectedGovernance)) {
+      throw new Error(
+        `run ${run.id} trace ${trace.traceId} governance does not match dataset case ${trace.evalCaseId}`,
       );
     }
     if (seenCaseIds.has(trace.evalCaseId)) {
@@ -168,8 +179,8 @@ function assertTraceCoverage(
     }
   }
 
-  const missingCaseIds = run.dataset.caseIds.filter(
-    (caseId) => !seenCaseIds.has(caseId),
+  const missingCaseIds = run.dataset.cases.flatMap((evalCase) =>
+    seenCaseIds.has(evalCase.id) ? [] : [evalCase.id],
   );
   if (missingCaseIds.length > 0) {
     throw new Error(

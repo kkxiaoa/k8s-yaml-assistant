@@ -56,6 +56,11 @@ const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
 const CREATED_AT = '2026-07-16T00:00:00.000Z';
 const PROMOTED_AT = '2026-07-16T01:00:00.000Z';
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
 
 function datasetIdentity(
   id: string,
@@ -64,7 +69,10 @@ function datasetIdentity(
   return {
     id,
     hash: HASH_A,
-    caseIds: [...caseIds],
+    cases: caseIds.map((caseId) => ({
+      id: caseId,
+      governance: GOVERNANCE,
+    })),
     caseCount: caseIds.length,
   };
 }
@@ -182,13 +190,14 @@ function appendTrace(
 }
 
 function appendSuccessTraces(run: EvalRun, evalRoot: string): void {
-  for (const evalCaseId of run.dataset.caseIds) {
+  for (const evalCase of run.dataset.cases) {
     appendTrace(
       run,
       evalRoot,
       createTraceEnvelope({
         runId: run.id,
-        evalCaseId,
+        evalCaseId: evalCase.id,
+        governance: evalCase.governance,
         kind: run.kind,
         outcome: 'success',
         payload: { result: 'fixture' },
@@ -200,6 +209,7 @@ function appendSuccessTraces(run: EvalRun, evalRoot: string): void {
 function calibrationCase(id: string): JudgeCalibrationCase {
   return {
     id,
+    governance: GOVERNANCE,
     category: 'policy_conflict',
     sourceFaithRunId: 'faith-run',
     sourceFaithTraceId: `faith-trace-${id}`,
@@ -311,7 +321,13 @@ check('rejects every non-full scope for non-judge baselines', () => {
     'generation',
     'fix',
   ] as const) {
-    for (const scope of ['smoke', 'policy', 'targeted'] as const) {
+    for (const scope of [
+      'tuning',
+      'holdout',
+      'smoke',
+      'policy',
+      'targeted',
+    ] as const) {
       const evalRoot = mkdtempSync(join(tmpdir(), 'eval-promotion-'));
       const run = completedRun({ id: `${kind}-${scope}`, kind, scope });
       writeRun(run, evalRoot);
@@ -353,6 +369,29 @@ check('rejects a judge subset and accepts the complete calibration identity', ()
   assert.equal(
     promoteRun(fullRun.id, { evalRoot: fullRoot }).sourceRunId,
     fullRun.id,
+  );
+});
+
+check('rejects a calibration snapshot whose governance changed after run identity was captured', () => {
+  const evalRoot = mkdtempSync(join(tmpdir(), 'eval-promotion-'));
+  const original = calibrationCase('judge-governance');
+  const run = completedRun({
+    id: 'judge-governance',
+    kind: 'judge',
+    dataset: judgeDatasetIdentity([original]),
+  });
+  writeRun(run, evalRoot);
+  writeCalibration(evalRoot, [
+    {
+      ...original,
+      governance: { ...original.governance, role: 'regression' },
+    },
+  ]);
+  appendSuccessTraces(run, evalRoot);
+
+  assert.throws(
+    () => promoteRun(run.id, { evalRoot }),
+    /calibration identity/i,
   );
 });
 
@@ -462,6 +501,7 @@ check('rejects missing traces and trace coverage outside the dataset selection',
     createTraceEnvelope({
       runId: incomplete.id,
       evalCaseId: 'case-1',
+      governance: GOVERNANCE,
       kind: incomplete.kind,
       outcome: 'success',
       payload: { result: 'fixture' },
@@ -480,6 +520,7 @@ check('rejects missing traces and trace coverage outside the dataset selection',
     createTraceEnvelope({
       runId: wrongSelection.id,
       evalCaseId: 'other-case',
+      governance: GOVERNANCE,
       kind: wrongSelection.kind,
       outcome: 'success',
       payload: { result: 'fixture' },
@@ -491,6 +532,29 @@ check('rejects missing traces and trace coverage outside the dataset selection',
   );
 });
 
+check('rejects a trace whose governance differs from its dataset case', () => {
+  const evalRoot = mkdtempSync(join(tmpdir(), 'eval-promotion-'));
+  const run = completedRun({ id: 'governance-mismatch' });
+  writeRun(run, evalRoot);
+  appendTrace(
+    run,
+    evalRoot,
+    createTraceEnvelope({
+      runId: run.id,
+      evalCaseId: 'case-1',
+      governance: { ...GOVERNANCE, role: 'regression' },
+      kind: run.kind,
+      outcome: 'success',
+      payload: { result: 'fixture' },
+    }),
+  );
+
+  assert.throws(
+    () => promoteRun(run.id, { evalRoot }),
+    /governance/i,
+  );
+});
+
 check('rejects unexplained case errors and provides no harness-error override', () => {
   const malformedRoot = mkdtempSync(join(tmpdir(), 'eval-promotion-'));
   const malformed = completedRun({ id: 'unexplained-error' });
@@ -498,6 +562,7 @@ check('rejects unexplained case errors and provides no harness-error override', 
   const successEnvelope = createTraceEnvelope({
     runId: malformed.id,
     evalCaseId: 'case-1',
+    governance: GOVERNANCE,
     kind: malformed.kind,
     outcome: 'success',
     payload: { result: 'fixture' },
@@ -524,6 +589,7 @@ check('rejects unexplained case errors and provides no harness-error override', 
     createErrorTraceEnvelope({
       runId: errorRun.id,
       evalCaseId: 'case-1',
+      governance: GOVERNANCE,
       kind: errorRun.kind,
       stage: 'retrieval',
       error: new Error('retrieval unavailable'),

@@ -1,4 +1,4 @@
-// 计算 curated 白名单的“传递闭包”:26 个资源入口 + 它们 $ref 递归依赖到的所有 definitions。
+// 计算 curated 白名单资源入口及其 $ref 递归依赖 definitions 的传递闭包。
 // 只有这部分需要进 git(自包含、可复现、体积小);全量 generated/ 其余部分继续 gitignore。
 // 用法:
 //   npm run corpus:closure            打印闭包统计(资源数 / definition 数 / 体积)

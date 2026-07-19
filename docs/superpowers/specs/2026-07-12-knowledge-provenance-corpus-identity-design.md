@@ -1,6 +1,6 @@
 # Knowledge Provenance 与 Corpus Identity 纠偏设计
 
-> 状态：已自审，对应 implementation plan 已落盘，待执行。
+> 状态：已实施；对应实施计划已完成逐 Task（任务）审核。
 > 用途：定义知识形态、权威来源、目标资源、provider manifest、corpus 指纹和索引失效边界；本轮不 ingest docs/examples。
 > 对应计划：`docs/superpowers/plans/2026-07-12-knowledge-provenance-corpus-identity.md`。
 > 顺序：第二项实施。依赖 Artifact Protocol，并在 Evaluator Validity 前完成知识 ID 和 identity 迁移。

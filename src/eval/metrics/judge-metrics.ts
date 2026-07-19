@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { FaithContextSourceSchema } from '../faith-store';
+import { EvalCaseGovernanceSchema } from '../cases/governance';
 import {
   BooleanQuorumDiagnosticsSchema,
   DEFAULT_JUDGE_QUORUM,
@@ -56,6 +57,7 @@ export const JudgeCalibrationLabelSchema = z.strictObject({
 
 export const JudgeCalibrationCaseSchema = z.strictObject({
   id: NonBlankStringSchema,
+  governance: EvalCaseGovernanceSchema,
   category: JudgeCalibrationCategorySchema,
   sourceFaithRunId: NonBlankStringSchema,
   sourceFaithTraceId: NonBlankStringSchema,
@@ -216,6 +218,7 @@ export type JudgePolicyDimensionResult = z.infer<
 export const JudgeCalibrationTraceSchema = z
   .strictObject({
     id: NonBlankStringSchema,
+    governance: EvalCaseGovernanceSchema,
     category: JudgeCalibrationCategorySchema,
     question: NonBlankStringSchema,
     sourceFaithRunId: NonBlankStringSchema,
@@ -447,6 +450,7 @@ export function buildJudgeCalibrationTrace(params: {
 
   return JudgeCalibrationTraceSchema.parse({
     id: calibrationCase.id,
+    governance: calibrationCase.governance,
     category: calibrationCase.category,
     question: calibrationCase.question,
     sourceFaithRunId: calibrationCase.sourceFaithRunId,

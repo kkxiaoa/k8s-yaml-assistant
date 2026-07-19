@@ -4,6 +4,10 @@ import {
   validateYamlDocuments,
   type ValidationError,
 } from '../validation/validate';
+import {
+  parseGovernanceForCaseFamily,
+  type EvalCaseGovernance,
+} from './cases/governance';
 
 export type { JsonValue } from '../shared/json';
 
@@ -76,6 +80,7 @@ export interface GenerationAssertionContract {
 
 export interface GenerationCaseContract extends GenerationAssertionContract {
   id: string;
+  governance: EvalCaseGovernance;
   requirement: string;
   rationale?: string[];
 }
@@ -92,6 +97,7 @@ export type DefectType = (typeof DEFECT_TYPES)[number];
 
 export interface FixCase {
   id: string;
+  governance: EvalCaseGovernance;
   brokenYaml: string;
   defectType: DefectType;
   target: ResourceIdentity;
@@ -408,6 +414,7 @@ function assertContract(
 export function assertGenerationCaseContract(
   evalCase: GenerationCaseContract,
 ): void {
+  parseGovernanceForCaseFamily(evalCase.governance, 'generation');
   nonEmptyString(evalCase.id, 'generationCase.id');
   nonEmptyString(evalCase.requirement, `generationCase(${evalCase.id}).requirement`);
   evalCase.rationale?.forEach((reason, index) =>
@@ -429,6 +436,7 @@ export function assertGenerationCasesContract(
 }
 
 export function assertFixCaseContract(evalCase: FixCase): void {
+  parseGovernanceForCaseFamily(evalCase.governance, 'fix');
   nonEmptyString(evalCase.id, 'fixCase.id');
   nonEmptyString(evalCase.brokenYaml, `fixCase(${evalCase.id}).brokenYaml`);
   assertResourceIdentity(evalCase.target, `fixCase(${evalCase.id}).target`);

@@ -19,6 +19,12 @@ import {
 import { JudgeAttemptSchema, type JudgeAttempt } from './judge-votes';
 import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
 import {
+  buildGovernanceReport,
+  formatGovernanceReport,
+  requireGovernanceMetric,
+  type GovernanceDisplayMetric,
+} from './governance-report';
+import {
   JUDGE_CALIBRATION_VOTES,
   harnessErrorMetrics,
   isDirectExecution,
@@ -118,6 +124,24 @@ function reportJudgeCase(trace: JudgeCalibrationTrace): void {
   );
 }
 
+function judgeGovernanceMetrics(
+  traces: readonly JudgeCalibrationTrace[],
+): GovernanceDisplayMetric[] {
+  const metrics = judgeMetricsRecord(computeJudgeCalibrationMetrics(traces));
+  return [
+    {
+      label: 'agreement',
+      unit: 'ratio',
+      observation: requireGovernanceMetric(metrics, 'judge.agreement_rate'),
+    },
+    {
+      label: 'quorum-failure',
+      unit: 'count',
+      observation: requireGovernanceMetric(metrics, 'judge.indeterminate'),
+    },
+  ];
+}
+
 function reportDisagreements(traces: readonly JudgeCalibrationTrace[]): void {
   const disagreements = traces.filter(
     (trace) => trace.majority.agree === false,
@@ -205,6 +229,7 @@ async function main(): Promise<void> {
           createTraceEnvelope({
             runId,
             evalCaseId: calibrationCase.id,
+            governance: calibrationCase.governance,
             kind: 'judge',
             outcome: judgeEnvelopeOutcome(trace),
             payload: trace,
@@ -216,6 +241,7 @@ async function main(): Promise<void> {
           createErrorTraceEnvelope({
             runId,
             evalCaseId: calibrationCase.id,
+            governance: calibrationCase.governance,
             kind: 'judge',
             payload:
               failure.payload ??
@@ -254,6 +280,17 @@ async function main(): Promise<void> {
     );
     console.error(
       `judge 内部不稳定(${JUDGE_CALIBRATION_VOTES} 次判定分裂)= ${metrics.unstableCount} 条`,
+    );
+    console.error(
+      formatGovernanceReport(
+        buildGovernanceReport({
+          cases,
+          results: batch.results,
+          harnessErrors: batch.harnessErrors,
+          resultCaseId: (trace) => trace.id,
+          aggregate: judgeGovernanceMetrics,
+        }),
+      ),
     );
     console.error('\npolicy 维度一致率(只统计 human.policy 明确标注的维度):');
     for (const dimension of POLICY_DIMENSIONS) {

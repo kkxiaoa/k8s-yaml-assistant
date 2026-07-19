@@ -1,8 +1,6 @@
 // 服务端可复用管线:把 CLI 里的检索/校验逻辑抽成函数,供 Next.js API 路由调用。
 // 检索流水线(向量 → 软路由 → rerank)与 CLI 完全一致,只是这里被 Web 复用。
 
-import { config } from 'dotenv';
-config({ override: true });
 import { performance } from 'node:perf_hooks';
 import Anthropic from '@anthropic-ai/sdk';
 import { searchCorpusTraced } from '../retrieval/retrieve';
@@ -25,7 +23,10 @@ import {
   resolveQueryExpansionEnabled,
   skippedExactQueryExpansionTrace,
 } from '../retrieval/query-expansion-runtime';
-export { ANSWER_MODEL } from './agent-contract';
+import { ANSWER_MODEL } from './agent-contract';
+export { ANSWER_MODEL };
+
+export const ASK_MAX_TOKENS = 2048;
 
 export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,服务于一个容器云平台控制台。
 基于给定的 <ask_mode>、<editor_context>、<current_yaml> 和 <docs> 片段准确回答用户关于当前 YAML 配置的问题。
@@ -150,6 +151,34 @@ ${errors}
 </editor_context>`;
 }
 
+export interface AskPromptInput {
+  question: string;
+  context: string;
+  mode: AskMode;
+  editorContext?: EditorContext;
+}
+
+export function buildAskUserMessage(input: AskPromptInput): string {
+  const { question, context, mode, editorContext } = input;
+  return `参考以下上下文和 K8s 字段文档片段回答问题。\n\n<ask_mode>\n${mode}\n</ask_mode>\n\n${formatEditorContext(editorContext)}\n\n<current_yaml>\n${editorContext?.yaml ?? '无'}\n</current_yaml>\n\n<docs>\n${context}\n</docs>\n\n问题:${question}`;
+}
+
+export type AskRequest = Anthropic.MessageCreateParamsNonStreaming;
+
+export function buildAskRequest(input: AskPromptInput): AskRequest {
+  return {
+    model: ANSWER_MODEL,
+    max_tokens: ASK_MAX_TOKENS,
+    system: ASK_SYSTEM,
+    messages: [
+      {
+        role: 'user',
+        content: buildAskUserMessage(input),
+      },
+    ],
+  };
+}
+
 /** 完整检索流水线:软路由 → 粗召回 → rerank 精排 → 拼上下文。 */
 export async function retrieveContext(
   question: string,
@@ -231,6 +260,40 @@ export async function retrieveContext(
   });
 
   return { context, hits: finalHits, sources, trace };
+}
+
+export interface PrepareAskInput {
+  question: string;
+  k?: number;
+  editorContext?: EditorContext;
+  mode: AskMode;
+  retrievalOptions?: RetrieveContextOptions;
+}
+
+export async function prepareAsk(input: PrepareAskInput) {
+  const {
+    question,
+    k = 3,
+    editorContext,
+    mode,
+    retrievalOptions,
+  } = input;
+  const retrieval = await retrieveContext(
+    question,
+    k,
+    editorContext,
+    mode,
+    retrievalOptions,
+  );
+  return {
+    ...retrieval,
+    request: buildAskRequest({
+      question,
+      context: retrieval.context,
+      mode,
+      editorContext,
+    }),
+  };
 }
 
 /** 校验一段资源 YAML 文本(多文档 + schema 驱动校验)。供 /api/check 调用,与生成引擎共用同一校验。 */

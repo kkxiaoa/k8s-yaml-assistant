@@ -1,12 +1,14 @@
-// 从人工 judge labels 和最新 faith trace 生成可执行 calibration snapshot。
+// 从人工标签和最近可用的已完成非 smoke faith traces 生成非 Holdout calibration snapshot。
 // 用法: npm run build:calibration
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   buildJudgeCalibrationCaseFromFaith,
   type JudgeCalibrationLabel,
 } from '../src/eval/calibration-snapshot';
+import { assertTuningEligibleCase } from '../src/eval/cases/governance';
 import {
   decodeFaithTrace,
   type FaithTrace,
@@ -78,15 +80,28 @@ function readTraceFile(run: FaithEvalRun): FaithTraceSnapshot[] {
       if (trace.id !== envelope.evalCaseId) {
         throw new Error(`faith trace payload mismatch: ${envelope.traceId}`);
       }
+      if (!isDeepStrictEqual(trace.governance, envelope.governance)) {
+        throw new Error(
+          `faith trace governance mismatch: ${envelope.traceId}`,
+        );
+      }
       return { trace, traceId: envelope.traceId, run };
     },
   );
   const traces = snapshots.map(({ trace }) => trace);
-  if (!equalSorted(traces.map((trace) => trace.id), run.dataset.caseIds)) {
+  if (
+    !equalSorted(
+      traces.map((trace) => trace.id),
+      run.dataset.cases.map((evalCase) => evalCase.id),
+    )
+  ) {
     throw new Error(`faith run ${run.id} trace cases do not match dataset`);
   }
   const snapshotIdentity = faithTraceDatasetIdentity(traces);
-  if (snapshotIdentity.hash !== run.dataset.hash) {
+  if (
+    snapshotIdentity.hash !== run.dataset.hash ||
+    !isDeepStrictEqual(snapshotIdentity.cases, run.dataset.cases)
+  ) {
     throw new Error(`faith run ${run.id} dataset hash mismatch`);
   }
   return snapshots;
@@ -126,6 +141,7 @@ function main(): void {
       throw new Error(`明细缺 faith snapshot ${label.id}`);
     }
     const { trace: t, run, traceId } = found;
+    assertTuningEligibleCase(t, `calibration label ${label.id}`);
     return buildJudgeCalibrationCaseFromFaith({
       label,
       trace: t,

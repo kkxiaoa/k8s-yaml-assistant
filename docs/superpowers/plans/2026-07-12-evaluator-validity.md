@@ -1,8 +1,8 @@
 # Evaluator Validity 实施计划
 
-> 状态：已自审，待执行。
+> 状态：已实施并完成逐 Task（任务）审核。
 > 对应设计：`docs/superpowers/specs/2026-07-12-evaluator-validity-design.md`。
-> 顺序：纠偏计划 3/4。依赖 Artifact Protocol 和 Knowledge Provenance/Corpus Identity，完成并 review 后再执行 Metric Semantics。
+> 顺序：纠偏计划 3/4；四份纠偏计划均已完成。
 
 ## Goal
 

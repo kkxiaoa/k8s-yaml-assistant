@@ -34,6 +34,11 @@ const SOURCE = {
   provenance: { authority: 'cluster_api' as const, version: 'v1' },
   targets: [{ apiVersion: 'v1', kind: 'Pod', path: 'spec.field' }],
 };
+const GOVERNANCE = {
+  task: 'field_explanation',
+  origin: 'human',
+  role: 'development',
+} as const;
 
 function calibrationCase(
   id: string,
@@ -42,6 +47,7 @@ function calibrationCase(
 ): JudgeCalibrationCase {
   return {
     id,
+    governance: GOVERNANCE,
     category: 'faithful',
     sourceFaithRunId: 'faith-run-1',
     sourceFaithTraceId: `faith-trace-${id}`,
@@ -140,6 +146,14 @@ check('calibration preflight rejects malformed labels and missing snapshots', ()
       ]),
     /sources/i,
   );
+  const { governance: _governance, ...withoutGovernance } = calibrationCase(
+    'case-a',
+    true,
+  );
+  assert.throws(
+    () => decodeJudgeCalibrationCases([withoutGovernance]),
+    /governance/i,
+  );
   assert.throws(
     () =>
       decodeJudgeCalibrationCases([
@@ -173,6 +187,7 @@ check('trace records planned, valid, invalid, error attempts and lineage', () =>
 
   assert.equal(trace.sourceFaithRunId, 'faith-run-1');
   assert.equal(trace.sourceFaithTraceId, 'faith-trace-case-a');
+  assert.deepEqual(trace.governance, GOVERNANCE);
   assert.deepEqual(trace.attempts, {
     planned: 5,
     executed: 5,
@@ -192,6 +207,11 @@ check('trace records planned, valid, invalid, error attempts and lineage', () =>
     unstable: true,
     agree: true,
   });
+  const { governance: _governance, ...withoutGovernance } = trace;
+  assert.throws(
+    () => decodeJudgeCalibrationTrace(withoutGovernance),
+    /governance/i,
+  );
 });
 
 check('1/5, 2/5, and a 2:2 tie remain indeterminate', () => {

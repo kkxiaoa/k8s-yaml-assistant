@@ -1,5 +1,12 @@
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 export type JsonValue =
   | null
@@ -119,5 +126,33 @@ export function readJsonFile(
       `invalid ${artifact} JSON at ${displayPath}: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
+  }
+}
+
+export function writeJsonAtomic(path: string, value: unknown): void {
+  const serialized = JSON.stringify(value, null, 2);
+  if (serialized === undefined) {
+    throw new TypeError('value is not JSON-serializable');
+  }
+
+  writeTextAtomic(path, `${serialized}\n`);
+}
+
+export function writeTextAtomic(path: string, content: string): void {
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true });
+  const tempPath = join(
+    directory,
+    `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+
+  try {
+    writeFileSync(tempPath, content, {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
+    renameSync(tempPath, path);
+  } finally {
+    rmSync(tempPath, { force: true });
   }
 }
