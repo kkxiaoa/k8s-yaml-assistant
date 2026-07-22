@@ -9,6 +9,7 @@ import { decodeKnowledgeChunk, type KnowledgeChunk } from '../knowledge/chunk';
 import type { CorpusManifest } from '../knowledge/identity';
 import { canonicalHash, canonicalJson } from '../shared/json';
 import type { IndexBuildChunk } from './index-builder';
+import { getRuntimeConfig } from '../server/runtime-config';
 
 export const INDEX_FORMAT_VERSION = 3 as const;
 
@@ -86,12 +87,10 @@ interface IndexPaths {
   embeddings: string;
 }
 
-/** 索引目录:env INDEX_DIR 优先,默认 data/index。A/B 使用隔离目录。 */
+/** 读取已经显式解码的索引目录。 */
 export function resolveIndexDir(): string {
-  return process.env.INDEX_DIR ?? join(process.cwd(), 'data', 'index');
+  return getRuntimeConfig().indexDir;
 }
-
-export const INDEX_DIR = resolveIndexDir();
 
 function indexPaths(dir: string): IndexPaths {
   return {

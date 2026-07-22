@@ -10,6 +10,7 @@ import {
 
 function validDependencies(): HealthCheckDependencies {
   return {
+    validateRuntimeConfig: async () => undefined,
     validateSchema: async () => undefined,
     validatePolicy: async () => undefined,
     loadAliases: async () => ({ ok: true }),
@@ -24,6 +25,7 @@ test('liveness 不读取索引或调用供应商', () => {
     throw new Error('DeepSeek/Voyage unavailable');
   };
   const health = createHealthService({
+    validateRuntimeConfig: unavailable,
     validateSchema: unavailable,
     validatePolicy: unavailable,
     loadAliases: unavailable,
@@ -33,6 +35,23 @@ test('liveness 不读取索引或调用供应商', () => {
   assert.deepEqual(health.liveness(), { status: 'live' });
   assert.deepEqual(getLiveness(), { status: 'live' });
   assert.equal(dependencyCalls, 0);
+});
+
+test('runtime config 失败映射为不含原值的封闭健康码', async () => {
+  const rawValue = 'http://user:RawCredential@invalid.internal';
+  const health = createHealthService({
+    ...validDependencies(),
+    validateRuntimeConfig: async () => {
+      throw new Error(rawValue);
+    },
+  });
+
+  const status = await health.readiness();
+  assert.deepEqual(status, {
+    status: 'not_ready',
+    code: 'runtime_config_invalid',
+  });
+  assert.equal(JSON.stringify(status).includes(rawValue), false);
 });
 
 test('readiness 失败只返回稳定错误码并缓存首次结果', async () => {
@@ -163,8 +182,11 @@ test('所有索引 miss reason 收敛为有限 readiness 错误码', async () =>
 });
 
 test('有效初始化只执行一次，readiness 与业务门禁复用同一状态', async () => {
-  const calls = { schema: 0, policy: 0, aliases: 0, index: 0 };
+  const calls = { config: 0, schema: 0, policy: 0, aliases: 0, index: 0 };
   const health = createHealthService({
+    validateRuntimeConfig: async () => {
+      calls.config++;
+    },
     validateSchema: async () => {
       calls.schema++;
     },
@@ -186,5 +208,11 @@ test('有效初始化只执行一次，readiness 与业务门禁复用同一状�
   assert.strictEqual(askGate, readinessProbe);
   assert.deepEqual(await readinessProbe, { status: 'ready' });
   assert.deepEqual(await health.readiness(), { status: 'ready' });
-  assert.deepEqual(calls, { schema: 1, policy: 1, aliases: 1, index: 1 });
+  assert.deepEqual(calls, {
+    config: 1,
+    schema: 1,
+    policy: 1,
+    aliases: 1,
+    index: 1,
+  });
 });

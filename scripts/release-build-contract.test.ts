@@ -21,6 +21,7 @@ type ReleaseBuildBundle = {
   packageJson: JsonObject;
   lockRoot: JsonObject;
   nextConfig: JsonObject;
+  tsConfig: JsonObject;
   appSources: Record<string, string>;
   fontAssets: string[];
 };
@@ -59,6 +60,7 @@ async function readActualBundle(): Promise<ReleaseBuildBundle> {
     packageJson: readJson(join(root, 'package.json')),
     lockRoot: packages[''] as JsonObject,
     nextConfig: configModule.default,
+    tsConfig: readJson(join(root, 'tsconfig.json')),
     appSources: Object.fromEntries(
       sourceFiles.map((path) => [relative(root, path), readFileSync(path, 'utf8')]),
     ),
@@ -82,6 +84,11 @@ function validateReleaseBuild(bundle: ReleaseBuildBundle): void {
   assert.equal(devDependencies?.['@types/node'], expectedNodeTypesVersion);
   assert.equal(lockDevDependencies?.['@types/node'], expectedNodeTypesVersion);
   assert.equal(bundle.nextConfig.output, 'standalone');
+  const compilerOptions = bundle.tsConfig.compilerOptions as
+    | JsonObject
+    | undefined;
+  assert.equal(compilerOptions?.noUnusedLocals, true);
+  assert.equal(compilerOptions?.noUnusedParameters, true);
 
   for (const [path, source] of Object.entries(bundle.appSources)) {
     assert.doesNotMatch(source, /from\s+['"]next\/font(?:\/[^'"]+)?['"]/, path);
@@ -119,6 +126,14 @@ test('release build contract rejects version, output, and font regressions', asy
   await t.test('standalone output is disabled', () => {
     const candidate = structuredClone(source);
     delete candidate.nextConfig.output;
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('unused code checks are disabled', () => {
+    const candidate = structuredClone(source);
+    const compilerOptions = candidate.tsConfig.compilerOptions as JsonObject;
+    compilerOptions.noUnusedLocals = false;
+    compilerOptions.noUnusedParameters = false;
     assert.throws(() => validateReleaseBuild(candidate));
   });
 

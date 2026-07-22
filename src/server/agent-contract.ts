@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { DEEPSEEK_ANSWER_MODEL } from './runtime-config';
 
-export const ANSWER_MODEL = 'claude-sonnet-4-6';
+export const ANSWER_MODEL = DEEPSEEK_ANSWER_MODEL;
 export const MAX_REPAIR_ROUNDS = 2;
 export const AGENT_MAX_TOKENS = 2048;
 

@@ -145,7 +145,6 @@ export async function retrieve(
 // 同一段「软加权粗召回 → rerank 精排」代码,保证 eval 数字预测线上行为。
 
 export class CorpusIndexUnavailableError extends Error {
-  readonly code = 'corpus_index_unavailable' as const;
   readonly reason: IndexMissReason;
 
   constructor(reason: IndexMissReason) {

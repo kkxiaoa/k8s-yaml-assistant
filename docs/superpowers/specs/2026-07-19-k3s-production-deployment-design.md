@@ -59,10 +59,10 @@
 | 当前构建 | Node.js 24.18.0 下真实构建通过，`.next/standalone/server.js` 已生成 | Task 5（任务 5）审核后才进入容器实现 |
 | 字体 | 已移除 `next/font` 和 IBM Plex，使用浏览器系统 sans/monospace（无衬线 / 等宽）字体栈 | 不下载外部字体，也不向仓库加入无能力收益的字体二进制 |
 | 现有交付文件 | 没有 Dockerfile、.dockerignore、.github/workflows、Kubernetes 清单、Helm（Kubernetes 包管理）或 Kustomize（清单定制工具） | Phase 2（阶段 2）和 Phase 3（阶段 3）必须从审核后的正式设计实现 |
-| API（应用程序接口）路由 | /api/ask、/api/check、/api/generate、/api/fix | 没有专用存活或就绪端点 |
+| API（应用程序接口）路由 | /api/ask、/api/check、/api/generate、/api/fix，以及 /api/health/live、/api/health/ready | 存活端点只证明进程存活；就绪端点校验运行时配置和索引身份 |
 | 认证与保护 | 没有身份认证、授权、请求限流、请求体字节上限或费用硬门禁 | 不允许直接匿名公开 |
 | 请求解析 | 路由直接调用 req.json() 并做 TypeScript（类型化 JavaScript）类型断言，没有严格 runtime decode（运行时解码） | 仅配置入口 Content-Length（内容长度）不足以覆盖分块请求和字段语义 |
-| 模型客户端 | DeepSeek 客户端固定使用 https://api.deepseek.com/anthropic，回答模型固定为 claude-sonnet-4-6 | 模型与兼容端点不是显式部署配置，生产前必须确认供应商契约并消除歧义 |
+| 模型客户端 | DeepSeek 兼容端点、在线回答模型 `deepseek-v4-flash` 和离线 judge（裁判）模型 `deepseek-v4-pro` 已显式固定；Voyage endpoint/model（端点 / 模型）同样经过严格运行时解码 | 在线作答与离线裁判保持能力分层；缺失、未知或非法配置 fail-closed（失败关闭） |
 
 2026-07-20 核对 Node.js（JavaScript 运行时）官方发布页后，24 系列仍为 LTS（长期支持），当前补丁版本为 24.18.0；仓库工具链固定为该版本。后续基础镜像仍须固定真实 digest（内容摘要），升级补丁时单独审核，不使用移动标签作为最终身份。参考：[Node.js 24 下载归档](https://nodejs.org/en/download/archive/v24)。
 
@@ -74,11 +74,16 @@ Next.js（React 全栈框架）官方文档说明 standalone output（独立运�
 | --- | --- | --- |
 | DEEPSEEK_API_KEY | /api/ask、/api/generate、/api/fix 调用 DeepSeek | Kubernetes Secret（Kubernetes 密钥），只在运行时注入 |
 | VOYAGE_API_KEY | 查询 embedding（向量嵌入）、rerank（重排）和当前索引构建 | 发布环境 Secret（密钥）与运行时 Kubernetes Secret（Kubernetes 密钥）分别管理 |
-| VOYAGE_EMBEDDING_MODEL | embedding model（向量嵌入模型）；未配置时默认 voyage-3 | ConfigMap（普通配置），发布时显式固定 |
-| INDEX_DIR | 索引目录；未配置时是 process.cwd()/data/index | ConfigMap（普通配置），容器内固定为只读绝对路径 |
-| ENABLE_QUERY_EXPANSION | 查询扩展；只有字符串 false 才关闭 | ConfigMap（普通配置），不得依赖隐式默认值 |
+| DEEPSEEK_BASE_URL | DeepSeek Anthropic-compatible API（Anthropic 兼容接口）地址 | ConfigMap（普通配置），显式固定 HTTPS（安全超文本传输协议）地址 |
+| DEEPSEEK_ANSWER_MODEL | 在线 Ask/Generate/Fix（询问 / 生成 / 修复）模型，当前只接受 `deepseek-v4-flash` | ConfigMap（普通配置），不使用别名或隐式默认值 |
+| VOYAGE_EMBEDDING_URL | 查询和索引构建的 embedding endpoint（向量嵌入端点） | ConfigMap（普通配置），显式固定 HTTPS 地址 |
+| VOYAGE_RERANK_URL | 在线 rerank endpoint（重排端点） | ConfigMap（普通配置），显式固定 HTTPS 地址 |
+| VOYAGE_EMBEDDING_MODEL | embedding model（向量嵌入模型），当前发布身份为 `voyage-3` | ConfigMap（普通配置），不使用隐式默认值 |
+| VOYAGE_RERANK_MODEL | rerank model（重排模型），当前只接受 `rerank-2.5` | ConfigMap（普通配置），不使用移动别名 |
+| INDEX_DIR | 索引目录 | ConfigMap（普通配置），容器内显式固定为只读绝对路径 |
+| ENABLE_QUERY_EXPANSION | 查询扩展开关，严格接受 `true` 或 `false` | ConfigMap（普通配置），不得依赖隐式默认值 |
 
-当前根目录存在被 Git 忽略的 .env，只核对了变量名，没有读取、输出或复制任何值。仓库没有 .env.example。后续如果创建示例文件，只允许记录变量名、用途和安全语义，不允许放入可用凭据或看似可用的占位值。
+当前根目录存在被 Git 忽略的 .env，只核对了变量名，没有读取、输出或复制任何值。仓库已提供安全的 .env.example，只记录密钥变量名和经过审核的非敏感固定配置，不包含可用凭据或看似可用的密钥占位值。严格解码后的配置快照不包含 Secret（密钥）值；密钥只在调用供应商前校验存在并按能力读取。
 
 ### 2.4 运行时读取和写入
 
@@ -91,7 +96,7 @@ Next.js（React 全栈框架）官方文档说明 standalone output（独立运�
 - alias（别名）相关 JSONL（逐行 JSON）文件
 - data/index
 
-当前发现的应用主动写入是 data/observability/serving-traces.jsonl。app/api/ask/route.ts 会默认注入 appendServingTrace，src/retrieval/trace.ts 会把包含用户 question、queryText 和检索诊断的原始 RetrievalTrace 直接追加到无界文件。当前没有脱敏、采样、轮转、保留期、删除机制或磁盘上限。这不是“仅缺少优化”，而是生产阻断项。
+应用唯一主动持久化的数据是 serving observation（在线观测）。当前实现默认 `off`（关闭）；启用 `local`（本地）模式时，先按稳定 requestId（请求标识）采样，再对问题文本脱敏或拒绝记录，只允许通过严格 schema（模式）的最小观测对象写入。local sink（本地写入端）使用受限文件权限、按 UTC（协调世界时）日期和字节轮转、保留期清理、总磁盘上限及固定安全错误码，任何失败都不会回退写入原始 RetrievalTrace（检索轨迹）。生产仍需通过 PVC（持久卷声明）挂载、单副本单写入端、Pod（容器组）权限和告警验证后才能把模式从 `off` 切换为 `local`。
 
 最终容器必须使用 read-only root filesystem（只读根文件系统），只给经过证明的临时路径挂载受限 emptyDir（临时卷），候选路径为 /tmp。不能用只读文件系统掩盖当前轨迹问题：在启用只读根文件系统前，必须先从默认请求路径移除不安全写入，使其不会持续报错或产生噪声。
 
@@ -670,7 +675,7 @@ JavaScript 内存中的向量和对象会明显大于约 37 MiB 的磁盘索引�
 - Traefik（入口控制器）是应用唯一入站来源；应用 Service（服务）仅 ClusterIP（集群内地址）。
 - Namespace（命名空间）默认拒绝不需要的入站，显式允许 Traefik（入口控制器）访问应用和认证代理。
 - 应用允许 DNS（域名系统）解析和出站 443 到模型供应商。标准 NetworkPolicy（网络策略）不提供可靠的域名 allowlist（允许名单）；未部署专用 egress proxy（出站代理）前不能声称已按域名隔离。
-- ConfigMap（普通配置）显式设置 INDEX_DIR、VOYAGE_EMBEDDING_MODEL、ENABLE_QUERY_EXPANSION、ACCESS_MODE、NODE_ENV、PORT、HOSTNAME 和 serving observation（在线观测）的完整非敏感配置。缺失或非法 ACCESS_MODE（访问模式）按 private（私有）处理；不在计量设计前添加 Turnstile sitekey（Turnstile 站点公钥标识）或匿名额度变量。
+- ConfigMap（普通配置）显式设置 DEEPSEEK_BASE_URL、DEEPSEEK_ANSWER_MODEL、VOYAGE_EMBEDDING_URL、VOYAGE_RERANK_URL、VOYAGE_EMBEDDING_MODEL、VOYAGE_RERANK_MODEL、INDEX_DIR、ENABLE_QUERY_EXPANSION、ACCESS_MODE、NODE_ENV、PORT、HOSTNAME 和 serving observation（在线观测）的完整非敏感配置。缺失、未知或非法供应商配置使就绪检查失败；缺失或非法 ACCESS_MODE（访问模式）按 private（私有）处理。不在计量设计前添加 Turnstile sitekey（Turnstile 站点公钥标识）或匿名额度变量。
 - DEEPSEEK_API_KEY 和 VOYAGE_API_KEY 使用 secretKeyRef（密钥引用）注入；Turnstile secret key（Turnstile 服务端密钥）、未来计量或 Interview Pass（面试临时通行证）密钥由对应设计确定，日志不得打印完整环境。
 - 应用 ServiceAccount（服务账户）不授予读取或修改 ConfigMap/Secret/Ingress（普通配置 / 密钥 / 入口）的 Kubernetes API（Kubernetes 应用程序接口）权限；配置只在 Pod（容器组）启动时注入，模式变更必须经过受控 rollout（滚动更新）。
 
@@ -1273,12 +1278,12 @@ sudo journalctl -u k3s --since "1 hour ago"
 
 按优先级排序：
 
-1. serving trace（在线轨迹）当前默认原文落盘，违反既有安全设计；必须先按 Task 1（任务 1）隔离，再完成严格 schema（模式）、脱敏、采样、轮转、保留、删除、单写入端、PVC（持久卷声明）和告警反例，才能启用目标中的持续安全 observation（观测）。
-2. data/index 只有 8,127 条，当前 8,410 条语料会使其失效；运行时还会尝试昂贵的隐式内存重建。
-3. 没有 health endpoint（健康端点），无法建立正确的 startup/readiness/liveness probe（启动 / 就绪 / 存活探针）。
+1. serving observation（在线观测）的严格 schema（模式）、脱敏、稳定采样、轮转、保留、删除和磁盘上限已实现；生产 PVC（持久卷声明）、单副本单写入端、目录权限、Pod（容器组）接线和告警验收尚未完成，因此生产模式仍必须保持 `off`（关闭）。
+2. data/index 只有 8,127 条且属于旧索引格式，当前 8,410 条语料会使其明确失效；运行时已经 fail-closed（失败关闭）且不会在线重建，但发布前仍必须离线构建、验证并交付 8,410 条语料对应的新索引。
+3. /api/health/live 和 /api/health/ready 健康端点已经实现；Kubernetes startup/readiness/liveness probe（启动 / 就绪 / 存活探针）资源接线和真实容器时序仍待验证。
 4. 没有 ACCESS_MODE（访问模式）服务端授权、管理员专用切换路径、认证、请求体大小、限流、并发和费用熔断；不能公开。
 5. 没有独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计，也没有 Turnstile（人机验证）服务端校验、匿名安全会话或 Interview Pass（面试临时通行证）实现；portfolio（作品集展示）可以公开页面和本地 YAML 检查，但匿名付费模型能力不能启用。存储介质尚未选择，不能把 SQLite/PVC（嵌入式数据库 / 持久卷声明）当作既定答案。
-6. DeepSeek 兼容端点和 claude-sonnet-4-6 模型名当前硬编码，尚未证明该组合是预期且可用的供应商契约。
+6. DeepSeek/Voyage（深度求索 / 向量服务）端点和模型身份已按官方契约显式固定，安全错误映射与流式失败协议已实现；ConfigMap/Secret（普通配置 / 密钥）资源接线和供应商故障的生产冒烟测试仍待完成。
 7. 尚无 Dockerfile、`.dockerignore`、Git remote（Git 远程仓库）、GHCR（GitHub 容器镜像仓库）归属或 GitHub Actions（GitHub 自动化流水线）；已知计划使用私有仓库，但 owner scope/plan（所有者范围 / 套餐）仍未知，尚不能确认 release-build Environment secret（发布构建环境密钥）、runner group selected workflow（运行器组指定工作流）、immutable releases（不可变发布版本）或私有仓库 artifact attestation（产物证明）能力。draft Release（草稿发布版本）单人确认不依赖独立审核人，但这些差异仍影响发布凭据范围、运行器隔离和供应链证明。
 8. K3s（轻量 Kubernetes）已经安装并完成 Phase 1（阶段 1）审核，但生产部署 runner/adapter（运行器 / 适配器）仍不存在。
 9. 最终域名、DNS（域名系统）控制权、OAuth（开放授权）允许名单和证书策略尚未确定；Turnstile（人机验证）生产配置、可承受日预算及计量契约只在准备开放匿名模型能力时进入设计。

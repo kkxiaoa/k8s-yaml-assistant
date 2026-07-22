@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-7（任务 5-7）已审核；下一项是 Task 8（任务 8）的显式运行时配置与供应商失败边界。
+> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-7（任务 5-7）已审核；Task 8（任务 8）已完成实现和本地门禁，当前停在 Task 8 review（任务 8 审核）。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > 当前基线：`7962ddc docs(deploy): define single-node k3s production design`；Float32 索引读取优化位于 `fdfec5c`。
@@ -428,15 +428,28 @@ git diff --check
 - Create（创建）：`src/server/runtime-config.test.ts`
 - Create（创建）：`src/server/upstream-error.ts`
 - Create（创建）：`src/server/upstream-error.test.ts`
+- Modify（修改）：`src/server/agent-contract.ts`
+- Modify（修改）：`src/server/health.ts`
+- Modify（修改）：`src/server/health.test.ts`
 - Modify（修改）：`src/server/pipeline.ts`
+- Modify（修改）：`src/server/pipeline-retrieval.test.ts`
 - Modify（修改）：`src/retrieval/embeddings.ts`
+- Modify（修改）：`src/retrieval/embeddings.test.ts`
+- Modify（修改）：`src/retrieval/index-store.ts`
 - Modify（修改）：`src/retrieval/rerank.ts`
+- Modify（修改）：`src/retrieval/retrieve.ts`
+- Modify（修改）：`src/eval/judge.ts`
+- Modify（修改）：`src/eval/metrics/generation-metrics.ts`
+- Modify（修改）：`src/eval/runner-protocol.test.ts`
 - Modify（修改）：`app/api/ask/route.ts`
 - Modify（修改）：`app/api/generate/route.ts`
 - Modify（修改）：`app/api/fix/route.ts`
-- Modify（修改）：`.env.example`，若 Task 6（任务 6）已经创建
+- Modify（修改）：`.env.example`
+- Modify（修改）：`README.md`
+- Modify（修改）：`tsconfig.json`
+- Modify（修改）：`scripts/release-build-contract.test.ts`
 
-- [ ] **Step 1（步骤 1）：先写配置与泄露反例**
+- [x] **Step 1（步骤 1）：先写配置与泄露反例**
 
 覆盖：
 
@@ -447,17 +460,25 @@ git diff --check
 - Voyage key（密钥）缺失时 Ask（询问）安全返回 503，不触发索引构建；
 - 上游超时、认证失败、配额、余额和未知错误分别映射到有限 502/503 错误码，不透传供应商错误体。
 
-- [ ] **Step 2（步骤 2）：实现单一 runtime config（运行时配置）解码器**
+9 项 runtime config（运行时配置）反例和 5 项 upstream error（上游错误）反例先证明旧 route（路由）会返回 500/原始错误且缺少单一解码器；实现后覆盖配置缺失/未知/非法、URL（网址）凭据、Secret（密钥）缺失降级、DeepSeek 402、Voyage 402/429、无原始错误体和 Check（检查）旁路。
+
+- [x] **Step 2（步骤 2）：实现单一 runtime config（运行时配置）解码器**
 
 显式定义 DeepSeek compatible endpoint/model（DeepSeek 兼容端点 / 模型）、Voyage embedding/rerank model（Voyage 向量嵌入 / 重排模型）、`INDEX_DIR` 和查询扩展开关。代码不读取 `.env` 文件本身；本地 `dotenv`（环境变量加载器）只属于开发入口。Secret（密钥）只验证存在性，不进入可序列化配置 snapshot（快照）。
 
-实施前必须确认当前 `https://api.deepseek.com/anthropic` 与 `claude-sonnet-4-6` 的供应商契约确实是用户预期；若模型/端点不能由官方契约证明，停止并由用户选择真实供应商配置，不能靠改环境变量名称掩盖歧义。
+实施前已把旧的 `https://api.deepseek.com/anthropic` 与 `claude-sonnet-4-6` 组合列为待确认供应商契约；若模型/端点不能由官方契约证明，必须停止并由用户选择真实供应商配置，不能靠改环境变量名称掩盖歧义。
 
-- [ ] **Step 3（步骤 3）：集中供应商错误映射**
+DeepSeek 官方契约确认 Anthropic-compatible API（Anthropic 兼容接口）端点有效，且 `claude-sonnet-*` / `claude-opus-*` 分别映射 Flash / Pro（快速模型 / 高能力模型）。经用户确认，在线回答改为无歧义的 `DEEPSEEK_ANSWER_MODEL=deepseek-v4-flash`，离线 judge（裁判）独立固定 `deepseek-v4-pro`。Voyage 官方契约确认 embedding/rerank（向量嵌入 / 重排）端点、`voyage-3` 可访问性和 `rerank-2.5` 身份；本 Task（任务）不改变已有检索模型决策。参考：[DeepSeek Anthropic API](https://api-docs.deepseek.com/guides/anthropic_api)、[Voyage text embeddings](https://docs.voyageai.com/docs/embeddings)、[Voyage rerankers](https://docs.voyageai.com/docs/reranker)。
+
+`src/server/runtime-config.ts` 现在是在线非敏感配置的唯一严格解码器；未知供应商字段、非 HTTPS（安全超文本传输协议）或含凭据的 URL（网址）、未显式模型/索引目录/查询扩展均封闭失败。Secret（密钥）不进入可序列化 snapshot（快照），只用于对应能力可用性检查。
+
+- [x] **Step 3（步骤 3）：集中供应商错误映射**
 
 Ask/Generate/Fix（询问 / 生成 / 修复）复用同一安全错误分类，不在每个 route（路由）复制字符串判断。SSE（服务器发送事件）在 headers sent（响应头已发送）后出现错误时发送封闭 error event（错误事件）并正常结束/中止，不把异常对象直接交给框架日志。
 
-- [ ] **Step 4（步骤 4）：验证**
+`src/server/upstream-error.ts` 集中输出 `upstream_timeout`、`upstream_authentication_failed`、`upstream_balance_exhausted`、`upstream_quota_exceeded`、`upstream_unavailable`、`upstream_request_rejected` 或 `upstream_error`，仅使用 502/503。Ask（询问）在 SSE（服务器发送事件）已开始后发送只含安全码的 `error` 事件并关闭流，不再执行 `controller.error(error)`。
+
+- [x] **Step 4（步骤 4）：验证**
 
 ```bash
 node --import tsx --test src/server/runtime-config.test.ts
@@ -467,6 +488,10 @@ npx tsc --noEmit -p tsconfig.json
 npm run build
 git diff --check
 ```
+
+固定 Node.js 24.18.0 下，runtime config / upstream error（运行时配置 / 上游错误）专项分别通过 9 / 5 项，`npm test` 通过 152 项，TypeScript（类型系统）检查和真实 Next.js build（Next.js 构建）通过。全部供应商反例使用注入的本地 `fetch`（网络请求）响应，未调用真实 DeepSeek/Voyage；本地构建产生的 `.next/standalone/.env` 副本已立即删除，原始 `.env` 未读取或修改。
+
+Task 8 review（任务 8 审核）期间继续全仓库核对错误类公开字段和 TypeScript（类型系统）未使用诊断，删除了无消费者的 `CorpusIndexUnavailableError.code`、`UpstreamHttpError.provider`、运行时配置快照中的重复 `answerModel` 字段及一个死类型导入。`tsconfig.json` 已启用 `noUnusedLocals` 和 `noUnusedParameters`，发布构建契约包含对应反例；其余错误字段均核实存在运行时消费者。沙箱内 Next.js build（Next.js 构建）因 Turbopack（增量构建器）禁止绑定本地端口失败，使用相同源码和命令在允许该构建行为的环境中通过。
 
 **Rollback（回滚）：** 恢复单一 Task（任务）差异；不得恢复把 Secret（密钥）名称/值或上游原始错误体返回给客户端的旧行为。
 

@@ -626,8 +626,36 @@ check('generation and fix hashes cover their full expected contracts', () => {
 });
 
 check('faith and judge prompt hashes are derived from actual request inputs', () => {
-  const faith = faithEvalConfig(3);
-  const calibration = judgeEvalConfig(5);
+  assert.equal(ANSWER_MODEL, 'deepseek-v4-flash');
+  assert.equal(JUDGE_MODEL, 'deepseek-v4-pro');
+  assert.notEqual(ANSWER_MODEL, JUDGE_MODEL);
+
+  const runtimeEnvironment = {
+    DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
+    DEEPSEEK_ANSWER_MODEL: 'deepseek-v4-flash',
+    VOYAGE_EMBEDDING_URL: 'https://api.voyageai.com/v1/embeddings',
+    VOYAGE_RERANK_URL: 'https://api.voyageai.com/v1/rerank',
+    VOYAGE_EMBEDDING_MODEL: 'voyage-3',
+    VOYAGE_RERANK_MODEL: 'rerank-2.5',
+    INDEX_DIR: 'data/index',
+    ENABLE_QUERY_EXPANSION: 'true',
+  } as const;
+  const previous = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(runtimeEnvironment)) {
+    previous.set(key, process.env[key]);
+    process.env[key] = value;
+  }
+  let faith: ReturnType<typeof faithEvalConfig>;
+  let calibration: ReturnType<typeof judgeEvalConfig>;
+  try {
+    faith = faithEvalConfig(3);
+    calibration = judgeEvalConfig(5);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 
   assert.equal(
     faith.answerPromptHash,
@@ -673,21 +701,36 @@ check('faith and judge prompt hashes are derived from actual request inputs', ()
 });
 
 check('retrieval config resolves the embedding model at run start', () => {
-  const previous = process.env.VOYAGE_EMBEDDING_MODEL;
-  process.env.VOYAGE_EMBEDDING_MODEL = 'identity-test-model';
+  const environment = {
+    DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
+    DEEPSEEK_ANSWER_MODEL: 'deepseek-v4-flash',
+    VOYAGE_EMBEDDING_URL: 'https://api.voyageai.com/v1/embeddings',
+    VOYAGE_RERANK_URL: 'https://api.voyageai.com/v1/rerank',
+    VOYAGE_EMBEDDING_MODEL: 'voyage-4',
+    VOYAGE_RERANK_MODEL: 'rerank-2.5',
+    INDEX_DIR: 'data/index-ab',
+    ENABLE_QUERY_EXPANSION: 'true',
+  } as const;
+  const previous = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(environment)) {
+    previous.set(key, process.env[key]);
+    process.env[key] = value;
+  }
   try {
     const config = retrievalEvalConfig(3);
     const corpus = buildCorpusManifest();
-    assert.equal(config.embeddingModel, 'identity-test-model');
+    assert.equal(config.embeddingModel, 'voyage-4');
     assert.equal(config.corpusContentHash, corpus.contentHash);
     assert.equal(config.corpusManifestHash, corpus.manifestHash);
     assert.equal(
       config.indexHash,
-      computeIndexHash(corpus, 'identity-test-model'),
+      computeIndexHash(corpus, 'voyage-4'),
     );
   } finally {
-    if (previous === undefined) delete process.env.VOYAGE_EMBEDDING_MODEL;
-    else process.env.VOYAGE_EMBEDDING_MODEL = previous;
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 

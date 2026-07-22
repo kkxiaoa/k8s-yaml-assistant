@@ -9,7 +9,7 @@
 - `AI应用开发能力训练实现方案.md`：唯一实施 roadmap（路线图），维护当前事实、质量门禁和执行顺序。
 - `AGENTS.md`：agent 执行规则和工程铁律。
 - `superpowers/specs/2026-07-19-k3s-production-deployment-design.md`：已审核的华为云单机 K3s（轻量 Kubernetes）生产部署设计依据。
-- `superpowers/plans/2026-07-19-k3s-production-deployment.md`：当前生产部署实施计划；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已审核，下一项是 Task 8（任务 8）的显式运行时配置与供应商失败边界。
+- `superpowers/plans/2026-07-19-k3s-production-deployment.md`：当前生产部署实施计划；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已审核，Task 8（任务 8）已完成实现和本地门禁并等待审核。
 - `superpowers/specs/2026-07-17-case-governance-design.md` / `superpowers/plans/2026-07-17-case-governance.md`：Case Governance（评估用例治理）的已实施设计与执行记录。
 - `superpowers/plans/2026-07-16-phase-b-engineering-cleanup.md`：已完成审核的 Phase B（阶段 B）工程清理与 Deferred Risk Closure（延期风险收敛）记录。
 - `doc-inventory.md`：docs lifecycle inventory（文档生命周期清单）。
@@ -29,7 +29,7 @@
 
 1. Phase B（阶段 B）工程清理与 Deferred Risk Closure（延期风险收敛）第 1-6 项已完成审核。
 2. Case Governance（评估用例治理）已完成实现和本地门禁。
-3. 当前优先主线为生产部署：Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核；下一项是 Task 8（任务 8）的显式运行时配置与供应商失败边界。尚未创建远程仓库、生产镜像、应用部署资源或公网入口。
+3. 当前优先主线为生产部署：Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核；Task 8（任务 8）已完成实现和本地门禁并等待审核。尚未创建远程仓库、生产镜像、应用部署资源或公网入口。
 4. 正式质量重建暂缓到私有部署和受限入口验证之后，在公开发布前恢复：清理旧产物、使用候选镜像的 8,410 条索引、依次运行正式评估并人工审核 baseline（基线）。
 5. 当前仍没有新口径 full eval（完整评估）或 baseline（基线），不得根据旧指标调优模型或检索。
 

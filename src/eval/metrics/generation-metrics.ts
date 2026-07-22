@@ -17,7 +17,6 @@ import {
   type FixCase,
   type FixFixturePreflight,
   type FixResourceSetResult,
-  type KubernetesDocument,
   type ResourceIdentity,
   type ResourceMatchResult,
   type ResourceRelation,

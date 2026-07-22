@@ -8,6 +8,14 @@ import {
   type ServingObservationRecordResult,
 } from '@/observability/recorder';
 import { getReadiness } from '@/server/health';
+import {
+  getRuntimeConfig,
+  requireRuntimeCapability,
+} from '@/server/runtime-config';
+import {
+  upstreamErrorEvent,
+  upstreamErrorResponse,
+} from '@/server/upstream-error';
 import type {
   AskMode,
   EditorContext,
@@ -99,6 +107,15 @@ function sse(event: string, data: unknown): Uint8Array {
 }
 
 export async function POST(req: Request): Promise<Response> {
+  let runtimeConfig;
+  try {
+    runtimeConfig = getRuntimeConfig();
+    requireRuntimeCapability('deepseek');
+    requireRuntimeCapability('voyage');
+  } catch (error) {
+    return upstreamErrorResponse(error);
+  }
+
   const readiness = await getReadiness();
   if (readiness.status !== 'ready') {
     return Response.json(readiness, {
@@ -115,42 +132,53 @@ export async function POST(req: Request): Promise<Response> {
   const question = String(body.question ?? '').trim();
   if (!question) return new Response('empty question', { status: 400 });
 
-  if (!process.env.DEEPSEEK_API_KEY)
-    return new Response('DEEPSEEK_API_KEY 未设置', { status: 500 });
-
   const editorContext = body.context;
   const mode: AskMode =
     body.mode === 'explain_field' || body.mode === 'explain_error'
       ? body.mode
       : 'free';
-  const { getClient, prepareAsk } = await import('@/server/pipeline');
-  const requestId = randomUUID();
-  const { hits, sources, request } = await prepareAsk({
-    question,
-    editorContext,
-    mode,
-    retrievalOptions: servingObservationRetrievalOptions(requestId),
-  });
+  let prepared;
+  let stream;
+  try {
+    const { getClient, prepareAsk } = await import('@/server/pipeline');
+    const requestId = randomUUID();
+    prepared = await prepareAsk({
+      question,
+      editorContext,
+      mode,
+      retrievalOptions: {
+        ...servingObservationRetrievalOptions(requestId),
+        queryExpansion: runtimeConfig.queryExpansionEnabled,
+      },
+    });
+    stream = getClient().messages.stream(prepared.request);
+  } catch (error) {
+    return upstreamErrorResponse(error);
+  }
+  const { hits, sources } = prepared;
   // 合并引用编号和 formatSources 规范化后的 provenance。
   const cited = hits.map((h, i) => ({
     ...h,
     n: sources[i]?.n ?? i + 1,
     provenance: sources[i]?.provenance ?? h.provenance,
   }));
-  const client = getClient();
-
-  const stream = client.messages.stream(request);
-
   const readable = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let closed = false;
       try {
         controller.enqueue(sse('sources', cited));
-        stream.on('text', (t) => controller.enqueue(sse('delta', t)));
+        stream.on('text', (text) => {
+          if (!closed) controller.enqueue(sse('delta', text));
+        });
         await stream.finalMessage();
         controller.enqueue(sse('done', {}));
+        closed = true;
         controller.close();
-      } catch (e) {
-        controller.error(e);
+      } catch (error) {
+        if (closed) return;
+        controller.enqueue(sse('error', upstreamErrorEvent(error)));
+        closed = true;
+        controller.close();
       }
     },
   });

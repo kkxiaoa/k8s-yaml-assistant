@@ -1,5 +1,5 @@
 // 构建并持久化全量 CORPUS 索引。索引身份命中时跳过；失效时调用 Voyage 嵌入全量语料。
-// 默认写入 data/index/{manifest.json, chunks.jsonl, embeddings.f32}，INDEX_DIR 可改写目录。
+// 写入显式 INDEX_DIR 下的 manifest.json、chunks.jsonl 和 embeddings.f32。
 // 用法:npm run index:build
 
 import { config } from 'dotenv';

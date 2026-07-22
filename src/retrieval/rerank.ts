@@ -4,9 +4,15 @@
 //
 // 关键:rerank 只能重排"粗召回已经捞到的"候选。COARSE_N 给小了,正确 chunk 没进候选,精排也救不回。
 
-const VOYAGE_RERANK_URL = 'https://api.voyageai.com/v1/rerank';
+import {
+  getVoyageApiKey,
+  requireRuntimeCapability,
+  VOYAGE_RERANK_MODEL,
+} from '../server/runtime-config';
+import { UpstreamHttpError } from '../server/upstream-error';
+
 /** 当前 rerank 模型名。记入 eval run / baseline 元数据。 */
-export const RERANK_MODEL = 'rerank-2.5';
+export const RERANK_MODEL = VOYAGE_RERANK_MODEL;
 
 /** 粗召回候选数:向量先取这么多,再交给 rerank 精排。*/
 export const COARSE_N = 10;
@@ -25,11 +31,11 @@ export async function rerank(
   documents: string[],
   topK: number,
 ): Promise<Array<{ index: number; score: number }>> {
-  const key = process.env.VOYAGE_API_KEY;
-  if (!key) throw new Error('VOYAGE_API_KEY 未设置');
+  const config = requireRuntimeCapability('voyage');
+  const key = getVoyageApiKey();
   if (documents.length === 0) return [];
 
-  const res = await fetch(VOYAGE_RERANK_URL, {
+  const res = await fetch(config.voyage.rerankUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -38,13 +44,25 @@ export async function rerank(
     body: JSON.stringify({
       query,
       documents,
-      model: RERANK_MODEL,
+      model: config.voyage.rerankModel,
       top_k: topK,
     }),
   });
   if (!res.ok) {
-    throw new Error(`Voyage rerank ${res.status}: ${await res.text()}`);
+    throw new UpstreamHttpError(res.status);
   }
   const json = (await res.json()) as { data: VoyageRerankResult[] };
+  if (
+    !Array.isArray(json.data) ||
+    json.data.some(
+      (result) =>
+        !Number.isInteger(result.index) ||
+        result.index < 0 ||
+        result.index >= documents.length ||
+        !Number.isFinite(result.relevance_score),
+    )
+  ) {
+    throw new Error('invalid upstream rerank response');
+  }
   return json.data.map((r) => ({ index: r.index, score: r.relevance_score }));
 }

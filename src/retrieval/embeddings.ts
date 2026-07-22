@@ -1,15 +1,17 @@
 // 远程 embedding API 客户端。迭代0 用 Voyage AI(Anthropic 官方推荐的 embedding 提供商)。
 // 故意只暴露一个 embed() 函数,方便迭代3 换成别的提供商或本地模型而不动其他代码。
 
-const VOYAGE_URL = 'https://api.voyageai.com/v1/embeddings';
+import {
+  getRuntimeConfig,
+  getVoyageApiKey,
+  requireRuntimeCapability,
+} from '../server/runtime-config';
+import { UpstreamHttpError } from '../server/upstream-error';
 
-/** 解析当前 embedding 模型:env VOYAGE_EMBEDDING_MODEL 优先,默认 voyage-3。 */
+/** 读取已经显式解码的 embedding 模型身份。 */
 export function resolveEmbeddingModel(): string {
-  return process.env.VOYAGE_EMBEDDING_MODEL ?? 'voyage-3';
+  return getRuntimeConfig().voyage.embeddingModel;
 }
-
-/** 当前 embedding 模型名。索引 indexHash 依赖它:换模型即让旧索引失效。 */
-export const EMBEDDING_MODEL = resolveEmbeddingModel();
 const MAX_BATCH_SIZE = 1000;
 
 interface VoyageResponse {
@@ -26,15 +28,13 @@ export async function embed(
   inputType: 'document' | 'query',
   model: string = resolveEmbeddingModel(),
 ): Promise<number[][]> {
-  const key = process.env.VOYAGE_API_KEY;
-  if (!key) {
-    throw new Error('VOYAGE_API_KEY 未设置。复制 .env.example 为 .env 并填入,或 export VOYAGE_API_KEY=...');
-  }
+  const config = requireRuntimeCapability('voyage');
+  const key = getVoyageApiKey();
 
   const out: number[][] = [];
   for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
     const batch = texts.slice(i, i + MAX_BATCH_SIZE);
-    const res = await fetch(VOYAGE_URL, {
+    const res = await fetch(config.voyage.embeddingUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -44,11 +44,25 @@ export async function embed(
     });
 
     if (!res.ok) {
-      throw new Error(`Voyage API ${res.status}: ${await res.text()}`);
+      throw new UpstreamHttpError(res.status);
     }
 
     const json = (await res.json()) as VoyageResponse;
-    out.push(...json.data.map((d) => d.embedding));
+    if (!Array.isArray(json.data) || json.data.length !== batch.length) {
+      throw new Error('invalid upstream embedding response');
+    }
+    const embeddings = json.data.map((item) => item.embedding);
+    if (
+      embeddings.some(
+        (embedding) =>
+          !Array.isArray(embedding) ||
+          embedding.length === 0 ||
+          embedding.some((value) => !Number.isFinite(value)),
+      )
+    ) {
+      throw new Error('invalid upstream embedding response');
+    }
+    out.push(...embeddings);
   }
   return out;
 }

@@ -3,6 +3,7 @@ import type { IndexMissReason } from '../retrieval/index-store';
 type MaybePromise<T> = T | Promise<T>;
 
 export type ReadinessErrorCode =
+  | 'runtime_config_invalid'
   | 'schema_invalid'
   | 'policy_invalid'
   | 'aliases_missing'
@@ -25,6 +26,7 @@ export type IndexHealthResult =
   | { ok: false; reason: IndexMissReason };
 
 export interface HealthCheckDependencies {
+  validateRuntimeConfig(): MaybePromise<void>;
   validateSchema(): MaybePromise<void>;
   validatePolicy(): MaybePromise<void>;
   loadAliases(): MaybePromise<AliasHealthResult>;
@@ -71,6 +73,12 @@ async function initializeReadiness(
   dependencies: HealthCheckDependencies,
 ): Promise<ReadinessStatus> {
   try {
+    await dependencies.validateRuntimeConfig();
+  } catch {
+    return notReady('runtime_config_invalid');
+  }
+
+  try {
     await dependencies.validateSchema();
   } catch {
     return notReady('schema_invalid');
@@ -99,6 +107,11 @@ async function initializeReadiness(
   if (!index.ok) return notReady(readinessCodeForIndexMiss(index.reason));
 
   return Object.freeze({ status: 'ready' });
+}
+
+async function validateRuntimeConfig(): Promise<void> {
+  const { getRuntimeConfig } = await import('./runtime-config');
+  getRuntimeConfig();
 }
 
 export function createHealthService(
@@ -158,6 +171,7 @@ async function loadIndex(): Promise<IndexHealthResult> {
 }
 
 const productionHealth = createHealthService({
+  validateRuntimeConfig,
   validateSchema,
   validatePolicy,
   loadAliases,
