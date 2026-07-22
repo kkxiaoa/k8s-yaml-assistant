@@ -1,7 +1,7 @@
 # AI 应用开发能力训练实现方案
 
 > 状态：当前执行依据。
-> 最近核对：2026-07-19。
+> 最近核对：2026-07-21。
 > 用途：维护当前能力状态、质量门禁和唯一执行顺序。具体数据契约由已确认的 design/spec 定义，不在本文重复维护。
 
 ## 1. 项目目标
@@ -65,7 +65,7 @@ npm run corpus:stats
 - 尚未注册真实数据 provider：`docs`、`example`。
 - `data/schemas/curated.json` 显式包含 2 个真实集群 CRD（自定义资源定义）：`gateway.networking.k8s.io/v1 HTTPRoute` 和 `cert-manager.io/v1 Certificate`。
 - corpus content hash（语料内容哈希）为 `ae509a3b469ce6c8d6da078901eb72c4976e1a04f6ad59dc5294378d25c5042e`，manifest hash（清单哈希）为 `a8a8cfb843289b7b66b37e6864221e887942f6183da97c9848ea93ea6b689daa`。
-- 现有 `data/index` 仍对应 `8,127` chunks，当前读取结果为 `corpus_count_mismatch`；默认 `voyage-3` 的新 index expectation hash（索引期望哈希）为 `4edcbaf350ef50e8a2d0c8a8dc25ba3cf435fe7d6d974749470c132fa01e6274`，尚未重建。
+- 现有 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求带 chunks/embeddings file hash（知识片段 / 向量文件哈希）的 v3 格式，因此当前优先以 `format_mismatch` 失效。默认 `voyage-3` 的 v3 index expectation hash（索引期望哈希）为 `4fb46b53480f663a90bb8c7ac62a362eb59b229e0dfec7ad826437bf9ef3bb65`，8,410 条新索引尚未重建。
 
 ### 3.2 Eval 数据
 
@@ -301,15 +301,23 @@ Stage 是能力分类，不代表执行时序。
 5. 当前边界：未执行真实模型评估，未晋升任何 baseline（基线），不根据旧指标优化检索、提示词或模型。
 6. 已完成提交数据的一次性 canonical identity（规范身份）迁移；ignored runs/traces（被忽略的运行 / 轨迹产物）不兼容读取，正式评估前按当前身份清理重建。
 
-### Phase B：工程收尾与重建尺子（当前）
+### Phase B：工程收尾与重建尺子（结构完成，正式重建暂缓）
 
 1. 已完成：收敛 test runner（测试运行器）、根 README 命令入口和 scripts inventory（脚本清单）；当前没有证据支持删除脚本，不新增平行 CLI（命令行界面）文档。
 2. 已完成：清理 docs（文档）状态和引用，不让历史文档覆盖当前路线。
 3. 已完成：工程清理登记的 Deferred Risk Closure（延期风险收敛）第 1-6 项均已核对、处理并完成审核。
 4. 已完成：Case Governance（评估用例治理）已贯通 case contract、artifact、suite、泄漏门禁和分桶报告。
 5. 已完成：补入 2 条真实错误解释、2 个真实 CRD（自定义资源定义）主题和 Retrieval/Grounded Answer、Generation、Fix 的首批 Holdout（留出集）。
-6. 当前下一项：清理 ignored artifacts（被忽略的产物），重建 index（索引）和 run artifacts（运行产物），依次运行 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）评估。
+6. 当前暂停项：清理 ignored artifacts（被忽略的产物），重建或复用与发布候选完全一致的 8,410 条 index（索引）和 run artifacts（运行产物），依次运行 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）评估；该项在生产部署计划的公开前质量闸恢复。
 7. 首次 full（完整集）评估必须人工审核错误解释 trace（轨迹）的 correctness（正确性）和完整性；只在人工审核指标、trace 和 bad case（问题用例）后晋升各 kind baseline（类别基线）。
+
+### Production Deployment（生产部署，当前优先插入主线）
+
+1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引、private/portfolio（私有 / 作品集展示）双模式和安全 observation（观测）边界。
+2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
+3. Phase 2（阶段 2）的 Task 5-7（任务 5-7）已审核；Task 7（任务 7）已把在线索引收紧为共享连续 `Float32Array`、v3 文件哈希身份和 fail-closed（失败关闭）加载，并增加本地一次性 readiness/liveness（就绪 / 存活）状态与 Ask（询问）503 门禁。下一项是 Task 8（任务 8）的显式运行时配置与供应商失败边界。尚未创建远程仓库、生产镜像、应用 Kubernetes（容器编排系统）资源或公网入口。
+4. 私有部署和受限入口验证通过后，在公开发布前恢复 Phase B（阶段 B）正式质量重建；新 baseline（基线）审核通过或形成显式风险接受记录后，才进入公开发布。
+5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 
 ### Phase C：剩余质量债
 
@@ -340,6 +348,8 @@ Stage 是能力分类，不代表执行时序。
 4. 同时报告 groundedness、correctness、relevance、completeness 和 refusal correctness。
 
 ### Phase G：Stage 7 反馈闭环成熟化
+
+当前安全 Ask serving observation（询问在线观测）子能力已完成实现并通过部署 Task 6 review（任务 6 审核）；这不修改上方 Stage 7.2（阶段 7.2）的“未开始”状态。该子能力也不包含 answer feedback（回答反馈）、Generate/Fix（生成 / 修复）采纳信号、审核式回灌或闭环报告。
 
 1. 定义 serving observation envelope 和 request correlation，不复用 eval run 语义。
 2. 记录 query、source、answer、latency/cost 前先实现 Secret/token/YAML 敏感字段脱敏。

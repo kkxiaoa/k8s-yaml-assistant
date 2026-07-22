@@ -13,8 +13,8 @@
   --color-muted: #9e9e9e;
   --color-fg: #e6e6e6;
 
-  --font-mono: var(--font-plex-mono), ui-monospace, 'SF Mono', monospace;
-  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, 'PingFang SC', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', monospace;
+  --font-sans: ui-sans-serif, system-ui, 'PingFang SC', sans-serif;
 }
 
 html,

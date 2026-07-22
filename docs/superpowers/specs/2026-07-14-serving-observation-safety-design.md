@@ -1,19 +1,19 @@
 # Serving Observation Safety 设计
 
-> 状态：草案，待 review；未进入当前执行顺序。
+> 状态：已通过独立 review（审核），作为实施依据；计划 Task 1-5（任务 1-5）已完成并逐项审核；Task 6（任务 6）已完成实现与本地门禁，等待 Task 6 review（任务 6 审核）。
 > 用途：定义 Ask serving observation 在本地落盘前必须满足的开关、数据最小化、脱敏、采样和生命周期契约。
 > 对应计划：`docs/superpowers/plans/2026-07-14-serving-observation-safety.md`。
-> 执行位置：文档现在落盘；计划 Task 1 经 review 后可作为安全隔离闸执行，Task 2-6 等四份 `2026-07-12` corrective plans 完成后再执行。
+> 执行位置：四份 `2026-07-12` corrective plans（纠偏计划）和 Case Governance（评估用例治理）已经完成；本文与对应计划已经通过独立 review（审核）。计划 Task 1-6（任务 1-6）已关闭默认原始轨迹写入，并完成独立 strict schema（严格模式）、结构化脱敏、allowlist projection（白名单投影）、runtime config（运行时配置）、稳定采样、同步 recorder（记录器）、受控本地生命周期和 Ask（询问）接线；当前停在 Task 6（任务 6）实现审核点。
 
 ## 1. 背景与问题
 
-当前 Ask route 无条件把 `appendServingTrace` 注入 `retrieveContext()`。exact 和 search 成功后，完整 `RetrievalTrace` 会追加到：
+本设计立项时，Ask route 无条件把 `appendServingTrace` 注入 `retrieveContext()`；exact 和 search 成功后，完整 `RetrievalTrace` 会追加到：
 
 ```text
 data/observability/serving-traces.jsonl
 ```
 
-该文件与 `data/eval/` 已完成路径分流，写入失败也不会拖垮 Ask，但还缺少落盘前的安全与生命周期边界：
+该旧文件与 `data/eval/` 已完成路径分流，写入失败也不会拖垮 Ask，但当时缺少落盘前的安全与生命周期边界。Task 1（任务 1）已经关闭并退役该入口，以下内容保留为本设计要消除的原始风险：
 
 - 没有显式启用开关，route 默认写盘。
 - 没有采样。
@@ -228,7 +228,7 @@ redaction labels 只使用固定枚举，例如 `k8s_secret`、`bearer_token`、
 
 ### 4.5 本地文件生命周期
 
-本地 sink 仅服务显式启用的开发/受控单进程环境：
+本地 sink 仅服务显式启用的开发环境，或满足单节点、单 Pod、单 Node.js 进程、单 writer（写入端）约束的受控低流量生产环境：
 
 - 文件按 UTC 日期和受控序号命名，例如 `serving-observations.2026-07-14.0001.jsonl`。
 - 达到 `maxFileBytes` 或日期变化时轮转；单条 observation 大于上限时拒绝写入，不生成超限文件。
@@ -239,7 +239,41 @@ redaction labels 只使用固定枚举，例如 `k8s_secret`、`bearer_token`、
 - 删除失败不影响 Ask，但输出安全错误码；失败后不得通过删除未知文件来补偿容量。
 - 当前无界的 `serving-traces.jsonl` 视为旧 ignored artifact，不读取、不迁移；启用新 sink 前由操作者显式清理。
 
-实现轮转前必须完成依赖和执行模型决策：优先选择维护中的文件轮转 transport，并明确当前同步 `traceSink` 是直接写请求路径，还是交给有界队列。不允许无界队列或无完成/失败语义的 fire-and-forget Promise。若现有依赖不能满足 strict JSONL、受控删除和测试注入，Task 必须停止并向用户说明引入依赖与自维护 local adapter 的取舍；本 design 不授权悄悄落盘生产级自研日志系统。
+#### 4.5.1 Task 4 transport 与执行模型决策
+
+结论：不新增 rotation transport（轮转传输）依赖；Task 5（任务 5）使用 Node.js 24 内置 `node:fs` 实现范围封闭的 synchronous local adapter（同步本地适配器）。该结论只服务本节列出的单进程边界，不把适配器描述为通用日志系统或多写入端生产后端。
+
+2026-07-21 核对证据：
+
+| 候选 | 当前事实 | 与本项目契约的差距 | 结论 |
+| --- | --- | --- | --- |
+| 当前依赖树 | `package.json` / `package-lock.json` 没有文件轮转或日志 transport（传输） | 无可直接复用实现 | 不增加无关日志框架 |
+| [`rotating-file-stream@3.2.9`](https://github.com/iccicci/rotating-file-stream) | 仍在维护，无 runtime dependency（运行时依赖），支持 size/UTC interval/maxSize（大小 / 协调世界时周期 / 总大小）和 history（历史清单） | API 是异步 `Writable`（可写流）；文档没有提供本计划要求的 `O_NOFOLLOW`、exclusive create（独占创建）、受管文件普通文件复核和 symlink-safe cleanup（符号链接安全清理）保证；保留天数和失败状态仍需自维护包装 | 不引入；仅复用其“单条 write 不跨文件拆分”等设计参考 |
+| [`pino-roll@4.0.0`](https://github.com/mcollina/pino-roll) | 当前版本依赖 `date-fns` 和 `sonic-boom`，常规用法还引入 Pino（日志库）；支持 size/frequency/count（大小 / 周期 / 数量）轮转和 worker transport（工作线程传输） | cleanup（清理）以文件数量为主，没有本计划的保留天数与精确总字节双门禁；worker（工作线程）会引入队列、flush（刷新）和 shutdown（关闭）语义，仍不能替代符号链接与受管删除验证 | 当前低流量单写入端收益不足 |
+| [Node.js 24 `node:fs`](https://nodejs.org/docs/latest-v24.x/api/fs.html) | 项目已固定 Node.js 24.18.0；内置同步 API（应用程序接口）提供 `O_EXCL`、`O_NOFOLLOW`、`O_APPEND`、文件描述符、`lstat`/`fstat` 和显式 mode（权限模式） | 轮转与清理逻辑需要项目实现，但可以只实现已审核的固定文件名、容量和删除契约 | 选择；新增 runtime dependency（运行时依赖）为 0 |
+
+同步执行模型固定如下：
+
+1. `traceSink` 保持现有同步 `void` 契约；被采样请求在 retrieval（检索）返回前同步完成 redaction/project/decode/canonical JSONL/append（脱敏 / 投影 / 解码 / 规范逐行 JSON / 追加）。
+2. 不创建内存队列、worker（工作线程）、后台 Promise（异步结果）或 timer-driven writer（定时写入端），因此没有 `queued` 冒充 `written`、队列溢出或进程退出前隐式 flush（刷新）问题。
+3. `written` 只表示同步 append（追加）已被操作系统接受；不对每条 observation 执行 `fsync`，不承诺节点掉电时最后少量未落盘数据的 crash durability（崩溃持久性）。这类短期 observation 允许丢失且不做长期备份。
+4. 所有 adapter（适配器）异常必须在 recorder（记录器）边界转换为 `write_failed` 等安全状态，不能从同步 `traceSink` 抛出并影响 Ask；错误不得包含 payload（负载）、环境变量值或文件内容。
+5. 同步文件 I/O（输入输出）会阻塞 Node.js event loop（事件循环）；当前以低流量、单副本和小型本地 PVC（持久卷声明）接受该成本，Phase 3（阶段 3）必须实测追加延迟和 event-loop delay（事件循环延迟）。若影响 Ask 验收，不得改成无界队列，必须重新 review（审核）异步有界传输或真实 observability backend（可观测后端）。
+
+Task 5（任务 5）的文件边界固定为：写入前 strict decode（严格解码），复用 `canonicalJson()` 序列化并追加一个换行；按 UTF-8（Unicode 字符编码）字节数在写入前判断单条和 segment（分段）上限；新分段以 `O_CREAT | O_EXCL | O_APPEND | O_WRONLY | O_NOFOLLOW` 和 `0600` 创建，目录使用 `0700`；已有分段重新打开时使用 `O_NOFOLLOW` 并以 `fstat` 确认为普通文件。cleanup（清理）只接受固定正则命名、`lstat` 确认为普通文件的受管分段，按注入 clock（时钟）的 UTC（协调世界时）日期、序号和稳定次序执行 `retentionDays` 与 `maxTotalBytes`，未知文件、目录和 symlink（符号链接）一律不删除。测试通过临时目录、注入 clock/ID factory（时钟 / 标识生成器）和窄文件操作适配器覆盖失败路径，不修改全局对象。
+
+并发边界固定为一个 Node.js 进程内的同步串行写入；不实现跨进程锁、共享 history file（历史清单）或多 writer（写入端）协调。生产单副本 RollingUpdate（滚动更新）仍必须在部署 Phase 3（阶段 3）证明 writer lifecycle（写入端生命周期）不重叠；不能证明时改用 Recreate（重建更新）或真实多写入端 backend（后端）。出现多副本、`cluster`/worker process（集群 / 工作进程）、无中断更新、跨节点、集中查询或审计要求时，本地适配器立即退出适用范围。
+
+#### 4.5.2 Task 5 实施结果
+
+Task 5（任务 5）已按上述边界实现 `recorder.ts` 与 `local-sink.ts`，但尚未接入 Ask route（询问路由）：
+
+- recorder（记录器）先按服务端 request ID（请求标识）采样，命中后才读取 question 并执行脱敏、allowlist projection（白名单投影）、二次 strict decode（严格解码）和同步 append（追加）；任何阶段异常只返回固定安全状态。
+- sink（写入端）只接受规范化绝对 root（根目录）；初始化固定目录设备号和 inode（索引节点），运行期间目录身份变化、root/受管 segment（分段）为符号链接或权限过宽时停止写入。
+- 新进程总是创建下一序号 segment（分段），不续写无法证明上一写入端完成状态的历史末段；同进程追加使用 `O_NOFOLLOW` 打开并以 `fstat` 复核同一普通文件。
+- 轮转由 UTC（协调世界时）日期、`maxFileBytes` 或 `maxTotalBytes` 压力触发；清理按 UTC 日历日保留期，再按日期和固定宽度序号稳定删除最旧受管普通文件。
+- 单次写入允许短写重试；任一后续写失败会用 `ftruncate` 回滚到上一条完整 JSONL（逐行 JSON）边界。回滚或关闭失败会使实例进入只失败、不继续写入的 poison（毒化停写）状态。
+- 实现不含队列、worker（工作线程）、后台 Promise（异步结果）、timer（定时器）、shutdown flush（关闭刷新）或逐条 `fsync`，新增 runtime dependency（运行时依赖）为 0。
 
 ### 4.6 失败语义
 
@@ -312,11 +346,11 @@ src/observability/local-sink.ts
 - 在安全 observation schema、脱敏、采样和生命周期实现完成前，所有本地 serving 持久化保持关闭。
 - pipeline 测试用内存 fake sink 验证可注入契约，不再把 raw JSONL helper 伪装成 eval writer。eval 仍由自己的 strict run-scoped artifact writer 负责持久化。
 
-Task 1 经单独 review 后即可执行，然后回到当前四份 corrective plans。
+Task 1（任务 1）的实施遵守先审核、后进入下一 Task（任务）的门禁；当前历史状态以本文顶部为准。
 
-### 6.2 四份纠偏完成后
+### 6.2 Task 1 审核后
 
-依次实施：
+Task 1 review（任务 1 审核）通过后，依次实施：
 
 1. serving observation strict schema 与 allowlist projection。
 2. question redaction 和安全失败。

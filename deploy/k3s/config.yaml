@@ -1,0 +1,8 @@
+write-kubeconfig-mode: "0600"
+secrets-encryption: true
+disable-network-policy: false
+flannel-backend: vxlan
+cluster-cidr: 10.42.0.0/16
+service-cidr: 10.43.0.0/16
+kube-apiserver-arg:
+  - admission-control-config-file=/etc/rancher/k3s/admission-config.yaml

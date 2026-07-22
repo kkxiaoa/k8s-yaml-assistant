@@ -1,6 +1,7 @@
-// Embedding model 与 index v2 持久化契约测试。纯本地,不调用 embedding 或网络。
+// Embedding model 与 index v3 持久化契约测试。纯本地,不调用 embedding 或网络。
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   mkdtempSync,
   readFileSync,
@@ -16,6 +17,11 @@ import {
 } from '../knowledge/identity';
 import { resolveEmbeddingModel } from './embeddings';
 import {
+  buildIndexInput,
+  type IndexBuildChunk,
+} from './index-builder';
+import {
+  type IndexedChunk,
   computeIndexHash,
   INDEX_FORMAT_VERSION,
   readIndex,
@@ -25,9 +31,10 @@ import {
   type IndexReadResult,
 } from './index-store';
 import {
+  CorpusIndexUnavailableError,
+  createCorpusIndexLoader,
   denseSearch,
   resolveCorpusIndex,
-  type IndexedChunk,
 } from './retrieve';
 
 const BASE_CHUNK: KnowledgeChunk = {
@@ -78,9 +85,24 @@ function expectation(
 function indexed(
   chunk: KnowledgeChunk,
   embedding: number[] = [0.25, 0.75],
-): IndexedChunk {
+): IndexBuildChunk {
   return { ...chunk, embedding };
 }
+
+type IsExact<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends
+  (<T>() => T extends B ? 1 : 2)
+    ? (<T>() => T extends B ? 1 : 2) extends
+        (<T>() => T extends A ? 1 : 2)
+      ? true
+      : false
+    : false;
+
+const INDEXED_EMBEDDING_IS_FLOAT32: IsExact<
+  IndexedChunk['embedding'],
+  Float32Array
+> = true;
+void INDEXED_EMBEDDING_IS_FLOAT32;
 
 function missReason(result: IndexReadResult): IndexMissReason {
   assert.equal(result.status, 'miss');
@@ -98,6 +120,20 @@ function rewriteManifest(
   >;
   mutate(manifest);
   writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function sha256File(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function refreshFileHash(
+  dir: string,
+  file: 'chunks.jsonl' | 'embeddings.f32',
+): void {
+  const field = file === 'chunks.jsonl' ? 'chunksHash' : 'embeddingsHash';
+  rewriteManifest(dir, (manifest) => {
+    manifest[field] = sha256File(join(dir, file));
+  });
 }
 
 let passed = 0;
@@ -130,7 +166,7 @@ async function checkAsync(
   }
 }
 
-console.log('resolveEmbeddingModel / index v2:');
+console.log('resolveEmbeddingModel / index v3:');
 
 check('默认 embedding model 是 voyage-3', () => {
   delete process.env.VOYAGE_EMBEDDING_MODEL;
@@ -143,8 +179,8 @@ check('env VOYAGE_EMBEDDING_MODEL 覆盖默认', () => {
   delete process.env.VOYAGE_EMBEDDING_MODEL;
 });
 
-check('index v2 round-trip 保存完整 identity 与 canonical metadata', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-roundtrip-'));
+check('index v3 round-trip 保存完整 identity 与 canonical metadata', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-roundtrip-'));
   try {
     const expected = expectation();
     const manifest = writeIndex(
@@ -160,6 +196,8 @@ check('index v2 round-trip 保存完整 identity 与 canonical metadata', () => 
       count: 1,
       corpusContentHash: expected.corpusManifest.contentHash,
       corpusManifestHash: expected.corpusManifest.manifestHash,
+      chunksHash: sha256File(join(dir, 'chunks.jsonl')),
+      embeddingsHash: sha256File(join(dir, 'embeddings.f32')),
       indexHash: computeIndexHash(
         expected.corpusManifest,
         expected.embeddingModel,
@@ -196,7 +234,7 @@ check('index v2 round-trip 保存完整 identity 与 canonical metadata', () => 
 });
 
 check('index hit 使用共享连续 Float32Array,不展开为 number[]', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-contiguous-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-contiguous-'));
   try {
     const chunks = [BASE_CHUNK, SECOND_CHUNK];
     const expected = expectation(chunks);
@@ -224,7 +262,7 @@ check('index hit 使用共享连续 Float32Array,不展开为 number[]', () => {
   }
 });
 
-check('连续 Float32Array 与旧 number[] 的 dense score 和排序完全一致', () => {
+check('连续 Float32Array 与 builder number[] 的 dense score 和排序完全一致', () => {
   const thirdChunk: KnowledgeChunk = {
     ...BASE_CHUNK,
     id: 'schema::v1::Pod::spec.nodeName',
@@ -245,29 +283,43 @@ check('连续 Float32Array 与旧 number[] 的 dense score 和排序完全一致
   const legacy = chunks.map((chunk, index) =>
     indexed(chunk, Array.from(vectors[index]!)),
   );
-  const compact: IndexedChunk[] = chunks.map((chunk, index) => ({
-    ...chunk,
-    embedding: matrix.subarray(
-      index * dimension,
-      (index + 1) * dimension,
-    ),
-  }));
   const query = [0.3, -0.2, 0.4, 0.1];
-  const search = (index: IndexedChunk[]) =>
-    denseSearch(
-      query,
-      index,
-      chunks.length,
-      'Pod',
-      'spec.containers.image',
-      'v1',
-    ).map(({ chunk, score }) => ({ id: chunk.id, score }));
-
-  assert.deepEqual(search(compact), search(legacy));
+  const referenceCosine = (a: number[], b: number[]): number => {
+    let dot = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let index = 0; index < a.length; index++) {
+      const av = a[index] ?? 0;
+      const bv = b[index] ?? 0;
+      dot += av * bv;
+      normA += av * av;
+      normB += bv * bv;
+    }
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  };
+  const expected = legacy
+    .map((chunk) => ({
+      id: chunk.id,
+      score: referenceCosine(query, chunk.embedding),
+    }))
+    .sort((a, b) => b.score - a.score);
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-ab-'));
+  try {
+    const expectedIdentity = expectation(chunks);
+    writeIndex(legacy, expectedIdentity, dir);
+    const restored = readIndex(expectedIdentity, dir);
+    assert.equal(restored.status, 'hit');
+    const actual = denseSearch(query, restored.chunks, chunks.length).map(
+      ({ chunk, score }) => ({ id: chunk.id, score }),
+    );
+    assert.deepEqual(actual, expected);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 check('text、metadata 与 model 变化分别给出明确 miss reason', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-identity-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-identity-'));
   try {
     const original = expectation();
     writeIndex([indexed(BASE_CHUNK)], original, dir);
@@ -296,7 +348,7 @@ check('text、metadata 与 model 变化分别给出明确 miss reason', () => {
 });
 
 check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-chunk-identity-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-chunk-identity-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -304,6 +356,7 @@ check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', (
       join(dir, 'chunks.jsonl'),
       `${JSON.stringify({ ...BASE_CHUNK, text: 'stale image field' })}\n`,
     );
+    refreshFileHash(dir, 'chunks.jsonl');
     assert.equal(
       missReason(readIndex(expected, dir)),
       'corpus_content_mismatch',
@@ -317,6 +370,7 @@ check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', (
         provenance: { authority: 'kubernetes_official', version: 'v1' },
       })}\n`,
     );
+    refreshFileHash(dir, 'chunks.jsonl');
     assert.equal(
       missReason(readIndex(expected, dir)),
       'corpus_manifest_mismatch',
@@ -327,7 +381,7 @@ check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', (
 });
 
 check('count、dimension 与 indexHash 不一致不会返回 chunks', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-shape-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-shape-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -360,8 +414,41 @@ check('count、dimension 与 indexHash 不一致不会返回 chunks', () => {
   }
 });
 
+check('chunks 与 embeddings 文件哈希不匹配时封闭失效', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-file-hash-'));
+  try {
+    const expected = expectation();
+    const manifest = writeIndex([indexed(BASE_CHUNK)], expected, dir);
+    const chunksPath = join(dir, 'chunks.jsonl');
+    const embeddingsPath = join(dir, 'embeddings.f32');
+    assert.equal(manifest.chunksHash, sha256File(chunksPath));
+    assert.equal(manifest.embeddingsHash, sha256File(embeddingsPath));
+
+    const chunksText = readFileSync(chunksPath, 'utf8');
+    writeFileSync(chunksPath, `${chunksText.trimEnd()} \n`);
+    assert.equal(
+      missReason(readIndex(expected, dir)),
+      'index_hash_mismatch',
+    );
+
+    writeIndex([indexed(BASE_CHUNK)], expected, dir);
+    const bytes = readFileSync(embeddingsPath);
+    const changed = new Float32Array(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    );
+    changed[0] = changed[0]! + 0.125;
+    writeFileSync(embeddingsPath, Buffer.from(changed.buffer));
+    assert.equal(
+      missReason(readIndex(expected, dir)),
+      'index_hash_mismatch',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 check('格式、损坏 JSON、chunk count 与旧 manifest 明确失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-json-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-json-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -370,10 +457,12 @@ check('格式、损坏 JSON、chunk count 与旧 manifest 明确失效', () => {
 
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
     writeFileSync(join(dir, 'chunks.jsonl'), '{broken\n');
+    refreshFileHash(dir, 'chunks.jsonl');
     assert.equal(missReason(readIndex(expected, dir)), 'invalid_chunk');
 
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
     writeFileSync(join(dir, 'chunks.jsonl'), '');
+    refreshFileHash(dir, 'chunks.jsonl');
     assert.equal(
       missReason(readIndex(expected, dir)),
       'chunk_count_mismatch',
@@ -405,7 +494,7 @@ check('格式、损坏 JSON、chunk count 与旧 manifest 明确失效', () => {
 });
 
 check('NaN embedding 与 duplicate chunk ID 明确失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-values-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-values-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -413,6 +502,7 @@ check('NaN embedding 与 duplicate chunk ID 明确失效', () => {
       join(dir, 'embeddings.f32'),
       Buffer.from(new Float32Array([Number.NaN, 0.75]).buffer),
     );
+    refreshFileHash(dir, 'embeddings.f32');
     assert.equal(missReason(readIndex(expected, dir)), 'invalid_embedding');
 
     const twoChunks = [BASE_CHUNK, SECOND_CHUNK];
@@ -420,6 +510,7 @@ check('NaN embedding 与 duplicate chunk ID 明确失效', () => {
     writeIndex(twoChunks.map((chunk) => indexed(chunk)), twoExpected, dir);
     const firstLine = JSON.stringify(BASE_CHUNK);
     writeFileSync(join(dir, 'chunks.jsonl'), `${firstLine}\n${firstLine}\n`);
+    refreshFileHash(dir, 'chunks.jsonl');
     assert.equal(
       missReason(readIndex(twoExpected, dir)),
       'duplicate_chunk_id',
@@ -430,7 +521,7 @@ check('NaN embedding 与 duplicate chunk ID 明确失效', () => {
 });
 
 check('缺失和不完整文件集使用不同 miss reason', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-files-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-files-'));
   try {
     const expected = expectation();
     assert.equal(missReason(readIndex(expected, dir)), 'missing_files');
@@ -442,8 +533,22 @@ check('缺失和不完整文件集使用不同 miss reason', () => {
 });
 
 check('writeIndex 在落盘前拒绝 count、维度、NaN 与重复 ID', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-write-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-write-'));
   try {
+    assert.throws(
+      () =>
+        writeIndex(
+          [
+            {
+              ...BASE_CHUNK,
+              embedding: new Float32Array([0.25, 0.75]),
+            } as unknown as IndexBuildChunk,
+          ],
+          expectation(),
+          dir,
+        ),
+      /number\[\]/i,
+    );
     assert.throws(
       () =>
         writeIndex(
@@ -511,39 +616,117 @@ check('writeIndex 在落盘前拒绝 count、维度、NaN 与重复 ID', () => {
   }
 });
 
-await checkAsync('runtime miss 只返回当前重建 chunks，并保留 trace reason', async () => {
-  const stale: IndexReadResult = {
-    status: 'miss',
-    reason: 'corpus_manifest_mismatch',
-  };
-  const current = indexed({
-    ...BASE_CHUNK,
-    provenance: { authority: 'kubernetes_official', version: 'v1' },
-  });
-  const resolved = await resolveCorpusIndex(stale, async () => [current]);
+await checkAsync('builder input 是唯一保留 number[] 的模型边界', async () => {
+  let supplierCalls = 0;
+  const built = await buildIndexInput(
+    [BASE_CHUNK, SECOND_CHUNK],
+    'test-model',
+    async (texts, model) => {
+      supplierCalls++;
+      assert.deepEqual(texts, [BASE_CHUNK.text, SECOND_CHUNK.text]);
+      assert.equal(model, 'test-model');
+      return [
+        [0.25, 0.75],
+        [-0.5, 0.125],
+      ];
+    },
+  );
 
-  assert.deepEqual(resolved.chunks, [current]);
-  assert.deepEqual(resolved.cache, {
-    status: 'rebuilt',
-    reason: 'corpus_manifest_mismatch',
-  });
+  assert.equal(supplierCalls, 1);
+  assert.equal(Array.isArray(built[0]!.embedding), true);
 });
 
-await checkAsync('runtime hit 复用已校验 chunks，不执行 rebuild', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v2-hit-'));
+await checkAsync('runtime 所有 miss 都封闭失败且不调用旧 rebuild 或 Voyage', async () => {
+  const reasons: IndexMissReason[] = [
+    'missing_files',
+    'incomplete_files',
+    'read_error',
+    'format_mismatch',
+    'invalid_manifest',
+    'corpus_count_mismatch',
+    'corpus_content_mismatch',
+    'corpus_manifest_mismatch',
+    'embedding_model_mismatch',
+    'index_hash_mismatch',
+    'chunk_count_mismatch',
+    'invalid_chunk',
+    'duplicate_chunk_id',
+    'embedding_dimension_mismatch',
+    'invalid_embedding',
+  ];
+  let rebuildCalls = 0;
+  let voyageCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    voyageCalls++;
+    throw new Error('network must not be called');
+  };
+  const legacyCall = resolveCorpusIndex as unknown as (
+    persisted: IndexReadResult,
+    rebuild: () => Promise<IndexedChunk[]>,
+  ) => Promise<{ chunks: IndexedChunk[] }>;
+
+  try {
+    for (const reason of reasons) {
+      await assert.rejects(
+        legacyCall(
+          { status: 'miss', reason },
+          async () => {
+            rebuildCalls++;
+            return [];
+          },
+        ),
+        (error: unknown) =>
+          error instanceof CorpusIndexUnavailableError &&
+          error.reason === reason &&
+          error.message === 'corpus index unavailable',
+        reason,
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(resolveCorpusIndex.length, 1);
+  assert.equal(rebuildCalls, 0);
+  assert.equal(voyageCalls, 0);
+});
+
+await checkAsync('runtime hit 复用已校验 Float32 chunks', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-hit-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
     const persisted = readIndex(expected, dir);
-    let rebuildCalled = false;
-    const resolved = await resolveCorpusIndex(persisted, async () => {
-      rebuildCalled = true;
-      return [];
-    });
+    const resolved = await resolveCorpusIndex(persisted);
 
-    assert.equal(rebuildCalled, false);
     assert.deepEqual(resolved.cache, { status: 'hit' });
     assert.equal(resolved.chunks[0]!.id, BASE_CHUNK.id);
+    assert.ok(resolved.chunks[0]!.embedding instanceof Float32Array);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+await checkAsync('有效 serving index 在并发和后续调用中只读取一次', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'index-v3-loader-once-'));
+  try {
+    const expected = expectation();
+    writeIndex([indexed(BASE_CHUNK)], expected, dir);
+    let readCalls = 0;
+    const loader = createCorpusIndexLoader(() => {
+      readCalls++;
+      return readIndex(expected, dir);
+    });
+
+    const firstPromise = loader.load();
+    const secondPromise = loader.load();
+    assert.strictEqual(secondPromise, firstPromise);
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+    assert.strictEqual(second, first);
+    assert.strictEqual(await loader.load(), first);
+    assert.equal(readCalls, 1);
+    assert.deepEqual(loader.cache(), { status: 'hit' });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

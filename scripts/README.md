@@ -20,6 +20,8 @@
 | `curated-closure.ts` | `npm run corpus:closure` | curated whitelist（精选白名单）、generated resources/definitions（生成资源 / 定义） | 无 | 无 | 计算应纳入版本控制的 `$ref` 传递闭包；`--list` 只输出文件路径。 |
 | `eval-check.ts` | `npm run eval:check` | 当前语料、retrieval cases（检索用例）与 grounded-answer cases（有依据回答用例） | 无 | 无 | 本地验证用例契约、来源 ID 和资源覆盖。 |
 | `eval-compare.ts` | `npm run eval:compare -- <runId>` | 指定或最新 `run` 及同 kind（类型）的 baseline（基线） | 无 | 无 | 在兼容性门禁通过后解释指标差异，不修改任何评估产物。 |
+| `deployment-contract.test.ts` | `npm run deploy:check` | `deploy/k3s` 的 release identity（发布身份）、K3s（轻量 Kubernetes）配置、准入配置与恢复边界 | 无 | 无 | 解析真实 YAML（配置文件），拒绝浮动版本、弱权限、缺失加密、放宽准入、公网控制面、占位 Secret（密钥）和不可恢复的备份边界。 |
+| `release-build-contract.test.ts` | `npm run release:check` | Node.js（JavaScript 运行时）版本声明、Next.js（React 全栈框架）构建配置和前端字体依赖 | 无 | 无 | 拒绝版本漂移、缺失 standalone output（独立运行产物）、外部字体加载、自带字体二进制和旧 IBM Plex 变量。 |
 
 ## 稳定写入与人工审核脚本
 
@@ -30,18 +32,18 @@
 | `faith-bad-cases.ts` | `npm run badcases:faith -- <runId> [--write]` | 无 | 默认不写；`--write` 覆盖 `data/eval/bad-cases.jsonl` | 先预览 faithful bad-case candidates（忠实度问题候选）；显式写入时合并长期问题台账并校验证据；Holdout（留出集）轨迹不生成候选。 |
 | `check-schema-aliases.ts` | `npm run aliases:review -- <draft> [--apply]` | 无 | 默认不写；`--apply` 原子合并 `data/aliases/schema-field-aliases.jsonl` | 只接受位于草稿目录、全部完成人工审核且可追溯的记录；默认输出合并预览，并保留草稿未覆盖的正式记录。 |
 | `generate-schema-aliases.ts` | `npm run aliases:generate` | DeepSeek；每个目标失败时最多尝试 3 次 | 独占新建 `data/aliases/drafts/schema-field-aliases.<timestamp>.jsonl` | 输出全部为 `reviewed=false`，不会修改正式注册表；草稿需要先校验和人工编辑，再经显式预览与 `--apply` 合并。 |
-| `index-build.ts` | `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 默认写入 `data/index/{manifest.json,chunks.jsonl,embeddings.f32}`；可由 `INDEX_DIR` 改写 | 索引身份命中时跳过；失效时对全量当前语料重新嵌入并覆盖目标索引目录。 |
+| `index-build.ts` | `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 默认写入 `data/index/{manifest.json,chunks.jsonl,embeddings.f32}` 的 v3 文件哈希索引；可由 `INDEX_DIR` 改写 | 只依赖无副作用 builder（构建器）；索引身份命中时跳过，失效时对全量当前语料重新嵌入并覆盖目标索引目录。在线服务不导入或调用该脚本。 |
 | `ingest-schemas.ts` | `npm run ingest:schemas -- ...` | 文件来源无；`cluster-discovery` 通过 `kubectl get --raw` 访问当前集群 | 默认写入 `data/schemas/generated/`，可由 `--out` 改写 | 支持目录、CRD（自定义资源定义）、Kubernetes / cluster OpenAPI（Kubernetes / 集群开放应用程序接口规范）和集群发现来源；通过版本化 manifest（清单）只覆盖或删除明确归属 `ingest-schemas` 的文件，旧清单和无清单的非空目录失败关闭。 |
 
 ## 实验诊断脚本
 
 | 脚本 | npm 入口 | 外部调用 | 写盘 | 实验边界 |
 |---|---|---|---|---|
-| `query-expansion-ab.ts` | `npm run aliases:ab [-- --all]` | Voyage query embedding/rerank（查询向量嵌入 / 重排）；index miss（索引未命中）时还会在内存中重建全量语料索引 | 无 | 默认只比较通过 alias target gate（别名目标门禁）的非 Holdout（非留出）用例；`--all` 比较 retrieval tuning suite（检索调优套件）。结果只用于诊断，不写 bad case（问题用例）或 baseline（基线）。 |
+| `query-expansion-ab.ts` | `npm run aliases:ab [-- --all]` | 有效索引命中后调用 Voyage query embedding/rerank（查询向量嵌入 / 重排）；index miss（索引未命中）时失败关闭 | 无 | 运行前要求兼容索引；默认只比较通过 alias target gate（别名目标门禁）的非 Holdout（非留出）用例；`--all` 比较 retrieval tuning suite（检索调优套件）。结果只用于诊断，不写 bad case（问题用例）或 baseline（基线）。 |
 | `voyage-ab.ts` | `npm run voyage:ab` | Voyage query embedding/rerank（查询向量嵌入 / 重排） | 无 | 比较 `voyage-3` 与 `voyage-4`；要求 `data/index` 和 `data/index-ab` 已分别存在兼容索引。只输出 bad case（问题用例）及 policy conflict cases（策略冲突用例）的对比。 |
 
 ## Cleanup（清理）结论
 
-- 14 个脚本均有 npm 入口，且代码仍对应当前本地门禁、数据维护、人工审核或实验诊断流程；本轮没有足够证据删除任何脚本。
+- 14 个操作脚本均有 npm 入口，且代码仍对应当前本地门禁、数据维护、人工审核或实验诊断流程；部署与发布构建契约测试分别有独立的 `deploy:check` 和 `release:check` 入口。本轮没有足够证据删除任何脚本。
 - 实验脚本继续留在 `scripts/`，避免仅为目录整齐而修改 npm 入口和历史引用。是否下线实验必须由新的使用证据决定。
 - 原有 13 项 `latest` 直接依赖已固定为当前 lockfile（锁文件）的既有解析版本；`scripts/dependency-versions.test.ts` 校验直接依赖不使用 `latest`、根清单声明一致，以及精确版本与解析版本一致。本次没有升级、重新解析或安装依赖。

@@ -217,7 +217,7 @@ export default function Home() {
               options={{
                 minimap: { enabled: false },
                 fontSize: 13,
-                fontFamily: 'var(--font-plex-mono)',
+                fontFamily: 'var(--font-mono)',
                 padding: { top: 12 },
                 scrollBeyondLastLine: false,
                 renderLineHighlight: 'none',

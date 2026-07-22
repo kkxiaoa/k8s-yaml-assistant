@@ -17,6 +17,7 @@
 | 生成资源 YAML | Web `/api/generate`;CLI `npm run gen` | ✅ |
 | 上下文化问答 | Web `/api/ask` | ✅ |
 | 答案依据展示 | SSE `sources` + 前端“答案依据” | ✅ |
+| 健康检查 | Web `/api/health/live`、`/api/health/ready` | liveness（存活状态）只检查进程；readiness（就绪状态）校验本地 schema/policy/alias/index（模式 / 策略 / 别名 / 索引）闭包 |
 | 检索评估 | `npm run eval` | 契约已纠偏，待按 tuning（调优集）/ Holdout（留出集）/ full（完整集）重跑并审核 baseline（基线） |
 | Grounded Answer / Judge 评估 | `npm run eval:faith`、`npm run eval:judge` | 契约已纠偏，待重建 calibration（校准集）并审核 baseline（基线） |
 | Generation / Fix 评估 | `npm run eval:gen`、`npm run eval:fix` | evaluator（评估器）已纠偏，待按角色套件重跑并审核 baseline（基线） |
@@ -25,8 +26,9 @@
 ## Web 使用
 
 ```bash
-npm install
-# 创建 .env，填入 DEEPSEEK_API_KEY 和 VOYAGE_API_KEY
+npm ci
+cp .env.example .env
+# 只在本地 .env 中填写 DEEPSEEK_API_KEY 和 VOYAGE_API_KEY
 npm run dev
 ```
 
@@ -74,12 +76,12 @@ npm run gen -- "用 AWS EBS CSI、保留策略、延迟绑定、允许扩容的 
 
 | 命令 | 外部调用 | 写盘边界 |
 |---|---|---|
-| `npm run ask -- "..."` | 索引命中时调用 Voyage 查询 embedding（向量嵌入）、rerank（重排）和 DeepSeek 回答；索引缺失或失效时还会在内存中重新嵌入全量当前语料 | 读取 `INDEX_DIR` 中经过身份校验的持久化索引；运行时重建不写索引文件 |
+| `npm run ask -- "..."` | 索引命中时调用 Voyage 查询 embedding（向量嵌入）、rerank（重排）和 DeepSeek 回答；索引缺失或失效时在调用供应商前失败关闭 | 只读 `INDEX_DIR` 中经过身份和文件哈希校验的持久化索引；运行时不重建索引 |
 | `npm run check -- <yaml>` | DeepSeek tool loop（工具循环）；工具内部执行本地 schema validation（模式校验） | 不修改输入文件 |
 | `npm run gen -- "..."` | DeepSeek generation/repair loop（生成 / 修复循环） | 不写文件；最终 YAML 输出到终端 |
 
 这些 CLI（命令行界面）命令会产生真实 API（应用程序接口）请求和费用。
-执行 `npm run ask` 前可先运行 `npm run index:build`。语料内容、元数据和嵌入模型均匹配时，问答命令直接复用持久化索引；任一身份不匹配时明确重建，不读取旧格式或不完整索引。
+执行 `npm run ask` 前必须准备有效索引，可显式运行 `npm run index:build`。语料内容、元数据、嵌入模型和索引文件哈希均匹配时，问答命令复用持久化索引；任一身份不匹配、文件损坏或索引不完整时明确失败，不读取旧格式，也不在运行时隐式重建。
 
 ## 核心架构
 
@@ -172,7 +174,7 @@ interface SchemaDoc {
 | `npm run aliases:review -- <draft> [--apply]` | 无 | 默认只预览已人工审核草稿与正式注册表的合并结果；显式 `--apply` 才原子合并，且保留草稿未覆盖的正式记录 |
 | `npm run corpus:stats` | 无 | 只读；输出语料规模、资源覆盖及内容 / manifest hash（清单哈希） |
 | `npm run corpus:closure [-- --list]` | 无 | 只读；计算 curated whitelist（精选白名单）的 `$ref` 传递闭包 |
-| `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 默认写入 `data/index/`；索引身份命中时跳过重建 |
+| `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 默认写入 `data/index/` 的 v3 文件哈希索引；索引身份命中时跳过重建 |
 
 Alias（别名）人工审核流程：
 
@@ -204,13 +206,13 @@ npm run build
 npm test -- src/retrieval/router.test.ts
 ```
 
-这些命令不调用模型、embedding（向量嵌入）或 rerank（重排）。`npm run build` 使用 `next/font`，首次构建可能访问 Google Fonts。
+这些命令不调用模型、embedding（向量嵌入）或 rerank（重排）。`npm run build` 使用系统字体栈，不下载外部字体。
 
 ### Eval（评估）调用与成本边界
 
 | 命令 | 外部调用 | 主要写盘 | 用途与边界 |
 |---|---|---|---|
-| `npm run eval` / `npm run eval -- 5` | Voyage embedding（向量嵌入）与 rerank（重排）；index miss（索引未命中）时在内存中重建全量 corpus index（语料索引） | `data/eval/runs/`、`data/eval/traces/` | 默认运行 retrieval tuning suite（检索调优套件）；可选数字保留为 `k` |
+| `npm run eval` / `npm run eval -- 5` | 有效索引命中后调用 Voyage query embedding（查询向量嵌入）与 rerank（重排）；index miss（索引未命中）时失败关闭且不调用模型 | `data/eval/runs/`、`data/eval/traces/` | 默认运行 retrieval tuning suite（检索调优套件）；可选数字保留为 `k` |
 | `npm run eval -- --holdout` / `npm run eval -- 5 --full` | 同上 | `data/eval/runs/`、`data/eval/traces/` | 显式运行 Holdout（留出集）或 full（完整集）检索评估 |
 | `npm run eval:faith` | Voyage embedding/rerank（向量嵌入 / 重排）；DeepSeek 回答与 judge（裁判） | `data/eval/runs/`、`data/eval/traces/` | 默认运行 Grounded Answer tuning suite（有依据回答调优套件） |
 | `npm run eval:faith -- --holdout` / `npm run eval:faith -- --full` | 同上 | `data/eval/runs/`、`data/eval/traces/` | 显式运行 Holdout（留出集）或 full（完整集）有依据回答评估 |
@@ -282,22 +284,54 @@ data/eval/
   traces/<runId>.<kind>.jsonl     # 本地逐 case TraceEnvelope,不提交
 
 data/observability/
-  serving-traces.jsonl            # serving 观测数据,不属于 eval run,不提交
+  serving-observations.<UTC-date>.<sequence>.jsonl  # 受控 serving observation 分段,不提交
 ```
 
-`EvalRun.artifactPaths.trace` 保存相对 `data/eval/` 的 POSIX 路径,由运行时解析到当前工作区。`runs/`、`traces/` 和 `data/observability/` 由运行时按需创建,可以清理后重建;旧 artifact 格式不提供兼容读取。baseline 不复制 run 文件,也不保存 ignored trace 路径。
+`EvalRun.artifactPaths.trace` 保存相对 `data/eval/` 的 POSIX 路径,由运行时解析到当前工作区。`runs/`、`traces/` 由对应 runner（运行器）按需创建；`data/observability/` 仅在完整合法的 local mode（本地模式）初始化时创建。旧 artifact（产物）格式和旧 `serving-traces.jsonl` 均不兼容读取或迁移。baseline（基线）不复制 run（运行）文件,也不保存 ignored trace（被忽略的轨迹）路径。
 
 说明:
 
-- `npm run build` 会使用 `next/font` 拉取 Google Fonts,离线或沙箱网络受限时可能失败。
+- `npm run build` 不下载外部字体；容器禁网构建在生产 Dockerfile（容器构建文件）完成后单独验证。
 - 除 `npm test` 外，TypeScript npm 脚本通过 `tsx` CLI（命令行界面）启动；部分沙箱环境可能会拦截其 IPC pipe（进程间通信管道）创建。
 
 ## 环境变量
 
+从 `.env.example` 复制本地配置；`.env` 不得提交。API Key（应用程序接口密钥）不得出现在仓库、文档、日志或 observation（观测）文件中。
+
+| 变量 | 作用与边界 |
+|---|---|
+| `DEEPSEEK_API_KEY` | Ask/Generate/Fix（询问 / 生成 / 修复）和相关 CLI（命令行界面）的 DeepSeek 凭据 |
+| `VOYAGE_API_KEY` | embedding/rerank（向量嵌入 / 重排）凭据 |
+| `VOYAGE_EMBEDDING_MODEL` | 可选 embedding model（向量嵌入模型）覆盖；缺省为代码当前默认值，必须与 index identity（索引身份）一致 |
+| `INDEX_DIR` | 可选索引目录覆盖；缺省为当前工作目录下的 `data/index` |
+| `ENABLE_QUERY_EXPANSION` | 只有严格等于 `false` 时关闭 query expansion（查询扩展）；其他情况开启 |
+| `SERVING_OBSERVATION_MODE` | Ask serving observation（询问在线观测）开关；未配置或 `off` 时不创建观测文件 |
+
+### Ask serving observation（询问在线观测）
+
+默认 `SERVING_OBSERVATION_MODE=off`。设置为 `local` 前必须同时显式提供下列全部数值配置；缺失、格式错误、超过 hard cap（硬上限）或字段关系非法都会 fail closed（失败关闭）观测记录器，但 Ask 主流程继续运行：
+
+| 变量 | 约束 |
+|---|---|
+| `SERVING_OBSERVATION_SAMPLE_RATE` | `[0, 1]`；使用服务端 request ID（请求标识）的稳定 SHA-256（安全哈希算法）桶采样，不读取内容决定是否采样 |
+| `SERVING_OBSERVATION_MAX_FILE_BYTES` | 正整数且不超过 128 MiB；必须不大于总容量 |
+| `SERVING_OBSERVATION_MAX_TOTAL_BYTES` | 正整数且不超过 1 GiB |
+| `SERVING_OBSERVATION_RETENTION_DAYS` | `1..30` 的整数 |
+| `SERVING_OBSERVATION_MAX_INPUT_BYTES` | 正整数且不超过 256 KiB；限制进入脱敏器的 question（问题文本）字节数 |
+| `SERVING_OBSERVATION_MAX_TEXT_BYTES` | 正整数且不超过 16 KiB；必须不大于输入上限 |
+
+记录内容只包含严格 `serving-observation/v1` schema（模式）允许的脱敏 question（问题文本）或丢弃状态、受控 route hint（路由提示）、chunk ID（知识片段标识）、来源类别与权威性、目标字段、分数、查询扩展状态、延迟和索引缓存状态。不会记录 `queryText`、用户 YAML、选中内容、校验错误、answer（回答）、chunk title/text（知识片段标题 / 正文）、source URI（来源地址）、请求头、cookie（浏览器会话）或环境变量值；脱敏、二次扫描或 strict decode（严格解码）失败时不回退原文。
+
+local mode（本地模式）写入 `data/observability/serving-observations.<UTC-date>.<sequence>.jsonl`，按 UTC（协调世界时）日期或单文件字节上限轮转，并同时按保留天数和总字节上限清理最旧的受管普通文件。配置在模块初始化时读取；修改后必须重启进程。相同 stage/code（阶段 / 错误码）的配置、采样、脱敏、投影或文件故障每个进程只向 console（控制台）报告一次固定安全信号，不输出 payload（负载）或底层异常内容。
+
+人工清理前先停止唯一写入进程，并只检查受控文件名：
+
 ```bash
-DEEPSEEK_API_KEY=...
-VOYAGE_API_KEY=...
+find data/observability -maxdepth 1 -type f -name 'serving-observations.*.jsonl' -print
+# 核对单个路径后再执行：rm -- data/observability/<reviewed-segment-name>
 ```
+
+当前 local mode（本地模式）只支持单进程、单写入端，不适用于多实例或重叠写入；remote observability backend（远程可观测后端）尚未实现。生产候选值和 PVC（持久卷声明）边界以已审核部署设计为准，不能把上述 hard cap（硬上限）当作生产推荐值。
 
 当前模型接入:
 
