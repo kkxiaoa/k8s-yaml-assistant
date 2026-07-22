@@ -7,7 +7,7 @@ import {
 } from './judge-votes';
 import { evalErrorDetails } from './run-session';
 
-export const JUDGE_MODEL = 'claude-opus-4-8';
+export const JUDGE_MODEL = 'deepseek-v4-pro';
 export const FAITH_JUDGE_ATTEMPT_LIMIT = 2;
 export const JUDGE_PARSER_SCHEMA_IDENTITY = 'judge-vote-parser-v2';
 

@@ -24,6 +24,10 @@ import {
   skippedExactQueryExpansionTrace,
 } from '../retrieval/query-expansion-runtime';
 import { ANSWER_MODEL } from './agent-contract';
+import {
+  getDeepSeekApiKey,
+  requireRuntimeCapability,
+} from './runtime-config';
 export { ANSWER_MODEL };
 
 export const ASK_MAX_TOKENS = 2048;
@@ -41,9 +45,10 @@ ${CONFLICT_RULES}
 - 简洁准确,涉及枚举值时列全。用中文回答。`;
 
 export function getClient(): Anthropic {
+  const config = requireRuntimeCapability('deepseek');
   return new Anthropic({
-    baseURL: 'https://api.deepseek.com/anthropic',
-    apiKey: process.env.DEEPSEEK_API_KEY,
+    baseURL: config.deepseek.baseUrl,
+    apiKey: getDeepSeekApiKey(),
   });
 }
 

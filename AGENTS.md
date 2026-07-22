@@ -59,7 +59,7 @@
 
 四份 2026-07-12 纠偏计划已经完成结构实现与逐 Task（任务）审核。Case Governance（评估用例治理）也已完成实现和本地门禁，当前仍未重建正式 baseline（基线）；在新版本完整评估完成人工审核前，不晋升 baseline（基线），不根据旧指标继续优化 retrieval、prompt 或模型。
 
-生产部署设计、Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核；Task 7（任务 7）已完成索引 fail-closed（失败关闭）、类型收口和健康端点。尚未创建 GitHub remote（GitHub 远程仓库）、生产镜像、应用 Kubernetes（容器编排系统）资源或公开入口。
+生产部署设计、Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核；Task 8（任务 8）的显式运行时配置与供应商失败边界已完成实现和本地门禁，当前停在 Task 8 review（任务 8 审核）。尚未创建 GitHub remote（GitHub 远程仓库）、生产镜像、应用 Kubernetes（容器编排系统）资源或公开入口。
 
 ## 当前执行优先级
 
@@ -68,7 +68,7 @@
 1. 已完成四份 `2026-07-12` 纠偏计划的结构实现与逐 Task（任务）审核；尚未执行真实模型完整评估或 baseline（基线）晋升。
 2. 已完成 Phase B（阶段 B）工程清理的 docs cleanup（文档清理）与 Deferred Risk Closure（延期风险收敛）第 1-6 项审核。
 3. 已完成 Case Governance（评估用例治理）：eval case 已建立 `task/origin/role` 分层，并补充 error explanation（错误解释）、真实 CRD（自定义资源定义）和 Holdout（留出集）。
-4. 当前优先主线是生产部署；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核，下一项是 Task 8（任务 8）的显式运行时配置与供应商失败边界，后续继续逐 Task（任务）和 Phase（阶段）停下审核。
+4. 当前优先主线是生产部署；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核，Task 8（任务 8）已完成实现和本地门禁并等待审核，后续继续逐 Task（任务）和 Phase（阶段）停下审核。
 5. 私有部署和受限入口验证后、公开发布前，恢复质量主线：清理 ignored artifacts（被忽略的产物），使用与发布候选一致的 8,410 条 index（索引），重跑 retrieval/faith/judge/generation/fix 并人工审核 baseline（基线）。
 6. 贯通 token/usage/cost（令牌 / 用量 / 成本），在新尺子下复测仍存在的 retrieval/rerank bad case（检索 / 重排问题用例）。
 7. 接入 Stage 6.2 official docs（阶段 6.2 官方文档），再接 Stage 6.3 examples（阶段 6.3 示例）。

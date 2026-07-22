@@ -189,17 +189,32 @@ await check('Ask route 只注入安全 recorder 且不恢复原始持久化入�
     /trace\.(?:question|queryText|coarseHits|rerankHits|finalHits)/,
   );
   assert.match(routeSource, /getReadiness\(\)/);
+  assert.match(routeSource, /requireRuntimeCapability\('deepseek'\)/);
+  assert.match(routeSource, /requireRuntimeCapability\('voyage'\)/);
+  assert.match(
+    routeSource,
+    /controller\.enqueue\(sse\('error', upstreamErrorEvent\(error\)\)\)/,
+  );
+  assert.doesNotMatch(routeSource, /controller\.error\(/);
+  assert.doesNotMatch(routeSource, /process\.env\.(?:DEEPSEEK|VOYAGE)/);
   assert.match(routeSource, /await import\('@\/server\/pipeline'\)/);
   assert.doesNotMatch(
     routeSource,
     /import\s*\{[^}]*\b(?:getClient|prepareAsk)\b[^}]*\}\s*from\s*['"]@\/server\/pipeline['"]/s,
   );
   const readinessOffset = routeSource.indexOf('await getReadiness()');
+  const capabilityOffset = routeSource.indexOf(
+    "requireRuntimeCapability('deepseek')",
+  );
   const bodyOffset = routeSource.indexOf('await req.json()');
   const pipelineOffset = routeSource.indexOf(
     "await import('@/server/pipeline')",
   );
-  assert.ok(readinessOffset >= 0 && readinessOffset < bodyOffset);
+  assert.ok(
+    capabilityOffset >= 0 &&
+      capabilityOffset < readinessOffset &&
+      readinessOffset < bodyOffset,
+  );
   assert.ok(bodyOffset < pipelineOffset);
 });
 

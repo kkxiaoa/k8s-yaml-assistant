@@ -315,7 +315,7 @@ Stage 是能力分类，不代表执行时序。
 
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引、private/portfolio（私有 / 作品集展示）双模式和安全 observation（观测）边界。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
-3. Phase 2（阶段 2）的 Task 5-7（任务 5-7）已审核；Task 7（任务 7）已把在线索引收紧为共享连续 `Float32Array`、v3 文件哈希身份和 fail-closed（失败关闭）加载，并增加本地一次性 readiness/liveness（就绪 / 存活）状态与 Ask（询问）503 门禁。下一项是 Task 8（任务 8）的显式运行时配置与供应商失败边界。尚未创建远程仓库、生产镜像、应用 Kubernetes（容器编排系统）资源或公网入口。
+3. Phase 2（阶段 2）的 Task 5-7（任务 5-7）已审核；Task 7（任务 7）已把在线索引收紧为共享连续 `Float32Array`、v3 文件哈希身份和 fail-closed（失败关闭）加载，并增加本地一次性 readiness/liveness（就绪 / 存活）状态与 Ask（询问）503 门禁。Task 8（任务 8）已完成 Flash/Pro（快速模型 / 高能力模型）身份分离、显式非敏感配置、能力降级与上游封闭错误边界，当前停在 Task 8 review（任务 8 审核）。尚未创建远程仓库、生产镜像、应用 Kubernetes（容器编排系统）资源或公网入口。
 4. 私有部署和受限入口验证通过后，在公开发布前恢复 Phase B（阶段 B）正式质量重建；新 baseline（基线）审核通过或形成显式风险接受记录后，才进入公开发布。
 5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 

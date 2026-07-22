@@ -303,10 +303,16 @@ data/observability/
 |---|---|
 | `DEEPSEEK_API_KEY` | Ask/Generate/Fix（询问 / 生成 / 修复）和相关 CLI（命令行界面）的 DeepSeek 凭据 |
 | `VOYAGE_API_KEY` | embedding/rerank（向量嵌入 / 重排）凭据 |
-| `VOYAGE_EMBEDDING_MODEL` | 可选 embedding model（向量嵌入模型）覆盖；缺省为代码当前默认值，必须与 index identity（索引身份）一致 |
-| `INDEX_DIR` | 可选索引目录覆盖；缺省为当前工作目录下的 `data/index` |
-| `ENABLE_QUERY_EXPANSION` | 只有严格等于 `false` 时关闭 query expansion（查询扩展）；其他情况开启 |
+| `DEEPSEEK_BASE_URL` | 必填 HTTPS（安全超文本传输协议）兼容端点；禁止 URL（网址）凭据、查询参数和片段 |
+| `DEEPSEEK_ANSWER_MODEL` | 必填且固定为 `deepseek-v4-flash`；只控制 Ask/Generate/Fix（询问 / 生成 / 修复），不控制离线 judge（裁判） |
+| `VOYAGE_EMBEDDING_URL` / `VOYAGE_RERANK_URL` | 必填 HTTPS（安全超文本传输协议）向量嵌入 / 重排端点 |
+| `VOYAGE_EMBEDDING_MODEL` | 必填 embedding model（向量嵌入模型）身份；发布值为 `voyage-3`，必须与 index identity（索引身份）一致 |
+| `VOYAGE_RERANK_MODEL` | 必填且固定为 `rerank-2.5` |
+| `INDEX_DIR` | 必填索引目录；本地示例为 `data/index`，容器内由 ConfigMap（普通配置）固定只读绝对路径 |
+| `ENABLE_QUERY_EXPANSION` | 必填且只接受 `true` 或 `false` |
 | `SERVING_OBSERVATION_MODE` | Ask serving observation（询问在线观测）开关；未配置或 `off` 时不创建观测文件 |
+
+上述非敏感运行时配置缺失、未知或非法时会 fail closed（失败关闭）。Secret（密钥）只检查对应能力是否可用，不进入可序列化配置快照。在线回答显式使用 `deepseek-v4-flash`，离线 judge（裁判）独立使用 `deepseek-v4-pro`。
 
 ### Ask serving observation（询问在线观测）
 

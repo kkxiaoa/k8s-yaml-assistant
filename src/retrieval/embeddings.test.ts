@@ -168,15 +168,48 @@ async function checkAsync(
 
 console.log('resolveEmbeddingModel / index v3:');
 
-check('默认 embedding model 是 voyage-3', () => {
+const RUNTIME_CONFIG_ENV = {
+  DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
+  DEEPSEEK_ANSWER_MODEL: 'deepseek-v4-flash',
+  VOYAGE_EMBEDDING_URL: 'https://api.voyageai.com/v1/embeddings',
+  VOYAGE_RERANK_URL: 'https://api.voyageai.com/v1/rerank',
+  VOYAGE_RERANK_MODEL: 'rerank-2.5',
+  INDEX_DIR: 'data/index',
+  ENABLE_QUERY_EXPANSION: 'true',
+} as const;
+
+function withRuntimeEmbeddingModel(model: string, run: () => void): void {
+  const environment = { ...RUNTIME_CONFIG_ENV, VOYAGE_EMBEDDING_MODEL: model };
+  const previous = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(environment)) {
+    previous.set(key, process.env[key]);
+    process.env[key] = value;
+  }
+  try {
+    run();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+check('缺失显式 embedding model 时封闭失败', () => {
+  const previous = process.env.VOYAGE_EMBEDDING_MODEL;
   delete process.env.VOYAGE_EMBEDDING_MODEL;
-  assert.equal(resolveEmbeddingModel(), 'voyage-3');
+  try {
+    assert.throws(() => resolveEmbeddingModel(), /runtime configuration/);
+  } finally {
+    if (previous === undefined) delete process.env.VOYAGE_EMBEDDING_MODEL;
+    else process.env.VOYAGE_EMBEDDING_MODEL = previous;
+  }
 });
 
-check('env VOYAGE_EMBEDDING_MODEL 覆盖默认', () => {
-  process.env.VOYAGE_EMBEDDING_MODEL = 'voyage-4';
-  assert.equal(resolveEmbeddingModel(), 'voyage-4');
-  delete process.env.VOYAGE_EMBEDDING_MODEL;
+check('显式 VOYAGE_EMBEDDING_MODEL 决定索引模型身份', () => {
+  withRuntimeEmbeddingModel('voyage-4', () => {
+    assert.equal(resolveEmbeddingModel(), 'voyage-4');
+  });
 });
 
 check('index v3 round-trip 保存完整 identity 与 canonical metadata', () => {
@@ -678,6 +711,7 @@ await checkAsync('runtime 所有 miss 都封闭失败且不调用旧 rebuild 或
         ),
         (error: unknown) =>
           error instanceof CorpusIndexUnavailableError &&
+          !('code' in error) &&
           error.reason === reason &&
           error.message === 'corpus index unavailable',
         reason,
