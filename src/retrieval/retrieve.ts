@@ -1,4 +1,4 @@
-// 持久化向量索引读入内存后执行余弦检索;索引不匹配时才全量重建。
+// 持久化向量索引读入内存后执行余弦检索；索引不匹配时在线路径封闭失败。
 
 import { performance } from 'node:perf_hooks';
 import { embed, resolveEmbeddingModel } from './embeddings';
@@ -6,7 +6,12 @@ import { buildCorpusManifest, CORPUS, type Chunk } from '../knowledge/corpus';
 import { RESOURCE_BOOST } from './router';
 import { policyBoost } from './boost';
 import { rerank, COARSE_N } from './rerank';
-import { readIndex, type IndexReadResult } from './index-store';
+import {
+  readIndex,
+  type IndexedChunk,
+  type IndexMissReason,
+  type IndexReadResult,
+} from './index-store';
 import { toTraceHit, type IndexCacheTrace, type RetrievalTrace } from './trace';
 import {
   getCachedAliasRegistry,
@@ -16,9 +21,7 @@ import {
 
 const FIELD_PATH_BOOST = 0.08;
 
-export interface IndexedChunk extends Chunk {
-  embedding: number[] | Float32Array;
-}
+export type { IndexedChunk } from './index-store';
 
 export type RetrievalPipelineStage =
   | 'index'
@@ -74,24 +77,13 @@ function cosineSimilarity(
   return denom === 0 ? 0 : dot / denom;
 }
 
-/** 把给定语料编码成带向量的索引。 */
-export async function buildIndex(
-  chunks: Chunk[] = CORPUS,
-): Promise<IndexedChunk[]> {
-  const embeddings = await embed(
-    chunks.map((c) => c.text),
-    'document',
-  );
-  return chunks.map((c, i) => ({ ...c, embedding: embeddings[i] ?? [] }));
-}
-
 /**
  * 纯向量打分(同步,无网络):对已嵌入的 query 在索引上算余弦 + 软加权,取 top-k。
  * 拆出来是为了 trace 能单独对「dense 打分」这一档计时(embed 在外层单独计时)。
  */
 export function denseSearch(
   queryEmbedding: number[],
-  index: IndexedChunk[],
+  index: readonly IndexedChunk[],
   k: number,
   boostResource?: string,
   boostPath?: string,
@@ -130,7 +122,7 @@ export function denseSearch(
  */
 export async function retrieve(
   query: string,
-  index: IndexedChunk[],
+  index: readonly IndexedChunk[],
   k = 3,
   boostResource?: string,
   boostPath?: string,
@@ -149,51 +141,73 @@ export async function retrieve(
 }
 
 // ── 共享检索入口(eval == serving)─────────────────────────────────────────
-// 单一全量索引:整个 CORPUS 嵌入一次,模块级缓存。CLI / Web / eval 共用同一份,
+// 单一全量索引在模块级缓存。CLI / Web / eval 共用同一份,
 // 同一段「软加权粗召回 → rerank 精排」代码,保证 eval 数字预测线上行为。
 
-let corpusIndexPromise: Promise<IndexedChunk[]> | null = null;
-let corpusIndexCache: IndexCacheTrace | null = null;
+export class CorpusIndexUnavailableError extends Error {
+  readonly code = 'corpus_index_unavailable' as const;
+  readonly reason: IndexMissReason;
+
+  constructor(reason: IndexMissReason) {
+    super('corpus index unavailable');
+    this.name = 'CorpusIndexUnavailableError';
+    this.reason = reason;
+  }
+}
 
 export async function resolveCorpusIndex(
   persisted: IndexReadResult,
-  rebuild: () => Promise<IndexedChunk[]>,
 ): Promise<{ chunks: IndexedChunk[]; cache: IndexCacheTrace }> {
   if (persisted.status === 'hit') {
     return { chunks: persisted.chunks, cache: { status: 'hit' } };
   }
+  throw new CorpusIndexUnavailableError(persisted.reason);
+}
+
+export interface CorpusIndexLoader {
+  load(): Promise<IndexedChunk[]>;
+  cache(): IndexCacheTrace | null;
+}
+
+export function createCorpusIndexLoader(
+  readPersisted: () => IndexReadResult,
+): CorpusIndexLoader {
+  let loadPromise: Promise<IndexedChunk[]> | null = null;
+  let cacheState: IndexCacheTrace | null = null;
+
+  const load = (): Promise<IndexedChunk[]> => {
+    loadPromise ??= Promise.resolve()
+      .then(readPersisted)
+      .then(resolveCorpusIndex)
+      .then((resolved) => {
+        cacheState = resolved.cache;
+        return resolved.chunks;
+      });
+    return loadPromise;
+  };
+
   return {
-    chunks: await rebuild(),
-    cache: { status: 'rebuilt', reason: persisted.reason },
+    load,
+    cache: () => cacheState,
   };
 }
 
-/**
- * 持久化索引只有在 format、corpus 双 identity 与模型全部匹配时才使用；
- * 其余情况都基于当前 CORPUS 实时重建，并保留结构化 miss reason。
- */
-async function loadOrBuildCorpusIndex(): Promise<IndexedChunk[]> {
-  const expectation = {
+const corpusIndexLoader = createCorpusIndexLoader(() =>
+  readIndex({
     corpusManifest: buildCorpusManifest(),
     corpusChunks: CORPUS,
     embeddingModel: resolveEmbeddingModel(),
-  };
-  const resolved = await resolveCorpusIndex(readIndex(expectation), () =>
-    buildIndex(CORPUS),
-  );
-  corpusIndexCache = resolved.cache;
-  return resolved.chunks;
-}
+  }),
+);
 
-/** 取(惰性构建/读盘)全量 CORPUS 索引。无硬过滤——路由只影响软加权,不删候选。 */
+/** 读取并缓存全量 CORPUS 索引。无硬过滤——路由只影响软加权,不删候选。 */
 export function getCorpusIndex(): Promise<IndexedChunk[]> {
-  if (!corpusIndexPromise) corpusIndexPromise = loadOrBuildCorpusIndex();
-  return corpusIndexPromise;
+  return corpusIndexLoader.load();
 }
 
-/** 当前模块级 index cache 的命中或重建状态。 */
+/** 当前模块级 index cache 的命中状态。 */
 export function getCorpusIndexCache(): IndexCacheTrace | null {
-  return corpusIndexCache;
+  return corpusIndexLoader.cache();
 }
 
 export interface SearchOptions {
@@ -222,7 +236,7 @@ export type SearchTrace = Pick<
 
 /**
  * 共享检索(带 trace):全量软加权粗召回 → rerank 精排。分档计时 embed / dense / rerank,
- * 记录粗召回、rerank 命中及 index hit/rebuild 原因。返回 rerank 后完整候选(长度=coarseN),调用方 slice 到 k。
+ * 记录粗召回、rerank 命中及 index hit。返回 rerank 后完整候选(长度=coarseN),调用方 slice 到 k。
  */
 export async function searchCorpusTraced(
   queryText: string,

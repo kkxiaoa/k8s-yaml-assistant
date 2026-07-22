@@ -6,6 +6,8 @@
 
 四份 2026-07-12 质量纠偏计划、Phase B（阶段 B）工程清理和 Deferred Risk Closure（延期风险收敛）第 1-6 项已完成审核。Case Governance（评估用例治理）已完成实现和本地门禁；完成新版本完整评估前，不晋升 baseline（基线），不根据旧指标优化 retrieval、prompt 或模型。
 
+当前优先主线是生产部署；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核，下一项是 Task 8（任务 8）的显式运行时配置与供应商失败边界。尚未创建 GitHub remote（GitHub 远程仓库）、生产镜像、应用 Kubernetes（容器编排系统）资源或公开入口。正式质量重建在私有部署和受限入口验证后、公开发布前恢复。
+
 ## 命令入口
 
 面向使用者的完整命令、外部调用、费用和写盘边界只维护在根 `README.md`；`scripts/README.md` 只记录维护者级 scripts inventory（脚本清单），不作为平行 CLI（命令行界面）文档。
@@ -52,7 +54,7 @@ data/schemas/    generated registry + curated 白名单(知识源)
   传 `claude-sonnet-4-6` → 映射 deepseek-v4-flash;`claude-opus-4-8` → deepseek-v4-pro。换回真 Claude 只改 baseURL + key。
 - **embedding / rerank** 用 Voyage(DeepSeek 无 embedding 接口)。
 - **前端分层(Next.js 最佳实践)**:`app/` 只放路由(page/layout/route);**`app/ui/` = UI 层**(展示组件,纯展示、状态与副作用都在 `page.tsx` 这个薄组合根里);`app/lib/` = 前端逻辑/工具。跨层访问后端用 `@/` 别名(`@/server/pipeline`),不写 `../../../`。新建展示组件放 `app/ui/`,新建前端纯逻辑放 `app/lib/`。**与 `/api/*` 的通信封装在 `app/lib/api.ts`,组件/page 不直接 `fetch`**(page 只做状态编排)。
-- **前端栈**:Tailwind v4(`@theme` token + `app/globals.css`)+ IBM Plex Mono/Sans(next/font),经典 VSCode Dark 风格(中性灰黑底 + VSCode 蓝 #3f9dff 强调,极淡中性网格);资源感知(从 YAML 解析 kind/apiVersion)+ Monaco 内联报错标记(path→行)。UI 用 `frontend-design` 技能。
+- **前端栈**:Tailwind v4(`@theme` token + `app/globals.css`)+ 系统 sans/monospace 字体栈,经典 VSCode Dark 风格(中性灰黑底 + VSCode 蓝 #3f9dff 强调,极淡中性网格);资源感知(从 YAML 解析 kind/apiVersion)+ Monaco 内联报错标记(path→行)。UI 用 `frontend-design` 技能。
 - **知识库 schema 驱动**:资源/CRD 应通过 ingestion pipeline 进入 `data/schemas/generated/{resources,definitions}`,不要靠手工 import 或 `data/schemas/*.json` fixture 扩覆盖。`resources` 存资源入口,`definitions` 存 OpenAPI `$ref` registry,运行时本地解析引用。
 - **共享 semantic retrieval（语义检索）实现**:CLI（命令行界面）、Web serving（在线服务）与 eval（评估）共用 query expansion（查询扩展）、软加权、dense retrieval（稠密检索）、rerank（重排）和持久化索引身份协议。Editor exact-field（编辑器精确字段）分流由独立 pipeline（管线）测试验证，不混入 semantic retrieval Recall/MRR（语义检索召回率 / 平均倒数排名）。
 - **测量驱动**:改了切片、检索、路由或模型，必须与同 kind、同 dataset hash（数据集哈希）、同 metric definition version（指标定义版本）的 baseline（基线）对比。当前尚无新口径 baseline（基线），不得用旧指标证明收益。

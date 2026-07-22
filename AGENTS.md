@@ -59,6 +59,8 @@
 
 四份 2026-07-12 纠偏计划已经完成结构实现与逐 Task（任务）审核。Case Governance（评估用例治理）也已完成实现和本地门禁，当前仍未重建正式 baseline（基线）；在新版本完整评估完成人工审核前，不晋升 baseline（基线），不根据旧指标继续优化 retrieval、prompt 或模型。
 
+生产部署设计、Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核；Task 7（任务 7）已完成索引 fail-closed（失败关闭）、类型收口和健康端点。尚未创建 GitHub remote（GitHub 远程仓库）、生产镜像、应用 Kubernetes（容器编排系统）资源或公开入口。
+
 ## 当前执行优先级
 
 唯一执行路线维护在 `docs/AI应用开发能力训练实现方案.md`，Stage 编号只表示能力分类，不表示时序。
@@ -66,11 +68,12 @@
 1. 已完成四份 `2026-07-12` 纠偏计划的结构实现与逐 Task（任务）审核；尚未执行真实模型完整评估或 baseline（基线）晋升。
 2. 已完成 Phase B（阶段 B）工程清理的 docs cleanup（文档清理）与 Deferred Risk Closure（延期风险收敛）第 1-6 项审核。
 3. 已完成 Case Governance（评估用例治理）：eval case 已建立 `task/origin/role` 分层，并补充 error explanation（错误解释）、真实 CRD（自定义资源定义）和 Holdout（留出集）。
-4. 下一项质量主线是清理 ignored artifacts（被忽略的产物）、重建 index（索引），重跑 retrieval/faith/judge/generation/fix 并人工审核 baseline（基线）。
-5. 贯通 token/usage/cost（令牌 / 用量 / 成本），在新尺子下复测仍存在的 retrieval/rerank bad case（检索 / 重排问题用例）。
-6. 接入 Stage 6.2 official docs（阶段 6.2 官方文档），再接 Stage 6.3 examples（阶段 6.3 示例）。
-7. 在多源 provenance（来源信息）和 judge（裁判）稳定后实施 Claim-level Grounding（声明级依据校验）。
-8. 最后成熟化 Stage 7 serving feedback（阶段 7 在线反馈）、采纳信号和审核式 eval（评估）回灌。
+4. 当前优先主线是生产部署；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-7（任务 5-7）已经审核，下一项是 Task 8（任务 8）的显式运行时配置与供应商失败边界，后续继续逐 Task（任务）和 Phase（阶段）停下审核。
+5. 私有部署和受限入口验证后、公开发布前，恢复质量主线：清理 ignored artifacts（被忽略的产物），使用与发布候选一致的 8,410 条 index（索引），重跑 retrieval/faith/judge/generation/fix 并人工审核 baseline（基线）。
+6. 贯通 token/usage/cost（令牌 / 用量 / 成本），在新尺子下复测仍存在的 retrieval/rerank bad case（检索 / 重排问题用例）。
+7. 接入 Stage 6.2 official docs（阶段 6.2 官方文档），再接 Stage 6.3 examples（阶段 6.3 示例）。
+8. 在多源 provenance（来源信息）和 judge（裁判）稳定后实施 Claim-level Grounding（声明级依据校验）。
+9. 最后成熟化 Stage 7 serving feedback（阶段 7 在线反馈）、采纳信号和审核式 eval（评估）回灌。
 
 长期约束：
 
@@ -81,6 +84,7 @@
 
 ## 工程规则
 
+- **Task effort level（任务推理强度）评估**：每次开始执行 Task（任务）前，先评估并向用户说明当前任务建议的 effort level（推理强度）。解释一段代码、编写简单函数、增加普通接口、修复明确的类型错误、生成 `Dockerfile`、执行格式化或机械性重构等任务本身已经很明确时，`xhigh` 通常已有足够推理能力；即使切换到 `max`，最终代码也可能几乎相同。`max` 应保留给最困难、质量优先，且存在显著不确定性、跨系统约束或高风险变更的任务。
 - **禁止玩具思维落盘（最高优先）**：落盘的内容必须是当前阶段的真实工程形态，不得为了快速跑通而沉淀简化、占位或硬编码版本——例如手写少字段 schema 覆盖真实 ingestion 产物、storage-only 的 fallback 资源集、`CORPUS.slice(0, N)` 截断语料、单资源特判。临时方案必须显式标注边界并征求用户同意，不能悄悄变成既成事实。核实到历史玩具残留（如 `FIXTURE_SCHEMA_DOCS` 覆盖层、`FALLBACK_RESOURCES` / `chunksForResource` 硬过滤、旧 `validateStorageClass` / `submit_storageclass` 注释）应一并清退，不得在其上继续叠加，避免影响后续落盘。
   - **落盘前过三闸（2026-07 复盘）**：① 反碎片——能复用/扩展已有（eval-set / getClient / pipeline / 共享模块）就别另造平行物；② 反玩具——评估类高分先怀疑题太简单，校准/eval 输入要来自真实 pipeline 而非手写送分题；③ 难就说难——真活难/模糊时不发简单替身，做难的或停下问。另：别从带 `main()` 的 runner 文件 import（会触发跑批），共享代码放无副作用模块。
 - 变更应贴合现有 TypeScript / Next.js / Monaco 结构。

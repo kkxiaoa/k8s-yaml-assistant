@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "24.18.0"
+  },
   "description": "K8s YAML 智能助手:CLI(ask/check/gen)+ 评估(eval)+ Next.js Web(Monaco)。Anthropic SDK 接 DeepSeek + Voyage。",
   "scripts": {
     "ask": "tsx src/cli/ask.ts",
@@ -28,6 +31,8 @@
     "corpus:stats": "tsx scripts/corpus-stats.ts",
     "corpus:closure": "tsx scripts/curated-closure.ts",
     "index:build": "tsx scripts/index-build.ts",
+    "deploy:check": "node --import tsx --test scripts/deployment-contract.test.ts",
+    "release:check": "node --import tsx --test scripts/release-build-contract.test.ts",
     "test": "node --import tsx --test --test-concurrency=1",
     "dev": "next dev",
     "build": "next build",
@@ -48,7 +53,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.1",
     "@types/js-yaml": "4.0.9",
-    "@types/node": "25.9.2",
+    "@types/node": "24.13.3",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "tailwindcss": "^4.3.1",

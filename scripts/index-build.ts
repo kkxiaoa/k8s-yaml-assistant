@@ -5,8 +5,8 @@
 import { config } from 'dotenv';
 config({ override: true });
 import { buildCorpusManifest, CORPUS } from '../src/knowledge/corpus';
-import { buildIndex } from '../src/retrieval/retrieve';
 import { resolveEmbeddingModel } from '../src/retrieval/embeddings';
+import { buildIndexInput } from '../src/retrieval/index-builder';
 import {
   resolveIndexDir,
   readIndex,
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
 
   console.log(`嵌入 ${CORPUS.length} 条 chunk(模型 ${embeddingModel})...`);
   const t0 = Date.now();
-  const index = await buildIndex(CORPUS);
+  const index = await buildIndexInput(CORPUS, embeddingModel);
   const manifest = writeIndex(index, expectation, indexDir);
 
   console.log(`\n✓ 索引已落盘 → ${indexDir}(耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s)`);

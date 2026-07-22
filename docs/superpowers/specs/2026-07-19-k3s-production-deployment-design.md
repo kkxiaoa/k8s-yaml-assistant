@@ -1,8 +1,8 @@
 # 华为云单机 K3s 生产部署设计
 
-> 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据。
+> 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产。
 > 用途：定义当前项目在华为云单机 K3s（轻量 Kubernetes）上的生产部署架构、实施边界和验收门禁。
-> 本文只定义设计，不代表已修改服务器、应用代码或部署资源。
+> 本文维护设计边界；实际实施状态和审核停止点以对应实施计划为准。
 
 ## 1. 结论与边界
 
@@ -54,17 +54,17 @@
 | 类别 | 当前事实 | 部署影响 |
 | --- | --- | --- |
 | 依赖 | next 16.2.9、react 19.2.7、typescript 6.0.3，package-lock.json 已锁定 | 依赖安装必须使用 npm ci |
-| Node.js（JavaScript 运行时）约束 | 仓库没有 engines、.nvmrc 或 .node-version；本机是 Node.js 25.6.1；Next.js 包声明 Node.js >=20.9.0 | 生产不能沿用未声明的本机版本 |
-| Next.js（React 全栈框架）配置 | next.config.mjs 只设置 turbopack.root 和 outputFileTracingRoot | 尚未启用 standalone output（独立运行产物） |
-| 当前构建 | npm run build 成功；.next 中没有 standalone 目录 | 容器化前必须补充并验证独立产物 |
-| 字体 | app/layout.tsx 使用 next/font/google 加载 IBM Plex Sans 和 IBM Plex Mono | clean build（干净构建）需要访问 Google 字体资源，尚不可离线复现 |
+| Node.js（JavaScript 运行时）约束 | `.nvmrc`、`package.json` 和 `package-lock.json` 固定为 Node.js 24.18.0；本机默认 shell（命令行环境）仍是 Node.js 25.6.1 | 本地、流水线和容器门禁必须显式使用固定版本，不能继承默认 shell |
+| Next.js（React 全栈框架）配置 | `next.config.mjs` 已启用 standalone output（独立运行产物），并固定开发与文件追踪根目录 | Task 5（任务 5）必须用真实构建验证 `.next/standalone/server.js` |
+| 当前构建 | Node.js 24.18.0 下真实构建通过，`.next/standalone/server.js` 已生成 | Task 5（任务 5）审核后才进入容器实现 |
+| 字体 | 已移除 `next/font` 和 IBM Plex，使用浏览器系统 sans/monospace（无衬线 / 等宽）字体栈 | 不下载外部字体，也不向仓库加入无能力收益的字体二进制 |
 | 现有交付文件 | 没有 Dockerfile、.dockerignore、.github/workflows、Kubernetes 清单、Helm（Kubernetes 包管理）或 Kustomize（清单定制工具） | Phase 2（阶段 2）和 Phase 3（阶段 3）必须从审核后的正式设计实现 |
 | API（应用程序接口）路由 | /api/ask、/api/check、/api/generate、/api/fix | 没有专用存活或就绪端点 |
 | 认证与保护 | 没有身份认证、授权、请求限流、请求体字节上限或费用硬门禁 | 不允许直接匿名公开 |
 | 请求解析 | 路由直接调用 req.json() 并做 TypeScript（类型化 JavaScript）类型断言，没有严格 runtime decode（运行时解码） | 仅配置入口 Content-Length（内容长度）不足以覆盖分块请求和字段语义 |
 | 模型客户端 | DeepSeek 客户端固定使用 https://api.deepseek.com/anthropic，回答模型固定为 claude-sonnet-4-6 | 模型与兼容端点不是显式部署配置，生产前必须确认供应商契约并消除歧义 |
 
-Node.js（JavaScript 运行时）发布页显示 24 系列处于 LTS（长期支持）状态，而 25 系列已经结束支持，因此容器推荐固定 Node.js 24 LTS（Node.js 24 长期支持版）的具体补丁版本和基础镜像 digest（内容摘要），并在 package.json 增加一致的 engines 约束。实施时必须重新核对当日受支持版本，不使用移动标签作为最终身份。参考：[Node.js 发布计划](https://nodejs.org/en/about/previous-releases)。
+2026-07-20 核对 Node.js（JavaScript 运行时）官方发布页后，24 系列仍为 LTS（长期支持），当前补丁版本为 24.18.0；仓库工具链固定为该版本。后续基础镜像仍须固定真实 digest（内容摘要），升级补丁时单独审核，不使用移动标签作为最终身份。参考：[Node.js 24 下载归档](https://nodejs.org/en/download/archive/v24)。
 
 Next.js（React 全栈框架）官方文档说明 standalone output（独立运行产物）会生成可直接部署的最小服务文件，但 public 和 .next/static 仍需显式复制；该行为必须用容器 smoke test（冒烟测试）验证。参考：[Next.js standalone output 文档](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)。
 
@@ -242,7 +242,7 @@ K3s（轻量 Kubernetes）文档说明默认安装包含 Traefik（入口控制�
 | deps（依赖） | 干净 Git 上下文、package.json、package-lock.json；npm ci | 锁定的完整依赖 |
 | verify（验证） | 源码和依赖；运行测试、类型、schema（模式）、eval contract（评估契约）和 clean build（干净构建）门禁 | 可审核的门禁结果 |
 | index（索引） | 已核对语料、显式模型名、受保护的 Voyage 构建凭据 | 通过身份校验的 data/index |
-| build（构建） | 启用 standalone output（独立运行产物），使用本地字体资产 | .next/standalone 和静态资源 |
+| build（构建） | 启用 standalone output（独立运行产物），使用系统字体栈 | .next/standalone 和静态资源 |
 | runtime（运行时） | 只复制服务文件、静态资源、运行必需 data 和已验证索引 | 最小 non-root（非 root）镜像 |
 
 verify（验证）阶段至少运行：
@@ -260,18 +260,20 @@ corpus:stats（语料统计）也应进入发布门禁，用于把语料数量�
 
 Next.js（React 全栈框架）必须设置 output: 'standalone'，并显式复制 public（如果存在）和 .next/static。最终进程使用固定工作目录，以 PORT=3000、HOSTNAME=0.0.0.0 启动 node server.js。最终镜像不得包含 TypeScript（类型化 JavaScript）编译器、测试工具、Git 元数据、.env 或 npm 缓存。
 
+Next.js 16.2.9 会把构建时加载的 `.env` 和 `.env.production` 主动复制到 standalone output（独立运行产物）。因此本地 `.next/standalone` 不是可直接发布的镜像输入；正式 Docker build（容器构建）必须从不含 `.env*` 的 clean checkout（干净检出）开始，由 `.dockerignore` 再次排除，并扫描 runtime image（运行时镜像）。不能用构建后删除文件替代最终镜像门禁。
+
 ### 4.3 字体的离线可复现构建
 
-next/font/google 会在构建期下载 Google 字体 CSS（层叠样式表）和字体文件；官方文档明确区分了 Google 字体下载与 next/font/local 本地字体。参考：[Next.js 字体文档](https://nextjs.org/docs/app/api-reference/components/font)。
+`next/font/google` 会在构建期下载 Google 字体 CSS（层叠样式表）和字体文件。2026-07-20 审核确认 IBM Plex 只提供视觉风格，不服务 K8s YAML Authoring Copilot（K8s YAML 编写助手）的核心能力，因此不再为它引入本地二进制、许可证和供应链维护。
 
-生产推荐：
+生产要求：
 
-1. 从 IBM 官方发布源获取当前使用字重的 IBM Plex Sans 和 IBM Plex Mono 字体文件及许可证。
-2. 核对许可证和文件 SHA-256，把经过审核的 .woff2 和许可证作为正常源码资产提交。
-3. 将 app/layout.tsx 改为 next/font/local，保留当前字重和 CSS variable（CSS 变量）契约。
-4. 在禁止网络访问的容器 build（构建）阶段运行 npm run build，证明不再依赖外网。
+1. 页面和 Monaco（代码编辑器）只使用 CSS（层叠样式表）系统 sans/monospace（无衬线 / 等宽）字体栈。
+2. 应用源码不得导入 `next/font`，仓库不提交 `.woff`、`.woff2`、`.ttf` 或 `.otf` 字体资产。
+3. 发布构建契约必须拒绝外部字体加载、字体二进制和旧 IBM Plex CSS variable（CSS 变量）回归。
+4. 在禁止网络访问的容器 build（构建）阶段运行 `npm run build`，证明完整构建不依赖外网。
 
-在这项改动完成前，镜像构建不具备离线可复现性。缓存一次下载结果或在 CI（持续集成）中临时伪造响应只能用于测试，不是生产字体交付方案。
+系统字体在不同客户端操作系统上的具体字形可能不同，这是明确接受的视觉一致性取舍；它不影响构建身份、服务端运行或 YAML 编辑能力。缓存字体下载结果或在 CI（持续集成）中伪造响应仍不能作为生产通过条件。
 
 ### 4.4 .dockerignore 边界
 
@@ -289,7 +291,6 @@ next/font/google 会在构建期下载 Google 字体 CSS（层叠样式表）和
 - 应用源码；
 - data/schemas/generated 中已被 Git 跟踪的 schema closure（模式闭包）；
 - curated corpus（精选语料）、policy（策略）、alias（别名）及构建索引所需的真实输入；
-- 本地 IBM Plex 字体及许可证。
 
 镜像只能从 clean checkout（干净检出）构建。不能用宽泛的 data/** 忽略规则后再手工补少量资源，这会破坏真实 ingestion pipeline（摄取流水线）和语料身份。
 
@@ -675,22 +676,22 @@ JavaScript 内存中的向量和对象会明显大于约 37 MiB 的磁盘索引�
 
 ## 9. 网络、域名与公开访问
 
-### 9.1 已知服务器事实与待核对项
+### 9.1 已核对服务器事实
 
-用户提供的服务器事实：
+Phase 1（阶段 1）实施后核对：
 
 - 华为云 Flexus 应用服务器 L；
 - 华北-北京四；
-- Ubuntu 24.04；
+- Ubuntu 24.04.4；
 - 4 vCPU、8 GiB 内存、180 GiB 系统盘；
 - 峰值带宽 6 Mbps、流量包 1,200 GB；
 - 公网 IPv4：120.46.57.214；
 - SSH 已从本机验证；
-- SSH 22 只允许 42.232.250.220/32；
-- K3s 尚未安装；
-- 6443 不对公网开放。
+- SSH 22 只允许实施日核对的 `42.232.250.103/32`，来源变化时必须重新审核；
+- K3s（轻量 Kubernetes）`v1.36.2+k3s1` 已安装，节点和系统组件健康；
+- 6443、10250、8472、80 和 443 均不对公网开放。
 
-本轮没有连接服务器，因此这些是“用户提供、等待 Phase 0（阶段 0）只读复核”的输入，不是本轮实测结果。
+详细非敏感证据维护在 `deploy/k3s/README.md`；服务器 Secret（密钥）、完整 kubeconfig（客户端配置）和云控制面详情不写入本文。
 
 ### 9.2 域名与 DNS
 
@@ -1048,7 +1049,7 @@ sudo journalctl -u k3s --since "30 minutes ago"
 - 仓库已建为 private repository（私有仓库），并已核对 owner scope/plan（所有者范围 / 套餐）、Releases（发布版本）、immutable releases（不可变发布版本）、runner scope（运行器范围）和 artifact attestation（产物证明）能力；当前单一维护者流程明确不使用 required reviewers/prevent self-review（必需审核人 / 禁止自我审核）；
 - 已按套餐确定 VOYAGE_API_KEY 使用 release-build environment secret（发布构建环境密钥），或明确选择升级套餐 / 接受 repository Actions secret（仓库流水线密钥）的较宽信任边界；
 - 唯一维护者的 GitHub 账号已启用强 MFA（多因素认证）并妥善保存恢复凭据；如果只能使用 personal repository-level runner（个人仓库级运行器），已书面接受第 7.5 节的较低隔离保证；
-- 字体已本地化，Next.js（React 全栈框架）standalone output（独立运行产物）已实现；
+- 系统字体栈和 Next.js（React 全栈框架）standalone output（独立运行产物）已实现；
 - raw serving trace（原始在线轨迹）已从默认请求路径隔离，既有 serving-observation-safety（在线观测安全）计划的严格 schema（模式）、脱敏、采样、轮转、保留、删除和安全失败已实现并逐项审核；
 - health endpoint（健康端点）和索引 fail-closed（失败关闭）已实现；
 - 所有代码改动先有反例测试并逐项 review（审核）。
@@ -1278,22 +1279,20 @@ sudo journalctl -u k3s --since "1 hour ago"
 4. 没有 ACCESS_MODE（访问模式）服务端授权、管理员专用切换路径、认证、请求体大小、限流、并发和费用熔断；不能公开。
 5. 没有独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计，也没有 Turnstile（人机验证）服务端校验、匿名安全会话或 Interview Pass（面试临时通行证）实现；portfolio（作品集展示）可以公开页面和本地 YAML 检查，但匿名付费模型能力不能启用。存储介质尚未选择，不能把 SQLite/PVC（嵌入式数据库 / 持久卷声明）当作既定答案。
 6. DeepSeek 兼容端点和 claude-sonnet-4-6 模型名当前硬编码，尚未证明该组合是预期且可用的供应商契约。
-7. next.config.mjs 没有 standalone output（独立运行产物），也没有 Dockerfile 和 .dockerignore。
-8. IBM Plex 字体构建依赖外网，尚未形成离线、许可证明确且哈希固定的资产。
-9. 没有 Git remote（Git 远程仓库）、GHCR（GitHub 容器镜像仓库）归属或 GitHub Actions（GitHub 自动化流水线）；已知计划使用私有仓库，但 owner scope/plan（所有者范围 / 套餐）仍未知，尚不能确认 release-build Environment secret（发布构建环境密钥）、runner group selected workflow（运行器组指定工作流）、immutable releases（不可变发布版本）或私有仓库 artifact attestation（产物证明）能力。draft Release（草稿发布版本）单人确认不依赖独立审核人，但这些差异仍影响发布凭据范围、运行器隔离和供应链证明。
-10. K3s 尚未安装，生产部署 runner/adapter（运行器 / 适配器）也不存在；用户提供的服务器端口、系统、磁盘和防火墙事实尚未由本轮只读复核。
-11. 最终域名、DNS（域名系统）控制权、OAuth（开放授权）允许名单和证书策略尚未确定；Turnstile（人机验证）生产配置、可承受日预算及计量契约只在准备开放匿名模型能力时进入设计。
-12. 当前尚未基于 8,410 条语料完成正式全量质量评估和错误解释人工正确性审核；在公开发布前必须完成或显式接受风险。
+7. 尚无 Dockerfile、`.dockerignore`、Git remote（Git 远程仓库）、GHCR（GitHub 容器镜像仓库）归属或 GitHub Actions（GitHub 自动化流水线）；已知计划使用私有仓库，但 owner scope/plan（所有者范围 / 套餐）仍未知，尚不能确认 release-build Environment secret（发布构建环境密钥）、runner group selected workflow（运行器组指定工作流）、immutable releases（不可变发布版本）或私有仓库 artifact attestation（产物证明）能力。draft Release（草稿发布版本）单人确认不依赖独立审核人，但这些差异仍影响发布凭据范围、运行器隔离和供应链证明。
+8. K3s（轻量 Kubernetes）已经安装并完成 Phase 1（阶段 1）审核，但生产部署 runner/adapter（运行器 / 适配器）仍不存在。
+9. 最终域名、DNS（域名系统）控制权、OAuth（开放授权）允许名单和证书策略尚未确定；Turnstile（人机验证）生产配置、可承受日预算及计量契约只在准备开放匿名模型能力时进入设计。
+10. 当前尚未基于 8,410 条语料完成正式全量质量评估和错误解释人工正确性审核；在公开发布前必须完成或显式接受风险。
 
-上述 1-9 都需要未来代码或交付资源变更；本轮禁止实现。第 10-11 需要服务器或外部系统授权；本文不擅自执行。第 12 属于暂停中的质量主线，不能被部署冒烟测试替代。
+上述 1-7 包含后续代码或交付资源变更，其中远程仓库和云端资源仍需当次明确授权；第 8-9 项涉及服务器或外部系统，第 10 项属于暂停中的质量主线，不能被部署冒烟测试替代。
 
 ## 14. 验收总门禁
 
 ### 私有部署门禁
 
-- [ ] K3s 版本、checksum（校验和）、配置和备份通过审核。
+- [x] K3s 版本、checksum（校验和）、配置和备份通过审核。
 - [ ] 镜像固定 commit SHA（提交哈希）和 digest（内容摘要），非 root、只读根文件系统。
-- [ ] 字体构建不依赖外网。
+- [x] 字体构建不依赖外网。
 - [ ] 8,410 条索引身份完整且运行时禁止重建。
 - [ ] live/ready（存活 / 就绪）探针不调用供应商。
 - [ ] raw serving trace（原始在线轨迹）已隔离；严格安全 observation（观测）以显式配置持续启用，原始/敏感输入被丢弃，轮转、保留、删除、容量、单写入端和失败无原文回退均通过。
@@ -1349,7 +1348,7 @@ sudo journalctl -u k3s --since "1 hour ago"
 - Interview Pass（面试临时通行证）在到期前仍是可转交凭据；一次兑换、单会话、短有效期、撤销和全局费用熔断只能降低影响，不能证明面试官身份。
 - 模型供应商 API（应用程序接口）的可用性、限额、计费硬上限和错误契约尚未实测。
 - JavaScript（JavaScript 语言）加载向量后的真实内存、冷启动和 6 Mbps 镜像拉取时间未知。
-- 本地字体资产的许可证和供应链哈希尚未落地。
+- 系统字体的具体字形会随客户端操作系统和浏览器变化；当前明确接受该视觉一致性取舍。
 - 现有 answer model（回答模型）和 DeepSeek compatible endpoint（DeepSeek 兼容端点）的运行行为需要私有环境验证。
 - 即使完成结构化脱敏，也不能证明识别所有业务秘密；生产持久化仍需独立隐私与存储审核。
 - 当前正式 baseline（基线）尚未重建，错误解释 correctness（正确性）仍需人工 trace review（轨迹审核）。
