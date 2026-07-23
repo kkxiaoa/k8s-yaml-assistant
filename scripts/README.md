@@ -23,6 +23,7 @@
 | `deployment-contract.test.ts` | `npm run deploy:check` | `deploy/k3s` 的 release identity（发布身份）、K3s（轻量 Kubernetes）配置、准入配置与恢复边界 | 无 | 无 | 解析真实 YAML（配置文件），拒绝浮动版本、弱权限、缺失加密、放宽准入、公网控制面、占位 Secret（密钥）和不可恢复的备份边界。 |
 | `release-build-contract.test.ts` | `npm run release:check` | Node.js（JavaScript 运行时）版本声明、Next.js（React 全栈框架）构建配置和前端字体依赖 | 无 | 无 | 拒绝版本漂移、缺失 standalone output（独立运行产物）、外部字体加载、自带字体二进制和旧 IBM Plex 变量。 |
 | `container-smoke.test.ts` | `node --import tsx --test scripts/container-smoke.test.ts` | `Dockerfile`、`.dockerignore` 和容器发布契约 | 无 | 无 | 无 Docker daemon（Docker 后台服务）也可执行的纯契约门禁；覆盖不可变基础镜像、构建阶段、密钥挂载、干净上下文和运行时内容边界。 |
+| `workflow-contract.test.ts` | `npm run workflow:check` | `.github/workflows/pr-verify.yml` 和 `.github/CODEOWNERS` | 无 | 无 | 解析真实 YAML（配置文件），拒绝特权触发器、自托管或生产运行器、写权限、Secret（密钥）、受保护配置、浮动 Action（流水线动作）、持久化检出凭据、模型命令、镜像推送和缺失门禁。 |
 
 ## 容器交付脚本
 

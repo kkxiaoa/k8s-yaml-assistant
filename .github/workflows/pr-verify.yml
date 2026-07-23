@@ -1,0 +1,61 @@
+name: PR verify
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: PR verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check schema closure
+        run: npm run schemas:check
+
+      - name: Check reviewed aliases
+        run: npm run aliases:check
+
+      - name: Check curated corpus closure
+        run: npm run corpus:closure
+
+      - name: Check evaluation contracts
+        run: npm run eval:check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check TypeScript
+        run: npm run typecheck
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Build no-index runtime image
+        run: npm run container:build:runtime-base
+
+      - name: Verify fail-closed runtime image
+        run: npm run container:smoke:runtime-base
