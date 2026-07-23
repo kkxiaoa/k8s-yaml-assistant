@@ -234,7 +234,7 @@ K3s（轻量 Kubernetes）文档说明默认安装包含 Traefik（入口控制�
 
 1. 选择当日仍受支持的 Node.js 24 LTS（Node.js 24 长期支持版）具体补丁版本。
 2. 在 package.json 中声明 engines，并让本地、GitHub Actions（GitHub 自动化流水线）和容器阶段使用同一版本。
-3. 基础镜像使用 Debian bookworm-slim（Debian 精简镜像）变体，并固定真实 digest（内容摘要）。升级补丁时通过单独 Pull Request（合并请求）更新 digest（内容摘要）并重跑门禁。
+3. deps/verify/index/build（依赖 / 验证 / 索引 / 构建）阶段使用 Node.js 24.18.0 Debian bookworm-slim（Debian 精简镜像），runtime（运行时）阶段使用提供 Node 所需 C/C++ 动态库且不含 shell/package manager（命令解释器 / 包管理器）的 distroless cc-debian12（无发行版工具的 Debian C/C++ 运行时镜像）；两者都固定真实 digest（内容摘要）。升级补丁或基础镜像时通过单独 Pull Request（合并请求）更新 digest（内容摘要）并重跑门禁。
 4. package-lock.json 作为依赖身份，所有安装只执行 npm ci，不执行 npm install。
 5. 所有第三方 GitHub Action（GitHub 流水线动作）固定到完整 commit SHA（提交哈希），不只固定版本标签。
 

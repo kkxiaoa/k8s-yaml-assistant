@@ -33,7 +33,10 @@
     "index:build": "tsx scripts/index-build.ts",
     "deploy:check": "node --import tsx --test scripts/deployment-contract.test.ts",
     "release:check": "node --import tsx --test scripts/release-build-contract.test.ts",
+    "container:build:runtime-base": "tsx scripts/container-smoke.ts --build-runtime-base --image k8s-yaml-assistant:test-runtime-base",
+    "container:smoke:runtime-base": "tsx scripts/container-smoke.ts --expect-not-ready --image k8s-yaml-assistant:test-runtime-base",
     "test": "node --import tsx --test --test-concurrency=1",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"

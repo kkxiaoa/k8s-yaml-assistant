@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+.next
+data/index
+data/index-*
+data/observability
+data/eval/runs
+data/eval/traces
+data/aliases/drafts
+coverage
+*.log
+.DS_Store

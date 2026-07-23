@@ -133,14 +133,20 @@ test('writes one canonical JSON object per line synchronously with restrictive p
   assert.equal(lstatSync(rootDir).mode & 0o777, 0o700);
   assert.equal(lstatSync(path).mode & 0o777, 0o600);
 
-  const createFlags = openedFlags[0]!;
+  const createFlags = openedFlags.find(
+    (flags) => (flags & constants.O_CREAT) !== 0,
+  )!;
   assert.notEqual(createFlags & constants.O_CREAT, 0);
   assert.notEqual(createFlags & constants.O_EXCL, 0);
   assert.notEqual(createFlags & constants.O_APPEND, 0);
   assert.notEqual(createFlags & constants.O_WRONLY, 0);
   assert.notEqual(createFlags & constants.O_NOFOLLOW, 0);
 
-  const existingFlags = openedFlags[1]!;
+  const existingFlags = openedFlags.find(
+    (flags) =>
+      (flags & constants.O_CREAT) === 0 &&
+      (flags & constants.O_APPEND) !== 0,
+  )!;
   assert.equal(existingFlags & constants.O_CREAT, 0);
   assert.equal(existingFlags & constants.O_EXCL, 0);
   assert.notEqual(existingFlags & constants.O_APPEND, 0);
@@ -344,6 +350,33 @@ test('rejects replacement of the initialized root directory identity', () => {
     error: { code: 'root_unsafe' },
   });
   assert.deepEqual(readdirSync(rootDir), []);
+});
+
+test('pins the initialized root directory with a no-follow directory descriptor', () => {
+  const { rootDir } = temporaryRoot();
+  let rootDescriptor: number | undefined;
+  let rootDescriptorClosed = false;
+  const fileSystem: LocalSinkFileSystem = {
+    ...NODE_LOCAL_SINK_FILE_SYSTEM,
+    open(path, flags, mode) {
+      const descriptor = NODE_LOCAL_SINK_FILE_SYSTEM.open(path, flags, mode);
+      if (path === rootDir) {
+        rootDescriptor = descriptor;
+        assert.notEqual(flags & constants.O_DIRECTORY, 0);
+        assert.notEqual(flags & constants.O_NOFOLLOW, 0);
+      }
+      return descriptor;
+    },
+    close(fileDescriptor) {
+      if (fileDescriptor === rootDescriptor) rootDescriptorClosed = true;
+      NODE_LOCAL_SINK_FILE_SYSTEM.close(fileDescriptor);
+    },
+  };
+
+  requiredSink(options(rootDir, { fileSystem }));
+
+  assert.notEqual(rootDescriptor, undefined);
+  assert.equal(rootDescriptorClosed, false);
 });
 
 test('exclusive creation never overwrites a segment introduced after initialization', () => {

@@ -247,6 +247,7 @@ class SynchronousLocalObservationSink implements LocalObservationSink {
   private cleanupPending = false;
   private poisoned = false;
   private rootIdentity: { dev: number; ino: number } | undefined;
+  private rootFileDescriptor: number | undefined;
 
   constructor(options: LocalSinkOptions) {
     this.rootDir = options.rootDir;
@@ -259,12 +260,64 @@ class SynchronousLocalObservationSink implements LocalObservationSink {
 
   initialize(): void {
     const rootStats = this.ensureSafeRoot();
-    this.rootIdentity = { dev: rootStats.dev, ino: rootStats.ino };
-    this.segments = this.scanSegments();
-    this.cleanup(undefined, 0, utcDate(this.clock()));
+    const pinnedStats = this.pinRootDirectory(rootStats);
+    this.rootIdentity = { dev: pinnedStats.dev, ino: pinnedStats.ino };
+    try {
+      this.segments = this.scanSegments();
+      this.cleanup(undefined, 0, utcDate(this.clock()));
+    } catch (error) {
+      this.closeRootDirectoryAfterInitializationFailure();
+      throw error;
+    }
 
     // A new process cannot prove the completion state of the previous writer's last record.
     this.current = undefined;
+  }
+
+  private pinRootDirectory(expected: LocalSinkStats): LocalSinkStats {
+    let fileDescriptor: number;
+    try {
+      fileDescriptor = this.fileSystem.open(
+        this.rootDir,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+    } catch {
+      throw new LocalSinkFault('root_unsafe');
+    }
+
+    try {
+      const stats = this.fileSystem.fstat(fileDescriptor);
+      if (
+        !stats.isDirectory() ||
+        stats.dev !== expected.dev ||
+        stats.ino !== expected.ino ||
+        (stats.mode & 0o077) !== 0
+      ) {
+        throw new LocalSinkFault('root_unsafe');
+      }
+      // Keeping the descriptor open prevents inode reuse from hiding root replacement.
+      this.rootFileDescriptor = fileDescriptor;
+      return stats;
+    } catch (error) {
+      try {
+        this.fileSystem.close(fileDescriptor);
+      } catch {
+        // The stable root error remains more actionable than close failure here.
+      }
+      if (error instanceof LocalSinkFault) throw error;
+      throw new LocalSinkFault('root_unsafe');
+    }
+  }
+
+  private closeRootDirectoryAfterInitializationFailure(): void {
+    const fileDescriptor = this.rootFileDescriptor;
+    this.rootFileDescriptor = undefined;
+    if (fileDescriptor === undefined) return;
+    try {
+      this.fileSystem.close(fileDescriptor);
+    } catch {
+      // Initialization already failed and no sink will retain this descriptor.
+    }
   }
 
   append(value: unknown): LocalSinkAppendResult {
@@ -538,6 +591,22 @@ class SynchronousLocalObservationSink implements LocalObservationSink {
       (stats.dev !== this.rootIdentity.dev || stats.ino !== this.rootIdentity.ino)
     ) {
       throw new LocalSinkFault('root_unsafe');
+    }
+    if (this.rootFileDescriptor !== undefined) {
+      let pinnedStats: LocalSinkStats;
+      try {
+        pinnedStats = this.fileSystem.fstat(this.rootFileDescriptor);
+      } catch {
+        throw new LocalSinkFault('root_unsafe');
+      }
+      if (
+        !pinnedStats.isDirectory() ||
+        pinnedStats.dev !== stats.dev ||
+        pinnedStats.ino !== stats.ino ||
+        (pinnedStats.mode & 0o077) !== 0
+      ) {
+        throw new LocalSinkFault('root_unsafe');
+      }
     }
     return stats;
   }
