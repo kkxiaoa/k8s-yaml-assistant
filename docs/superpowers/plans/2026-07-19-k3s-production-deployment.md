@@ -1,9 +1,9 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-8（任务 5-8）已审核；Task 9（任务 9）已完成实现和本地门禁，当前停在 Task 9 review（任务 9 审核）。
+> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-9（任务 5-9）已审核；Task 10（任务 10）已完成本地实现和门禁，等待受控 Pull Request（合并请求）、默认分支规则配置与线上验证。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
-> 当前基线：`7962ddc docs(deploy): define single-node k3s production design`；Float32 索引读取优化位于 `fdfec5c`。
+> 当前代码基线：`bea382d feat(deploy): add reproducible container build`；Task 10（任务 10）改动尚未提交。
 
 ## Goal（目标）
 
@@ -576,7 +576,7 @@ Node.js build image（Node.js 构建镜像）固定为 `node:24.18.0-bookworm-sl
 - Modify（修改）：`package.json`
 - Modify（修改）：`scripts/README.md`
 
-- [ ] **Step 1（步骤 1）：先写 workflow（流水线）安全反例**
+- [x] **Step 1（步骤 1）：先写 workflow（流水线）安全反例**
 
 解析真实 YAML（配置文件）并覆盖：
 
@@ -586,11 +586,15 @@ Node.js build image（Node.js 构建镜像）固定为 `node:24.18.0-bookworm-sl
 - workflow（流水线）未运行 `npm ci`、测试、类型、schema/corpus/eval contract（模式 / 语料 / 评估契约）、build（构建）和无密钥容器负例时失败；
 - 生产 runner label（运行器标签）或 production Environment（生产环境）出现在 PR workflow（合并请求流水线）时失败。
 
-- [ ] **Step 2（步骤 2）：核对实际 GitHub 能力**
+- [x] **Step 2（步骤 2）：核对实际 GitHub 能力**
 
 在网页/官方 API（应用程序接口）只读取并记录：仓库 owner scope（所有者范围）、套餐、Environment secret（环境密钥）、immutable release（不可变发布版本）、artifact attestation（产物证明）、repository-level runner（仓库级运行器）和 branch rules（分支规则）能力。当前唯一维护者不启用 required reviewers/prevent self-review（必需审核人 / 禁止自我审核），也不声称 CODEOWNERS（代码所有者）形成独立批准。
 
-- [ ] **Step 3（步骤 3）：实现无密钥 PR workflow（合并请求流水线）**
+2026-07-23 实测仓库为个人 owner（所有者）`kkxiaoa` 下的 private repository（私有仓库），默认分支为 `main`，GitHub Pro（GitHub 个人专业版）和 MFA（多因素认证）已由所有者确认。Repository rulesets（仓库规则集）接口可用且当前为 0 条；Environment（部署环境）和 repository-level runner（仓库级运行器）均为 0 个。私有仓库可创建 Environment secret（环境密钥），但 GitHub Pro（GitHub 个人专业版）不能在私有仓库使用 required reviewers/wait timer（必需审核人 / 等待计时器），因此当前不创建虚假的独立人工门禁。
+
+immutable releases（不可变发布版本）能力可用但当前 `enabled=false`，启用属于后续当次外部写入授权，且只保护启用后发布的版本。私有仓库的 GitHub artifact attestation（GitHub 产物证明）要求 GitHub Enterprise Cloud（GitHub 企业云）；Task 11（任务 11）必须按既定设计单独审核 Sigstore/Cosign（Sigstore 镜像签名工具）的公开 transparency log metadata（透明日志元数据）边界。Actions（自动化流水线）已启用，默认 `GITHUB_TOKEN` 为只读且不能批准 Pull Request（合并请求）；仓库全局尚未强制 Action SHA pinning（流水线动作提交哈希固定）。当前 `gh` 授权缺少 `read:packages`，GHCR package（GHCR 软件包）清单留到 Task 11（任务 11）按最小权限核对，不为 Task 10（任务 10）扩张长期权限。
+
+- [x] **Step 3（步骤 3）：实现无密钥 PR workflow（合并请求流水线）**
 
 只使用 GitHub-hosted runner（GitHub 托管运行器），权限默认 `contents: read`，从 clean checkout（干净检出）执行本地门禁和 Task 9（任务 9）的无密钥容器负例。禁止 `pull_request_target` 执行不可信代码，禁止访问 Voyage/DeepSeek/GHCR（Voyage / DeepSeek / GitHub 容器镜像仓库）写凭据。
 
@@ -608,6 +612,8 @@ git diff --check
 ```
 
 在 GitHub（代码托管平台）上使用一个不含 Secret（密钥）的 Pull Request（合并请求）验证 workflow（流水线）；fork（分叉仓库）验证不能通过向生产仓库提交恶意改动来进行，只使用受控测试仓库或官方权限证据。
+
+本地反例先在 workflow/CODEOWNERS（流水线 / 代码所有者）文件缺失时按预期失败；实现后 `npm run workflow:check` 4/4、完整 `npm test` 164/164、schema/alias/corpus/eval contract（模式 / 别名 / 语料 / 评估契约）、TypeScript（类型检查）、Next.js build（Next.js 构建）、无索引容器构建和 fail-closed smoke test（失败关闭冒烟测试）均通过。容器构建仍使用 Task 9（任务 9）的已跟踪 clean context（干净上下文）；Task 10（任务 10）文件在提交前不会进入该上下文，因此本地容器内运行的是基线 160 个测试，受控 Pull Request（合并请求）的干净检出必须再证明 164 个测试全部执行。
 
 **Rollback（回滚）：** 本地 workflow（流水线）可回退；外部仓库/规则变更先停止 Actions（自动化流水线）再恢复上一审核设置。删除仓库或 package（软件包）是破坏性操作，必须单独批准，不能作为自动回滚。
 
