@@ -22,6 +22,13 @@
 | `eval-compare.ts` | `npm run eval:compare -- <runId>` | 指定或最新 `run` 及同 kind（类型）的 baseline（基线） | 无 | 无 | 在兼容性门禁通过后解释指标差异，不修改任何评估产物。 |
 | `deployment-contract.test.ts` | `npm run deploy:check` | `deploy/k3s` 的 release identity（发布身份）、K3s（轻量 Kubernetes）配置、准入配置与恢复边界 | 无 | 无 | 解析真实 YAML（配置文件），拒绝浮动版本、弱权限、缺失加密、放宽准入、公网控制面、占位 Secret（密钥）和不可恢复的备份边界。 |
 | `release-build-contract.test.ts` | `npm run release:check` | Node.js（JavaScript 运行时）版本声明、Next.js（React 全栈框架）构建配置和前端字体依赖 | 无 | 无 | 拒绝版本漂移、缺失 standalone output（独立运行产物）、外部字体加载、自带字体二进制和旧 IBM Plex 变量。 |
+| `container-smoke.test.ts` | `node --import tsx --test scripts/container-smoke.test.ts` | `Dockerfile`、`.dockerignore` 和容器发布契约 | 无 | 无 | 无 Docker daemon（Docker 后台服务）也可执行的纯契约门禁；覆盖不可变基础镜像、构建阶段、密钥挂载、干净上下文和运行时内容边界。 |
+
+## 容器交付脚本
+
+| 脚本 | npm 入口 | 外部调用 | 写盘 | 边界与保留依据 |
+|---|---|---|---|---|
+| `container-smoke.ts` | `npm run container:build:runtime-base` / `npm run container:smoke:runtime-base` | Docker daemon（Docker 后台服务）和构建时使用的官方镜像仓库 | 只创建固定名称的本地测试镜像、随机名称的临时容器和系统临时目录 | 构建入口只复制 Git 跟踪文件与本 Task（任务）新增的容器文件到临时 context（构建上下文），排除工作区 ignored artifacts（被忽略产物）；冒烟入口以禁网、只读根文件系统和受限 `/tmp` 启动真实 `runtime-base` stage（运行时基础阶段），验证无索引时 `index_missing`，随后审计 uid/gid、文件和工具边界。不会调用模型或构建索引。 |
 
 ## 稳定写入与人工审核脚本
 

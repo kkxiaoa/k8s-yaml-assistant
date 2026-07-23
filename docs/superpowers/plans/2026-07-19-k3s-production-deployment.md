@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-7（任务 5-7）已审核；Task 8（任务 8）已完成实现和本地门禁，当前停在 Task 8 review（任务 8 审核）。
+> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-8（任务 5-8）已审核；Task 9（任务 9）已完成实现和本地门禁，当前停在 Task 9 review（任务 9 审核）。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > 当前基线：`7962ddc docs(deploy): define single-node k3s production design`；Float32 索引读取优化位于 `fdfec5c`。
@@ -509,8 +509,10 @@ Task 8 review（任务 8 审核）期间继续全仓库核对错误类公开字�
 - Create（创建）：`scripts/container-smoke.test.ts`
 - Modify（修改）：`package.json`
 - Modify（修改）：`scripts/README.md`
+- Modify（修改）：`src/observability/local-sink.ts`
+- Modify（修改）：`src/observability/local-sink.test.ts`
 
-- [ ] **Step 1（步骤 1）：先写容器反例**
+- [x] **Step 1（步骤 1）：先写容器反例**
 
 测试/冒烟流程覆盖：
 
@@ -523,7 +525,7 @@ Task 8 review（任务 8 审核）期间继续全仓库核对错误类公开字�
 
 专项容器测试可以要求本机 Docker（容器工具），但不能被静态字符串测试伪装通过。`npm test` 中只运行不依赖 Docker daemon（Docker 后台服务）的纯契约部分，真实 image smoke（镜像冒烟测试）由显式命令执行。
 
-- [ ] **Step 2（步骤 2）：实现 multi-stage build（多阶段构建）**
+- [x] **Step 2（步骤 2）：实现 multi-stage build（多阶段构建）**
 
 至少建立 deps/verify/index/build/runtime（依赖 / 验证 / 索引 / 构建 / 运行时）职责。依赖只用 `npm ci`；build（构建）复制 `.next/standalone`、`.next/static`、`public`（如存在）、运行必需 `data` 和索引，不复制开发依赖。
 
@@ -531,24 +533,32 @@ index stage（索引阶段）只能通过 BuildKit secret mount（BuildKit 密�
 
 基础镜像和 runtime image（运行时镜像）必须固定 digest（内容摘要）。实施时核对“Debian bookworm-slim（Debian 精简镜像）工具链”和“最终镜像不新增 shell/curl/package manager（命令解释器 / 网络工具 / 包管理器）”能否同时满足；若选定镜像自带超出设计的工具，停止并修订设计，不静默接受。
 
-- [ ] **Step 3（步骤 3）：证明字体和构建可复现**
+- [x] **Step 3（步骤 3）：证明字体和构建可复现**
 
 依赖层准备后，在 build（构建）阶段禁用网络执行 Next.js build（Next.js 构建）；任何 Google 字体或其他构建期下载都必须失败。核对 clean checkout（干净检出）与本地脏工作区构建上下文 hash（哈希）不会混用。
 
-- [ ] **Step 4（步骤 4）：运行镜像负例和内容审计**
+- [x] **Step 4（步骤 4）：运行镜像负例和内容审计**
 
 ```bash
 npm ci
 npm test
-npx tsc --noEmit -p tsconfig.json
+npm run typecheck
 npm run build
-docker buildx build --load --target runtime-base -t k8s-yaml-assistant:test-runtime-base .
-npx tsx scripts/container-smoke.ts --image k8s-yaml-assistant:test-runtime-base --expect-not-ready
+npm run container:build:runtime-base
+npm run container:smoke:runtime-base
 docker image inspect k8s-yaml-assistant:test-runtime-base
 git diff --check
 ```
 
 命令名/target（目标）可在反例测试确定后调整，但不得创建会被误发为生产的玩具索引镜像。
+
+Task 9（任务 9）实现使用 Git 跟踪文件清单生成临时 clean context（干净构建上下文），只额外接纳本 Task（任务）尚未提交的固定容器文件；本地 2,699 个未跟踪 generated schema artifacts（生成模式产物）不会进入上下文。`.dockerignore` 独立排除环境文件、Git 元数据、依赖、旧构建、索引、观测和评估轨迹，同时契约测试保证 269 个已跟踪 schema closure（模式闭包）文件没有被宽泛规则排除。
+
+Node.js build image（Node.js 构建镜像）固定为 `node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d`。最初候选 `distroless/base-debian12`（无发行版工具的 Debian 基础运行时）在真实启动中因缺少 `libstdc++.so.6` 失败；最终改为原生包含 Node 所需 C/C++ 动态库、仍不含 shell/curl/package manager（命令解释器 / 网络工具 / 包管理器）的 `gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e`。两者均为支持 amd64/arm64（AMD / ARM 64 位架构）的多架构 digest（内容摘要）。
+
+容器内 verify stage（验证阶段）运行完整测试和类型检查，build stage（构建阶段）以 `--network=none`（禁网）完成 Next.js build（Next.js 构建）。真实 `runtime-base` stage（运行时基础阶段）以 uid/gid 10001、只读根文件系统、64 MiB `/tmp`、无网络和无 ServiceAccount token（服务账户令牌）启动；liveness（存活状态）返回 200，readiness（就绪状态）因无索引返回 503/`index_missing`。索引 miss（未命中）的 fetch spy（网络请求替身）测试证明 Voyage 调用为 0，容器禁网再提供网络出口为 0 的独立证据。rootfs（根文件系统）审计确认不存在 `.env`、Git 元数据、旧索引、原始轨迹、测试、TypeScript compiler（TypeScript 编译器）、npm cache（npm 缓存）、构建凭据、shell、curl 或包管理器。
+
+真实容器测试同时发现 overlayfs（容器联合文件系统）可能在目录删除重建后立即复用 `dev/ino`（设备号 / 索引节点号），旧 local observation sink（本地观测写入端）仅保存这两个数字会漏判根目录替换。新增反例后，sink（写入端）在初始化时使用 `O_DIRECTORY|O_NOFOLLOW`（只允许目录 / 不跟随符号链接）固定持有根目录文件描述符，阻止旧 inode（索引节点）在 sink 生命周期内被复用；未改变观测 schema（模式）、采样、脱敏、轮转或保留语义。
 
 **Rollback（回滚）：** 删除当前 Task（任务）产生的本地测试镜像/BuildKit cache（构建缓存）属于本地可恢复清理，执行前列出精确目标；不清理其他项目镜像或用户缓存。
 
