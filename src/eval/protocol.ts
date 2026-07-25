@@ -8,7 +8,7 @@ import {
 
 export type { JsonValue } from '../shared/json';
 
-export const EVAL_SCHEMA_VERSION = 2 as const;
+export const EVAL_SCHEMA_VERSION = 3 as const;
 
 const NonEmptyStringSchema = z
   .string()
@@ -202,7 +202,6 @@ export const QueryExpansionConfigSchema = z.strictObject({
 });
 
 const RetrievalConfigShape = {
-  corpusContentHash: Sha256Schema,
   corpusManifestHash: Sha256Schema,
   indexHash: Sha256Schema,
   embeddingModel: NonEmptyStringSchema,

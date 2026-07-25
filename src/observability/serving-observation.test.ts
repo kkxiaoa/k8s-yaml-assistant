@@ -106,7 +106,7 @@ function project(overrides: Partial<RetrievalTrace> = {}) {
 test('projects only the persisted allowlist and decodes it again', () => {
   const observation = project();
 
-  assert.equal(observation.schemaVersion, 'serving-observation/v1');
+  assert.equal(observation.schemaVersion, 'serving-observation/v2');
   assert.equal(observation.kind, 'retrieval');
   assert.deepEqual(observation.query, redactedQuestion);
   assert.deepEqual(observation.ranking.coarse[0], {
@@ -176,6 +176,7 @@ test('accepts identity metadata from every current corpus chunk', () => {
 test('strict decoder rejects raw, unknown, and future fields at every level', () => {
   const valid = project();
   const cases: unknown[] = [
+    { ...valid, schemaVersion: 'serving-observation/v1' },
     { ...valid, queryText: RAW_SECRET },
     { ...valid, selectedText: RAW_SECRET },
     { ...valid, errors: [RAW_SECRET] },

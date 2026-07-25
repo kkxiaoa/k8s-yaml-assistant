@@ -93,7 +93,7 @@ type ServingObservationConfig =
 
 ```ts
 interface ServingRetrievalObservation {
-  schemaVersion: 'serving-observation/v1';
+  schemaVersion: 'serving-observation/v2';
   observationId: string;
   requestId: string;
   createdAt: string;
@@ -173,7 +173,6 @@ type ServingIndexMissReason =
   | 'format_mismatch'
   | 'invalid_manifest'
   | 'corpus_count_mismatch'
-  | 'corpus_content_mismatch'
   | 'corpus_manifest_mismatch'
   | 'embedding_model_mismatch'
   | 'index_hash_mismatch'

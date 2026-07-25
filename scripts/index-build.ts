@@ -35,10 +35,16 @@ async function main(): Promise<void> {
   console.log(`嵌入 ${CORPUS.length} 条 chunk(模型 ${embeddingModel})...`);
   const t0 = Date.now();
   const index = await buildIndexInput(CORPUS, embeddingModel);
-  const manifest = writeIndex(index, expectation, indexDir);
+  writeIndex(index, expectation, indexDir);
+  const written = readIndex(expectation, indexDir);
+  if (written.status !== 'hit') {
+    throw new Error(
+      `written index failed verification: ${written.reason}${written.detail === undefined ? '' : ` (${written.detail})`}`,
+    );
+  }
 
   console.log(`\n✓ 索引已落盘 → ${indexDir}(耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-  console.log(manifest);
+  console.log(written.manifest);
 }
 
 main().catch((e: unknown) => {

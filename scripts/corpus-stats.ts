@@ -30,13 +30,13 @@ console.log('=== 语料规模 ===');
 console.log(`chunks(CORPUS.length)        : ${CORPUS.length}`);
 console.log(`resources(unique resource)   : ${perResource.size}`);
 console.log(`schema docs(loaded)          : ${SCHEMA_DOCS.length}`);
-console.log(`corpus content hash          : ${manifest.contentHash}`);
+console.log(`corpus identity version      : ${manifest.identityVersion}`);
 console.log(`corpus manifest hash         : ${manifest.manifestHash}`);
 
 console.log('\n=== Provider manifest ===');
 for (const provider of manifest.providers)
   console.log(
-    `${provider.providerId.padEnd(24)} source=${provider.sourceType.padEnd(8)} count=${provider.count} contentHash=${provider.contentHash} manifestHash=${provider.manifestHash}`,
+    `${provider.providerId.padEnd(24)} source=${provider.sourceType.padEnd(8)} count=${provider.count} manifestHash=${provider.manifestHash}`,
   );
 
 console.log('\n=== 每资源 chunk 数(降序) ===');

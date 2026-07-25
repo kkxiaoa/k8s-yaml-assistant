@@ -52,7 +52,6 @@ function datasetCases(...ids: string[]) {
 }
 
 const RETRIEVAL_CONFIG = {
-  corpusContentHash: HASH_A,
   corpusManifestHash: HASH_D,
   indexHash: HASH_B,
   embeddingModel: 'voyage-4',
@@ -301,7 +300,6 @@ check('dataset hash preserves JSON keys that overlap object prototypes', () => {
 
 check('retrieval config requires the complete retrieval identity', () => {
   for (const field of [
-    'corpusContentHash',
     'corpusManifestHash',
     'indexHash',
     'embeddingModel',
@@ -320,7 +318,6 @@ check('retrieval config requires the complete retrieval identity', () => {
 
 check('faith config requires model, prompt, parser, and attempt identities', () => {
   for (const field of [
-    'corpusContentHash',
     'corpusManifestHash',
     'answerModel',
     'judgeModel',
@@ -411,8 +408,8 @@ check('zero denominator has exactly the 0/0 => null structure', () => {
 });
 
 check('run schema version and timestamps are validated', () => {
-  assert.equal(EVAL_SCHEMA_VERSION, 2);
-  assert.throws(() => decodeEvalRun({ ...runFixture(), schemaVersion: 1 }));
+  assert.equal(EVAL_SCHEMA_VERSION, 3);
+  assert.throws(() => decodeEvalRun({ ...runFixture(), schemaVersion: 2 }));
   assert.throws(() => decodeEvalRun({ ...runFixture(), createdAt: 'yesterday' }));
   assert.throws(() =>
     decodeEvalRun({ ...runFixture(), completedAt: '2026-02-30T00:00:00Z' }),
@@ -486,7 +483,7 @@ check('baseline is portable and rejects every run artifact field', () => {
     decodeEvalBaseline({ ...baselineFixture(), status: 'completed' }),
   );
   assert.throws(() =>
-    decodeEvalBaseline({ ...baselineFixture(), schemaVersion: 1 }),
+    decodeEvalBaseline({ ...baselineFixture(), schemaVersion: 2 }),
   );
   assert.throws(() =>
     decodeEvalBaseline({ ...baselineFixture(), promotedAt: 'tomorrow' }),
@@ -525,7 +522,7 @@ check('TraceEnvelope requires all identity, outcome, and payload fields', () => 
 
 check('TraceEnvelope validates schema version and timestamp', () => {
   assert.throws(() =>
-    decodeTraceEnvelope({ ...traceFixture(), schemaVersion: 1 }),
+    decodeTraceEnvelope({ ...traceFixture(), schemaVersion: 2 }),
   );
   assert.throws(() =>
     decodeTraceEnvelope({ ...traceFixture(), createdAt: 'not-an-instant' }),
@@ -580,6 +577,15 @@ check('run and case errors accept only the stable stage taxonomy', () => {
 
 check('protocol decoders reject unknown legacy fields', () => {
   assert.throws(() => decodeEvalRun({ ...runFixture(), faithSelection: {} }));
+  assert.throws(() =>
+    decodeEvalRun({
+      ...runFixture('retrieval'),
+      config: {
+        ...RETRIEVAL_CONFIG,
+        corpusContentHash: HASH_A,
+      },
+    }),
+  );
   assert.throws(() =>
     decodeTraceEnvelope({ ...traceFixture(), id: 'legacy-trace-id' }),
   );

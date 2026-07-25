@@ -6,6 +6,8 @@ import {
   assertImmutableDeploymentImageReference,
   assertLocalSmokeImageReference,
   findForbiddenRuntimePaths,
+  parseContainerSmokeArguments,
+  REVIEWED_WORKTREE_CONTEXT_FILES,
   selectBuildContextPaths,
 } from './container-smoke';
 
@@ -82,6 +84,16 @@ test('Dockerfile contract rejects mutable images and weakened runtime boundaries
     ['RUN --network=none npm run build', 'RUN npm run build', /network/],
     ['USER 10001:10001', 'USER 1000:1000', /10001:10001/],
     ['FROM runtime-base AS runtime', 'FROM build AS runtime', /runtime-base/],
+    [
+      'FROM scratch AS index-artifact',
+      'FROM index-build AS index-artifact',
+      /only the independently built index/,
+    ],
+    [
+      'COPY --from=verified-index --chown=10001:10001 /data/index ./data/index',
+      'COPY --from=index-build --chown=10001:10001 /app/data/index ./data/index',
+      /immutable verified-index build context/,
+    ],
     [
       '--mount=type=secret,id=voyage_api_key,required=true',
       'VOYAGE_API_KEY=fixture',
@@ -172,6 +184,48 @@ test('runtime content audit rejects development, credential, index and trace pat
   );
 });
 
+test('candidate runtime audit permits only the three reviewed index files', () => {
+  const indexPaths = [
+    'app/data/index/manifest.json',
+    'app/data/index/chunks.jsonl',
+    'app/data/index/embeddings.f32',
+  ];
+  assert.deepEqual(
+    findForbiddenRuntimePaths(indexPaths, { allowCandidateIndex: true }),
+    [],
+  );
+  assert.deepEqual(
+    findForbiddenRuntimePaths(
+      [...indexPaths, 'app/data/index/debug-dump.json'],
+      { allowCandidateIndex: true },
+    ),
+    ['app/data/index/debug-dump.json'],
+  );
+});
+
+test('candidate smoke accepts only an immutable image digest', () => {
+  const image = `ghcr.io/example/k8s-yaml-assistant@sha256:${'a'.repeat(64)}`;
+  assert.deepEqual(
+    parseContainerSmokeArguments(['--image', image, '--expect-ready']),
+    {
+      image,
+      mode: 'expect-ready',
+    },
+  );
+  for (const mutable of [
+    'ghcr.io/example/k8s-yaml-assistant:main',
+    'ghcr.io/example/k8s-yaml-assistant:release',
+  ]) {
+    assert.throws(() =>
+      parseContainerSmokeArguments([
+        '--image',
+        mutable,
+        '--expect-ready',
+      ]),
+    );
+  }
+});
+
 test('build context selection includes only tracked and reviewed Task files', () => {
   assert.deepEqual(
     selectBuildContextPaths(
@@ -187,5 +241,27 @@ test('build context selection includes only tracked and reviewed Task files', ()
   );
   for (const unsafe of ['/tmp/secret', '../outside', 'src/../../outside']) {
     assert.throws(() => selectBuildContextPaths([unsafe], []), /unsafe/);
+  }
+});
+
+test('reviewed Task 11 files enter the clean build context before staging', () => {
+  const required = [
+    '.github/workflows/index-build.yml',
+    '.github/workflows/release-artifacts.yml',
+    '.github/workflows/release.yml',
+    '.release-please-manifest.json',
+    'release-please-config.json',
+    'scripts/release-manifest-cli.test.ts',
+    'scripts/release-manifest.ts',
+    'src/release/manifest.test.ts',
+    'src/release/manifest.ts',
+  ];
+  const reviewed = new Set<string>(REVIEWED_WORKTREE_CONTEXT_FILES);
+
+  for (const path of required) {
+    assert.ok(
+      reviewed.has(path),
+      `missing reviewed build-context file: ${path}`,
+    );
   }
 });
