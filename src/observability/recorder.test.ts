@@ -382,7 +382,7 @@ function observationForDependencyTest(
   question: RedactedServingQuestion,
 ): ServingRetrievalObservation {
   return {
-    schemaVersion: 'serving-observation/v1',
+    schemaVersion: 'serving-observation/v2',
     observationId: OBSERVATION_ID,
     requestId: REQUEST_ID,
     createdAt: FIXED_NOW.toISOString(),

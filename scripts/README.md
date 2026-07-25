@@ -16,14 +16,14 @@
 |---|---|---|---|---|---|
 | `check-schema-aliases.ts` | `npm run aliases:check [-- --draft <path>]` | alias targets（别名目标）、正式 registry（注册表）或 draft（草稿）、当前语料与 retrieval cases（检索用例） | 无 | 无 | 默认校验正式注册表；`--draft` 只读校验草稿的格式和可追溯关系；目标引用 Holdout（留出集）用例时失败。 |
 | `check-schemas.ts` | `npm run schemas:check` | 当前加载的 generated schemas（生成的模式定义）及 definition registry（定义注册表） | 无 | 无 | 按运行时逐层解析契约遍历精选资源，拒绝缺失、非法和直接成环 `$ref`，并覆盖 map schema（映射模式）及 `anyOf` / `oneOf` 联合分支。 |
-| `corpus-stats.ts` | `npm run corpus:stats` | 当前语料、语料 manifest（清单）与 curated whitelist（精选白名单） | 无 | 无 | 输出资源覆盖、语料数量以及内容和 manifest hash（清单哈希）。 |
+| `corpus-stats.ts` | `npm run corpus:stats` | 当前语料、语料 manifest（清单）与 curated whitelist（精选白名单） | 无 | 无 | 输出资源覆盖、语料数量、身份版本和 manifest hash（清单哈希）。 |
 | `curated-closure.ts` | `npm run corpus:closure` | curated whitelist（精选白名单）、generated resources/definitions（生成资源 / 定义） | 无 | 无 | 计算应纳入版本控制的 `$ref` 传递闭包；`--list` 只输出文件路径。 |
 | `eval-check.ts` | `npm run eval:check` | 当前语料、retrieval cases（检索用例）与 grounded-answer cases（有依据回答用例） | 无 | 无 | 本地验证用例契约、来源 ID 和资源覆盖。 |
 | `eval-compare.ts` | `npm run eval:compare -- <runId>` | 指定或最新 `run` 及同 kind（类型）的 baseline（基线） | 无 | 无 | 在兼容性门禁通过后解释指标差异，不修改任何评估产物。 |
 | `deployment-contract.test.ts` | `npm run deploy:check` | `deploy/k3s` 的 release identity（发布身份）、K3s（轻量 Kubernetes）配置、准入配置与恢复边界 | 无 | 无 | 解析真实 YAML（配置文件），拒绝浮动版本、弱权限、缺失加密、放宽准入、公网控制面、占位 Secret（密钥）和不可恢复的备份边界。 |
 | `release-build-contract.test.ts` | `npm run release:check` | Node.js（JavaScript 运行时）版本声明、Next.js（React 全栈框架）构建配置和前端字体依赖 | 无 | 无 | 拒绝版本漂移、缺失 standalone output（独立运行产物）、外部字体加载、自带字体二进制和旧 IBM Plex 变量。 |
 | `container-smoke.test.ts` | `node --import tsx --test scripts/container-smoke.test.ts` | `Dockerfile`、`.dockerignore` 和容器发布契约 | 无 | 无 | 无 Docker daemon（Docker 后台服务）也可执行的纯契约门禁；覆盖不可变基础镜像、构建阶段、密钥挂载、干净上下文和运行时内容边界。 |
-| `workflow-contract.test.ts` | `npm run workflow:check` | `.github/workflows/pr-verify.yml` 和 `.github/CODEOWNERS` | 无 | 无 | 解析真实 YAML（配置文件），拒绝特权触发器、自托管或生产运行器、写权限、Secret（密钥）、受保护配置、浮动 Action（流水线动作）、持久化检出凭据、模型命令、镜像推送和缺失门禁。 |
+| `workflow-contract.test.ts` | `npm run workflow:check` | Pull Request / release lifecycle / index-build / release artifacts workflow（合并请求 / 发布生命周期 / 索引构建 / 发布证据流水线）、发布配置和 `.github/CODEOWNERS` | 无 | 无 | 解析真实 YAML（配置文件），拒绝特权触发器、自托管运行器、越权 Secret（密钥）、浮动 Action（流水线动作）、可变镜像标签和自动发布；固定 Release Please（发布自动化工具）的版本 / 草稿 / 发布说明所有权、唯一付费索引入口、不可变索引产物、无人工参数发布证据衔接和六份证据文件边界，不绑定无关 YAML 字段或步骤顺序。 |
 
 ## 容器交付脚本
 
@@ -40,8 +40,9 @@
 | `faith-bad-cases.ts` | `npm run badcases:faith -- <runId> [--write]` | 无 | 默认不写；`--write` 覆盖 `data/eval/bad-cases.jsonl` | 先预览 faithful bad-case candidates（忠实度问题候选）；显式写入时合并长期问题台账并校验证据；Holdout（留出集）轨迹不生成候选。 |
 | `check-schema-aliases.ts` | `npm run aliases:review -- <draft> [--apply]` | 无 | 默认不写；`--apply` 原子合并 `data/aliases/schema-field-aliases.jsonl` | 只接受位于草稿目录、全部完成人工审核且可追溯的记录；默认输出合并预览，并保留草稿未覆盖的正式记录。 |
 | `generate-schema-aliases.ts` | `npm run aliases:generate` | DeepSeek；每个目标失败时最多尝试 3 次 | 独占新建 `data/aliases/drafts/schema-field-aliases.<timestamp>.jsonl` | 输出全部为 `reviewed=false`，不会修改正式注册表；草稿需要先校验和人工编辑，再经显式预览与 `--apply` 合并。 |
-| `index-build.ts` | `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 写入显式 `INDEX_DIR` 下的 `manifest.json` / `chunks.jsonl` / `embeddings.f32` v3 文件哈希索引 | 只依赖无副作用 builder（构建器）；索引身份命中时跳过，失效时对全量当前语料重新嵌入并覆盖目标索引目录。在线服务不导入或调用该脚本。 |
+| `index-build.ts` | `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 写入显式 `INDEX_DIR` 下的 `manifest.json` / `chunks.jsonl` / `embeddings.f32` v5 文件哈希索引 | 只依赖无副作用 builder（构建器）；索引身份命中时跳过，失效时对全量当前语料重新嵌入，写入后立即回读完整校验。在线服务不导入或调用该脚本。 |
 | `ingest-schemas.ts` | `npm run ingest:schemas -- ...` | 文件来源无；`cluster-discovery` 通过 `kubectl get --raw` 访问当前集群 | 默认写入 `data/schemas/generated/`，可由 `--out` 改写 | 支持目录、CRD（自定义资源定义）、Kubernetes / cluster OpenAPI（Kubernetes / 集群开放应用程序接口规范）和集群发现来源；通过版本化 manifest（清单）只覆盖或删除明确归属 `ingest-schemas` 的文件，旧清单和无清单的非空目录失败关闭。 |
+| `release-manifest.ts` | `npm run release:manifest -- <check\|prepare\|index-identity\|verify-index\|finalize\|verify-draft>` | 受保护源码版本、`CHANGELOG.md`、Release Please Draft Release（发布自动化工具草稿发布版本）的实际正文、当前语料、独立索引产物、SBOM（软件物料清单）、SLSA provenance（供应链来源证明）、Sigstore bundle（签名证明包）和草稿发布回读 | 只写调用方显式指定的 GitHub output（GitHub 任务输出）或 `release-manifest.json`；不生成发布说明文件 | `RELEASE_INDEX_EMBEDDING_MODEL` 是发布索引模型的单一源码身份，三个 workflow（流水线）只消费 `index-identity` 输出，Dockerfile（容器构建文件）只接收该输出形成的构建参数；其余发布门禁校验版本、正文、索引、六份证据和回滚语义。 |
 
 ## 实验诊断脚本
 
@@ -52,6 +53,6 @@
 
 ## Cleanup（清理）结论
 
-- 14 个操作脚本均有 npm 入口，且代码仍对应当前本地门禁、数据维护、人工审核或实验诊断流程；部署与发布构建契约测试分别有独立的 `deploy:check` 和 `release:check` 入口。本轮没有足够证据删除任何脚本。
+- 15 个操作脚本均有 npm 入口，且代码仍对应当前本地门禁、数据维护、人工审核或实验诊断流程；部署、发布构建和发布清单分别有独立入口。本轮没有足够证据删除任何脚本。
 - 实验脚本继续留在 `scripts/`，避免仅为目录整齐而修改 npm 入口和历史引用。是否下线实验必须由新的使用证据决定。
 - 原有 13 项 `latest` 直接依赖已固定为当前 lockfile（锁文件）的既有解析版本；`scripts/dependency-versions.test.ts` 校验直接依赖不使用 `latest`、根清单声明一致，以及精确版本与解析版本一致。本次没有升级、重新解析或安装依赖。

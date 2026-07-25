@@ -1,4 +1,4 @@
-// Embedding model 与 index v3 持久化契约测试。纯本地,不调用 embedding 或网络。
+// Embedding model 与 versioned index 持久化契约测试。纯本地,不调用 embedding 或网络。
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import type { KnowledgeChunk } from '../knowledge/chunk';
 import {
   buildCorpusIdentity,
+  KNOWLEDGE_IDENTITY_VERSION,
   type CorpusManifest,
 } from '../knowledge/identity';
 import { resolveEmbeddingModel } from './embeddings';
@@ -166,7 +167,7 @@ async function checkAsync(
   }
 }
 
-console.log('resolveEmbeddingModel / index v3:');
+console.log('resolveEmbeddingModel / versioned index:');
 
 const RUNTIME_CONFIG_ENV = {
   DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
@@ -212,8 +213,8 @@ check('显式 VOYAGE_EMBEDDING_MODEL 决定索引模型身份', () => {
   });
 });
 
-check('index v3 round-trip 保存完整 identity 与 canonical metadata', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-roundtrip-'));
+check('index v5 round-trip 保存显式 corpus identity version 与 canonical metadata', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-roundtrip-'));
   try {
     const expected = expectation();
     const manifest = writeIndex(
@@ -224,10 +225,10 @@ check('index v3 round-trip 保存完整 identity 与 canonical metadata', () => 
 
     assert.deepEqual(manifest, {
       formatVersion: INDEX_FORMAT_VERSION,
+      corpusIdentityVersion: expected.corpusManifest.identityVersion,
       embeddingModel: expected.embeddingModel,
       dimension: 2,
       count: 1,
-      corpusContentHash: expected.corpusManifest.contentHash,
       corpusManifestHash: expected.corpusManifest.manifestHash,
       chunksHash: sha256File(join(dir, 'chunks.jsonl')),
       embeddingsHash: sha256File(join(dir, 'embeddings.f32')),
@@ -266,8 +267,60 @@ check('index v3 round-trip 保存完整 identity 与 canonical metadata', () => 
   }
 });
 
+check('indexHash 显式绑定 corpus identity version', () => {
+  const hashes = {
+    manifestHash: 'b'.repeat(64),
+  };
+  const versionOne = {
+    ...hashes,
+    identityVersion: KNOWLEDGE_IDENTITY_VERSION,
+  } as unknown as CorpusManifest;
+  const versionTwo = {
+    ...hashes,
+    identityVersion: KNOWLEDGE_IDENTITY_VERSION + 1,
+  } as unknown as CorpusManifest;
+
+  assert.equal(INDEX_FORMAT_VERSION, 5);
+  assert.notEqual(
+    computeIndexHash(versionOne, 'test-model'),
+    computeIndexHash(versionTwo, 'test-model'),
+  );
+});
+
+check('writeIndex 对同一身份生成顺序无关的确定性 chunk/embedding 文件', () => {
+  const forwardDir = mkdtempSync(join(tmpdir(), 'index-v5-order-forward-'));
+  const reverseDir = mkdtempSync(join(tmpdir(), 'index-v5-order-reverse-'));
+  try {
+    const chunks = [BASE_CHUNK, SECOND_CHUNK];
+    const expected = expectation(chunks);
+    const forward = [
+      indexed(BASE_CHUNK, [0.25, 0.75]),
+      indexed(SECOND_CHUNK, [-0.5, 0.125]),
+    ];
+    const reverse = [forward[1]!, forward[0]!];
+
+    const forwardManifest = writeIndex(forward, expected, forwardDir);
+    const reverseManifest = writeIndex(reverse, expected, reverseDir);
+
+    assert.deepEqual(
+      readFileSync(join(reverseDir, 'chunks.jsonl')),
+      readFileSync(join(forwardDir, 'chunks.jsonl')),
+    );
+    assert.deepEqual(
+      readFileSync(join(reverseDir, 'embeddings.f32')),
+      readFileSync(join(forwardDir, 'embeddings.f32')),
+    );
+    assert.equal(reverseManifest.chunksHash, forwardManifest.chunksHash);
+    assert.equal(reverseManifest.embeddingsHash, forwardManifest.embeddingsHash);
+    assert.equal(reverseManifest.indexHash, forwardManifest.indexHash);
+  } finally {
+    rmSync(forwardDir, { recursive: true, force: true });
+    rmSync(reverseDir, { recursive: true, force: true });
+  }
+});
+
 check('index hit 使用共享连续 Float32Array,不展开为 number[]', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-contiguous-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-contiguous-'));
   try {
     const chunks = [BASE_CHUNK, SECOND_CHUNK];
     const expected = expectation(chunks);
@@ -336,7 +389,7 @@ check('连续 Float32Array 与 builder number[] 的 dense score 和排序完全�
       score: referenceCosine(query, chunk.embedding),
     }))
     .sort((a, b) => b.score - a.score);
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-ab-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-ab-'));
   try {
     const expectedIdentity = expectation(chunks);
     writeIndex(legacy, expectedIdentity, dir);
@@ -351,8 +404,8 @@ check('连续 Float32Array 与 builder number[] 的 dense score 和排序完全�
   }
 });
 
-check('text、metadata 与 model 变化分别给出明确 miss reason', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-identity-'));
+check('chunk manifest 与 model 变化分别给出明确 miss reason', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-identity-'));
   try {
     const original = expectation();
     writeIndex([indexed(BASE_CHUNK)], original, dir);
@@ -360,7 +413,7 @@ check('text、metadata 与 model 变化分别给出明确 miss reason', () => {
     const changedText = { ...BASE_CHUNK, text: 'changed image field' };
     assert.equal(
       missReason(readIndex(expectation([changedText]), dir)),
-      'corpus_content_mismatch',
+      'corpus_manifest_mismatch',
     );
 
     const changedMetadata: KnowledgeChunk = {
@@ -381,7 +434,7 @@ check('text、metadata 与 model 变化分别给出明确 miss reason', () => {
 });
 
 check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-chunk-identity-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-chunk-identity-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -392,7 +445,7 @@ check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', (
     refreshFileHash(dir, 'chunks.jsonl');
     assert.equal(
       missReason(readIndex(expected, dir)),
-      'corpus_content_mismatch',
+      'corpus_manifest_mismatch',
     );
 
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -414,7 +467,7 @@ check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', (
 });
 
 check('count、dimension 与 indexHash 不一致不会返回 chunks', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-shape-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-shape-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -448,7 +501,7 @@ check('count、dimension 与 indexHash 不一致不会返回 chunks', () => {
 });
 
 check('chunks 与 embeddings 文件哈希不匹配时封闭失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-file-hash-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-file-hash-'));
   try {
     const expected = expectation();
     const manifest = writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -481,7 +534,7 @@ check('chunks 与 embeddings 文件哈希不匹配时封闭失效', () => {
 });
 
 check('格式、损坏 JSON、chunk count 与旧 manifest 明确失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-json-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-json-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -503,9 +556,20 @@ check('格式、损坏 JSON、chunk count 与旧 manifest 明确失效', () => {
 
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
     rewriteManifest(dir, (manifest) => {
-      manifest.formatVersion = 1;
+      manifest.formatVersion = 4;
     });
     assert.equal(missReason(readIndex(expected, dir)), 'format_mismatch');
+
+    writeIndex([indexed(BASE_CHUNK)], expected, dir);
+    const legacyContentManifest = JSON.parse(
+      readFileSync(join(dir, 'manifest.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    legacyContentManifest.corpusContentHash = 'a'.repeat(64);
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      `${JSON.stringify(legacyContentManifest)}\n`,
+    );
+    assert.equal(missReason(readIndex(expected, dir)), 'invalid_manifest');
 
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
     writeFileSync(
@@ -527,7 +591,7 @@ check('格式、损坏 JSON、chunk count 与旧 manifest 明确失效', () => {
 });
 
 check('NaN embedding 与 duplicate chunk ID 明确失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-values-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-values-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -554,7 +618,7 @@ check('NaN embedding 与 duplicate chunk ID 明确失效', () => {
 });
 
 check('缺失和不完整文件集使用不同 miss reason', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-files-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-files-'));
   try {
     const expected = expectation();
     assert.equal(missReason(readIndex(expected, dir)), 'missing_files');
@@ -566,7 +630,7 @@ check('缺失和不完整文件集使用不同 miss reason', () => {
 });
 
 check('writeIndex 在落盘前拒绝 count、维度、NaN 与重复 ID', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-write-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-write-'));
   try {
     assert.throws(
       () =>
@@ -625,7 +689,7 @@ check('writeIndex 在落盘前拒绝 count、维度、NaN 与重复 ID', () => {
           expectation(),
           dir,
         ),
-      /corpus_content_mismatch/,
+      /corpus_manifest_mismatch/,
     );
     assert.throws(
       () =>
@@ -677,7 +741,6 @@ await checkAsync('runtime 所有 miss 都封闭失败且不调用旧 rebuild 或
     'format_mismatch',
     'invalid_manifest',
     'corpus_count_mismatch',
-    'corpus_content_mismatch',
     'corpus_manifest_mismatch',
     'embedding_model_mismatch',
     'index_hash_mismatch',
@@ -727,7 +790,7 @@ await checkAsync('runtime 所有 miss 都封闭失败且不调用旧 rebuild 或
 });
 
 await checkAsync('runtime hit 复用已校验 Float32 chunks', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-hit-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-hit-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -743,7 +806,7 @@ await checkAsync('runtime hit 复用已校验 Float32 chunks', async () => {
 });
 
 await checkAsync('有效 serving index 在并发和后续调用中只读取一次', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v3-loader-once-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v5-loader-once-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);

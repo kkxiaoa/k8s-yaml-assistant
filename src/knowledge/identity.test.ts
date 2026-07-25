@@ -6,6 +6,7 @@ import {
   canonicalHash,
   canonicalJson,
   canonicalTargets,
+  KNOWLEDGE_IDENTITY_VERSION,
   schemaChunkId,
   type KnowledgeTarget,
 } from './identity';
@@ -101,6 +102,18 @@ check('target 按 apiVersion/kind/path 去重并稳定排序', () => {
   );
 });
 
+check('target 边界只校验数据字段，不拒绝可解码的对象原型', () => {
+  class Target {
+    readonly apiVersion = 'v1';
+    readonly kind = 'Pod';
+    readonly path = 'spec.containers';
+  }
+
+  assert.deepEqual(canonicalTargets([new Target()]), [
+    { apiVersion: 'v1', kind: 'Pod', path: 'spec.containers' },
+  ]);
+});
+
 check('schema ID 固定包含 apiVersion、kind 与 path', () => {
   assert.equal(
     schemaChunkId({
@@ -193,31 +206,63 @@ check('provider 与 corpus identity 不受 chunk/provider 输入顺序影响', (
   );
 });
 
-check('text 变化同时改变 contentHash 与 manifestHash', () => {
-  const before = buildSourceManifest(schemaProvider());
-  const after = buildSourceManifest(
-    schemaProvider({ chunks: [{ ...SCHEMA_CHUNK, text: `${SCHEMA_CHUNK.text}。已更新` }] }),
+check('provider 使用单一严格边界并拒绝未知字段', () => {
+  assert.throws(() =>
+    buildSourceManifest({
+      ...schemaProvider(),
+      unexpected: true,
+    } as Parameters<typeof buildSourceManifest>[0]),
   );
-
-  assert.notEqual(after.contentHash, before.contentHash);
-  assert.notEqual(after.manifestHash, before.manifestHash);
 });
 
-check('metadata-only 变化只改变 manifestHash', () => {
-  const before = buildSourceManifest(schemaProvider());
-  const after = buildSourceManifest(
-    schemaProvider({
-      chunks: [
-        {
-          ...SCHEMA_CHUNK,
-          provenance: { authority: 'cluster_api', version: 'v1' },
-        },
-      ],
-    }),
-  );
+check('text 变化会传递到 provider 和 corpus manifestHash', () => {
+  const beforeProvider = schemaProvider();
+  const afterProvider = schemaProvider({
+    chunks: [{ ...SCHEMA_CHUNK, text: `${SCHEMA_CHUNK.text}。已更新` }],
+  });
+  const beforeSource = buildSourceManifest(beforeProvider);
+  const afterSource = buildSourceManifest(afterProvider);
+  const beforeCorpus = buildCorpusIdentity([beforeProvider]);
+  const afterCorpus = buildCorpusIdentity([afterProvider]);
 
-  assert.equal(after.contentHash, before.contentHash);
-  assert.notEqual(after.manifestHash, before.manifestHash);
+  assert.notEqual(afterSource.manifestHash, beforeSource.manifestHash);
+  assert.notEqual(afterCorpus.manifestHash, beforeCorpus.manifestHash);
+});
+
+check('corpus identity 只组合排序后的 provider manifestHash', () => {
+  const source = buildSourceManifest(schemaProvider());
+  const corpus = buildCorpusIdentity([schemaProvider(), policyProvider()]);
+
+  assert.equal('contentHash' in source, false);
+  assert.equal('contentHash' in corpus, false);
+  assert.equal('identityVersion' in source, false);
+  assert.equal(KNOWLEDGE_IDENTITY_VERSION, 2);
+  assert.equal(corpus.identityVersion, KNOWLEDGE_IDENTITY_VERSION);
+  assert.equal(
+    corpus.manifestHash,
+    canonicalHash(
+      corpus.providers.map(({ manifestHash }) => manifestHash),
+    ),
+  );
+});
+
+check('metadata-only 变化会传递到 corpus manifestHash', () => {
+  const beforeProvider = schemaProvider();
+  const afterProvider = schemaProvider({
+    chunks: [
+      {
+        ...SCHEMA_CHUNK,
+        provenance: { authority: 'cluster_api', version: 'v1' },
+      },
+    ],
+  });
+  const beforeSource = buildSourceManifest(beforeProvider);
+  const afterSource = buildSourceManifest(afterProvider);
+  const beforeCorpus = buildCorpusIdentity([beforeProvider]);
+  const afterCorpus = buildCorpusIdentity([afterProvider]);
+
+  assert.notEqual(afterSource.manifestHash, beforeSource.manifestHash);
+  assert.notEqual(afterCorpus.manifestHash, beforeCorpus.manifestHash);
 });
 
 check('generatedAt 只用于审计，不改变 provider/corpus hash', () => {
@@ -227,7 +272,6 @@ check('generatedAt 只用于审计，不改变 provider/corpus hash', () => {
   const secondSource = buildSourceManifest(second);
 
   assert.notEqual(firstSource.generatedAt, secondSource.generatedAt);
-  assert.equal(firstSource.contentHash, secondSource.contentHash);
   assert.equal(firstSource.manifestHash, secondSource.manifestHash);
   assert.equal(
     buildCorpusIdentity([first]).manifestHash,
@@ -239,7 +283,6 @@ check('provider version 只改变 manifestHash', () => {
   const before = buildSourceManifest(schemaProvider({ version: 'v1' }));
   const after = buildSourceManifest(schemaProvider({ version: 'v2' }));
 
-  assert.equal(after.contentHash, before.contentHash);
   assert.notEqual(after.manifestHash, before.manifestHash);
 });
 

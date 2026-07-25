@@ -592,7 +592,6 @@ function retrievalConfigShape(k: number) {
   const corpus = buildCorpusManifest();
   const embeddingModel = resolveEmbeddingModel();
   return {
-    corpusContentHash: corpus.contentHash,
     corpusManifestHash: corpus.manifestHash,
     indexHash: computeIndexHash(corpus, embeddingModel),
     embeddingModel,

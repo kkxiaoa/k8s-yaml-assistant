@@ -720,7 +720,6 @@ check('retrieval config resolves the embedding model at run start', () => {
     const config = retrievalEvalConfig(3);
     const corpus = buildCorpusManifest();
     assert.equal(config.embeddingModel, 'voyage-4');
-    assert.equal(config.corpusContentHash, corpus.contentHash);
     assert.equal(config.corpusManifestHash, corpus.manifestHash);
     assert.equal(
       config.indexHash,

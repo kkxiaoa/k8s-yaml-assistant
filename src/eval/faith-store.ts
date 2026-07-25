@@ -121,7 +121,6 @@ const IndexMissReasonSchema = z.enum([
   'format_mismatch',
   'invalid_manifest',
   'corpus_count_mismatch',
-  'corpus_content_mismatch',
   'corpus_manifest_mismatch',
   'embedding_model_mismatch',
   'index_hash_mismatch',

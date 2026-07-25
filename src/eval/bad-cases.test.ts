@@ -127,7 +127,6 @@ function retrievalRun(
     artifactPaths: { trace: traceRelativePath(id, 'retrieval') },
     metricDefinitionVersion: 'legacy-v1',
     config: {
-      corpusContentHash: HASH_A,
       corpusManifestHash: HASH_B,
       indexHash: HASH_B,
       embeddingModel: 'embedding-model',
