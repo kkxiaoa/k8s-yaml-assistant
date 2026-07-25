@@ -9,7 +9,7 @@ import {
 } from './redaction';
 
 export const SERVING_OBSERVATION_SCHEMA_VERSION =
-  'serving-observation/v1' as const;
+  'serving-observation/v2' as const;
 
 const MAX_CHUNK_ID_LENGTH = 512;
 const MAX_HINT_LENGTH = 512;
@@ -217,7 +217,6 @@ export const ServingIndexMissReasonSchema = z.enum([
   'format_mismatch',
   'invalid_manifest',
   'corpus_count_mismatch',
-  'corpus_content_mismatch',
   'corpus_manifest_mismatch',
   'embedding_model_mismatch',
   'index_hash_mismatch',

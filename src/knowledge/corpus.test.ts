@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { KNOWLEDGE_IDENTITY_VERSION } from './identity';
 import {
   buildCorpus,
   buildCorpusManifest,
@@ -38,8 +39,9 @@ check('source 选择可控', () => {
   assert.equal(buildCorpus().length, schemaOnly.length + policyOnly.length);
 });
 
-check('真实 provider manifest 使用稳定 providerId 和双重 identity', () => {
+check('真实 provider manifest 使用稳定 providerId 和单一完整 identity', () => {
   const manifest = buildCorpusManifest();
+  assert.equal(manifest.identityVersion, KNOWLEDGE_IDENTITY_VERSION);
   assert.equal(manifest.count, CORPUS.length);
   assert.deepEqual(
     manifest.providers.map(({ providerId, sourceType }) => ({
@@ -51,12 +53,13 @@ check('真实 provider manifest 使用稳定 providerId 和双重 identity', () 
       { providerId: 'schema.curated-openapi', sourceType: 'schema' },
     ],
   );
-  assert.match(manifest.contentHash, /^[a-f0-9]{64}$/);
+  assert.equal('contentHash' in manifest, false);
   assert.match(manifest.manifestHash, /^[a-f0-9]{64}$/);
 
   for (const provider of manifest.providers) {
     assert.ok(provider.count > 0, `${provider.providerId} count`);
-    assert.match(provider.contentHash, /^[a-f0-9]{64}$/);
+    assert.equal('contentHash' in provider, false);
+    assert.equal('identityVersion' in provider, false);
     assert.match(provider.manifestHash, /^[a-f0-9]{64}$/);
   }
 });

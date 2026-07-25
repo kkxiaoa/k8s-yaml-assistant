@@ -11,18 +11,23 @@ COPY . .
 RUN npm test
 RUN npm run typecheck
 
-FROM verify AS index
+FROM verify AS index-build
+ARG RELEASE_INDEX_EMBEDDING_MODEL
 RUN --mount=type=secret,id=voyage_api_key,required=true \
+    test -n "$RELEASE_INDEX_EMBEDDING_MODEL" && \
     DEEPSEEK_BASE_URL=https://api.deepseek.com/anthropic \
     DEEPSEEK_ANSWER_MODEL=deepseek-v4-flash \
     VOYAGE_EMBEDDING_URL=https://api.voyageai.com/v1/embeddings \
     VOYAGE_RERANK_URL=https://api.voyageai.com/v1/rerank \
-    VOYAGE_EMBEDDING_MODEL=voyage-3 \
+    VOYAGE_EMBEDDING_MODEL="$RELEASE_INDEX_EMBEDDING_MODEL" \
     VOYAGE_RERANK_MODEL=rerank-2.5 \
     INDEX_DIR=/app/data/index \
     ENABLE_QUERY_EXPANSION=true \
     VOYAGE_API_KEY="$(cat /run/secrets/voyage_api_key)" \
     npm run index:build
+
+FROM scratch AS index-artifact
+COPY --from=index-build /app/data/index /data/index
 
 FROM verify AS build
 RUN --network=none npm run build
@@ -42,4 +47,4 @@ ENTRYPOINT ["/usr/local/bin/node"]
 CMD ["server.js"]
 
 FROM runtime-base AS runtime
-COPY --from=index --chown=10001:10001 /app/data/index ./data/index
+COPY --from=verified-index --chown=10001:10001 /data/index ./data/index

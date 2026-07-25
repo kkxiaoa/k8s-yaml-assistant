@@ -121,7 +121,7 @@ git diff --check
 
 - [x] **Step 2: 升级 schema v2**
 
-- `EVAL_SCHEMA_VERSION` 提升到 2。
+- `EVAL_SCHEMA_VERSION` 在本计划当时提升到 2；2026-07-25 删除 corpus contentHash（语料内容哈希）后，当前协议已提升到 3。
 - `EvalDatasetIdentity.caseIds` 替换为 `cases: Array<{ id; governance }>`，避免并行保存两份 ID 列表。
 - `TraceEnvelope` 增加必填 governance。
 - `groundedAnswerCaseSnapshot` 与 `faithTraceCaseSnapshot` 同时纳入 governance，不在 schema v1 下只升级其中一侧。
@@ -363,7 +363,7 @@ npx tsc --noEmit -p tsconfig.json
 git diff --check
 ```
 
-记录新旧 corpus content/manifest/index expectation hash（语料内容 / 清单 / 索引期望哈希）变化，但不调用 `index:build`。
+记录新旧 corpus manifest/index expectation hash（语料清单 / 索引期望哈希）变化，但不调用 `index:build`。
 
 **Stop and report:** 复用的真实 schema、provenance、增加的 chunk/case、清退的拒答、Holdout 隔离和索引失效证据。等待 review。
 
@@ -447,7 +447,7 @@ git diff --cached --check
 
 ## 完成记录
 
-2026-07-19 的最终本地事实：
+2026-07-19 的最终本地事实（以下 hash 为当时 knowledge identity v1（知识身份版本 1）的历史证据，不代表当前 v2 身份）：
 
 - Semantic Retrieval（语义检索）83 条；Grounded Answer（有依据回答）88 条，其中检索引用 83、错误解释 2、独立拒答 3；Generation（生成）27 条；Fix（修复）9 条。
 - Retrieval/Grounded Answer、Generation、Fix 各有 1 条 Holdout（留出集）。所有用例 origin（来源）仍为 `human`，没有为补 `schema_generated` 或 `bad_case` 分桶新增题目。

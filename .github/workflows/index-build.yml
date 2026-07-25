@@ -1,0 +1,239 @@
+name: Build index artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: index-build
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Resolve or verify index artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      exists: ${{ steps.artifact.outputs.exists }}
+      source_sha: ${{ steps.source.outputs.sha }}
+      index_tag: ${{ steps.index.outputs.index_tag }}
+      index_hash: ${{ steps.index.outputs.index_hash }}
+      embedding_model: ${{ steps.index.outputs.embedding_model }}
+    steps:
+      - name: Checkout protected main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate source branch
+        id: source
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          if [[ ! "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "main did not resolve to a full commit SHA" >&2
+            exit 1
+          fi
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check schema closure
+        run: npm run schemas:check
+
+      - name: Check reviewed aliases
+        run: npm run aliases:check
+
+      - name: Check curated corpus closure
+        run: npm run corpus:closure
+
+      - name: Run tests before paid work
+        run: npm test
+
+      - name: Check TypeScript before paid work
+        run: npm run typecheck
+
+      - name: Check release build contract
+        run: npm run release:check
+
+      - name: Check workflow contract
+        run: npm run workflow:check
+
+      - name: Resolve index identity
+        id: index
+        run: |
+          npm run release:manifest -- index-identity \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.2
+
+      - name: Reuse only a valid immutable artifact
+        id: artifact
+        env:
+          INDEX_IMAGE: ${{ steps.index.outputs.index_image }}
+          INDEX_TAG: ${{ steps.index.outputs.index_tag }}
+          EMBEDDING_MODEL: ${{ steps.index.outputs.embedding_model }}
+        run: |
+          mkdir -p index-state
+          if INSPECT_OUTPUT="$(
+            docker buildx imagetools inspect "$INDEX_IMAGE:$INDEX_TAG" \
+              --format '{{json .Manifest.Digest}}' \
+              2>index-state/inspect.stderr
+          )"; then
+            INDEX_DIGEST="$(printf '%s' "$INSPECT_OUTPUT" | tr -d '"')"
+            if [[ ! "$INDEX_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "existing index tag did not resolve to one digest" >&2
+              exit 1
+            fi
+            INDEX_REF="$INDEX_IMAGE@$INDEX_DIGEST"
+            CERTIFICATE_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/index-build.yml@refs/heads/main"
+            OIDC_ISSUER="https://token.actions.githubusercontent.com"
+            cosign verify \
+              --certificate-identity "$CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer "$OIDC_ISSUER" \
+              "$INDEX_REF" \
+              > index-state/signature-verification.json
+            docker pull "$INDEX_REF"
+            container_id="$(docker create "$INDEX_REF" ignored)"
+            docker cp "$container_id:/data/index" index-state/index
+            docker rm "$container_id"
+            npm run release:manifest -- verify-index \
+              --index-dir index-state/index \
+              --embedding-model "$EMBEDDING_MODEL"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          elif grep -Eqi 'manifest unknown|not found' index-state/inspect.stderr; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            cat index-state/inspect.stderr >&2
+            exit 1
+          fi
+
+  build:
+    name: Build, push, and sign missing index artifact
+    needs:
+      - inspect
+    if: needs.inspect.outputs.exists == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: index-build
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Checkout audited source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.inspect.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build and push immutable index artifact
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        env:
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+        with:
+          context: .
+          file: Dockerfile
+          target: index-artifact
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/kkxiaoa/k8s-yaml-assistant-index:${{ needs.inspect.outputs.index_tag }}
+          build-args: RELEASE_INDEX_EMBEDDING_MODEL=${{ needs.inspect.outputs.embedding_model }}
+          secret-envs: voyage_api_key=VOYAGE_API_KEY
+          provenance: mode=min,version=v1
+          sbom: false
+          cache-from: type=gha,scope=index-${{ needs.inspect.outputs.index_hash }}
+          cache-to: type=gha,mode=max,scope=index-${{ needs.inspect.outputs.index_hash }}
+
+      - name: Verify built index contents
+        env:
+          INDEX_DIGEST: ${{ steps.image.outputs.digest }}
+          EMBEDDING_MODEL: ${{ needs.inspect.outputs.embedding_model }}
+        run: |
+          mkdir -p index-state
+          INDEX_REF="ghcr.io/kkxiaoa/k8s-yaml-assistant-index@$INDEX_DIGEST"
+          docker pull "$INDEX_REF"
+          container_id="$(docker create "$INDEX_REF" ignored)"
+          docker cp "$container_id:/data/index" index-state/index
+          docker rm "$container_id"
+          docker history --no-trunc "$INDEX_REF" > index-state/image-history.txt
+          npm run release:manifest -- verify-index \
+            --index-dir index-state/index \
+            --embedding-model "$EMBEDDING_MODEL"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.2
+
+      - name: Sign and verify index artifact
+        env:
+          INDEX_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          INDEX_REF="ghcr.io/kkxiaoa/k8s-yaml-assistant-index@$INDEX_DIGEST"
+          CERTIFICATE_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/index-build.yml@refs/heads/main"
+          OIDC_ISSUER="https://token.actions.githubusercontent.com"
+          cosign sign --yes --use-signing-config=true "$INDEX_REF"
+          cosign verify \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$INDEX_REF" \
+            > index-state/signature-verification.json
+
+      - name: Upload index build evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: index-${{ needs.inspect.outputs.index_hash }}
+          path: index-state/
+          if-no-files-found: error
+          retention-days: 30

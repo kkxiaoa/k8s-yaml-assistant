@@ -172,9 +172,9 @@ interface SchemaDoc {
 | `npm run aliases:check [-- --draft <path>]` | 无 | 只读；默认校验正式 alias registry（别名注册表），`--draft` 校验生成草稿；两者均核对目标、语料及评估用例的可追溯性 |
 | `npm run aliases:generate` | DeepSeek；每个目标失败时最多尝试 3 次 | 独占写入 `data/aliases/drafts/` 下带时间戳的 draft artifact（草稿产物）；不修改正式注册表 |
 | `npm run aliases:review -- <draft> [--apply]` | 无 | 默认只预览已人工审核草稿与正式注册表的合并结果；显式 `--apply` 才原子合并，且保留草稿未覆盖的正式记录 |
-| `npm run corpus:stats` | 无 | 只读；输出语料规模、资源覆盖及内容 / manifest hash（清单哈希） |
+| `npm run corpus:stats` | 无 | 只读；输出语料规模、资源覆盖、身份版本及 manifest hash（清单哈希） |
 | `npm run corpus:closure [-- --list]` | 无 | 只读；计算 curated whitelist（精选白名单）的 `$ref` 传递闭包 |
-| `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 默认写入 `data/index/` 的 v3 文件哈希索引；索引身份命中时跳过重建 |
+| `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 默认写入 `data/index/` 的 v4 文件哈希索引；写入后立即回读校验，索引身份命中时跳过重建 |
 
 Alias（别名）人工审核流程：
 
@@ -326,7 +326,7 @@ data/observability/
 | `SERVING_OBSERVATION_MAX_INPUT_BYTES` | 正整数且不超过 256 KiB；限制进入脱敏器的 question（问题文本）字节数 |
 | `SERVING_OBSERVATION_MAX_TEXT_BYTES` | 正整数且不超过 16 KiB；必须不大于输入上限 |
 
-记录内容只包含严格 `serving-observation/v1` schema（模式）允许的脱敏 question（问题文本）或丢弃状态、受控 route hint（路由提示）、chunk ID（知识片段标识）、来源类别与权威性、目标字段、分数、查询扩展状态、延迟和索引缓存状态。不会记录 `queryText`、用户 YAML、选中内容、校验错误、answer（回答）、chunk title/text（知识片段标题 / 正文）、source URI（来源地址）、请求头、cookie（浏览器会话）或环境变量值；脱敏、二次扫描或 strict decode（严格解码）失败时不回退原文。
+记录内容只包含严格 `serving-observation/v2` schema（模式）允许的脱敏 question（问题文本）或丢弃状态、受控 route hint（路由提示）、chunk ID（知识片段标识）、来源类别与权威性、目标字段、分数、查询扩展状态、延迟和索引缓存状态。不会记录 `queryText`、用户 YAML、选中内容、校验错误、answer（回答）、chunk title/text（知识片段标题 / 正文）、source URI（来源地址）、请求头、cookie（浏览器会话）或环境变量值；脱敏、二次扫描或 strict decode（严格解码）失败时不回退原文。
 
 local mode（本地模式）写入 `data/observability/serving-observations.<UTC-date>.<sequence>.jsonl`，按 UTC（协调世界时）日期或单文件字节上限轮转，并同时按保留天数和总字节上限清理最旧的受管普通文件。配置在模块初始化时读取；修改后必须重启进程。相同 stage/code（阶段 / 错误码）的配置、采样、脱敏、投影或文件故障每个进程只向 console（控制台）报告一次固定安全信号，不输出 payload（负载）或底层异常内容。
 

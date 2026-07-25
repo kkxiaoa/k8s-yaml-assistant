@@ -1,9 +1,9 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-9（任务 5-9）已审核；Task 10（任务 10）已完成实现、本地门禁和受控 Pull Request（合并请求）验证，当前停在 Task 10 review（任务 10 审核）。
+> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的本地发布契约、Release lifecycle（发布生命周期）、release artifacts workflow（发布证据流水线）和本地门禁已经完成，等待 review（审核）。尚未调用模型、推送镜像、创建标签或草稿发布版本。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
-> Task 10（任务 10）实现提交：`5d8d06c ci: add pull request verification gates`；受控 Pull Request（合并请求）#1 保持开启且未合并。
+> Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。
 
 ## Goal（目标）
 
@@ -12,8 +12,9 @@
 ```text
 clean source（干净源码）
   -> test/type/build/security gates（测试 / 类型 / 构建 / 安全门禁）
-  -> trusted index build（受信任索引构建）
-  -> immutable GHCR image（不可变 GHCR 镜像）
+  -> manual immutable index artifact（手工触发的不可变索引产物）
+  -> Release Please Pull Request（发布自动化合并请求）
+  -> immutable candidate image（不可变候选应用镜像）
   -> draft Release manual confirmation（草稿发布版本人工确认）
   -> release.published（发布版本已发布）
   -> fixed deployment adapter（固定部署适配器）
@@ -382,15 +383,15 @@ Next.js 16.2.9 会把本地构建时加载的 `.env` 或 `.env.production` 主�
 - DeepSeek/Voyage 暂时不可用不触发 liveness（存活状态）失败；
 - 持久化索引中的全部 document vector（文档向量）是共享连续缓冲区的 `Float32Array` 视图。
 
-反例先证明旧 serving loader（在线加载器）仍接受重建回调、缺少健康模块和路由门禁；最终 17 项索引测试、5 项健康测试和 10 项 pipeline（管线）测试覆盖全部 miss reason（未命中原因）、v3 文件哈希、零重建/零供应商调用、封闭响应、连续缓冲区和一次性状态复用。
+反例先证明旧 serving loader（在线加载器）仍接受重建回调、缺少健康模块和路由门禁；索引门禁覆盖全部 miss reason（未命中原因）、当前 v5 文件哈希、零重建/零供应商调用、封闭响应、连续缓冲区和一次性状态复用。
 
 - [x] **Step 2（步骤 2）：分离 build input（构建输入）与 serving index（在线索引）类型**
 
 模型 API（应用程序接口）边界可以继续接收 `number[]`，但只允许进入独立 builder input（构建器输入）类型并立即写入 Float32 索引文件。生产 `IndexedChunk.embedding` 收紧为 `Float32Array`；删除 `number[] | Float32Array` 联合类型，避免未来在线路径重新保留膨胀的 JavaScript 数组。
 
-`scripts/index-build.ts` 只依赖无副作用 builder（构建器）和 `writeIndex()`；serving（在线服务）模块不 import（导入）带 `main()` 的 runner（运行器），也不拥有在线全量构建分支。
+`scripts/index-build.ts` 只依赖无副作用 builder（构建器）以及 index store（索引存储）的 `writeIndex()` / `readIndex()`；写入后必须立即通过与 serving（在线服务）相同的读取路径回读。serving 模块不 import（导入）带 `main()` 的 runner（运行器），也不拥有在线全量构建分支。
 
-`src/retrieval/index-builder.ts` 是唯一 document embedding `number[]`（文档向量数组）边界；`writeIndex()` 只接收该构建输入并立即写为 Float32 文件。`IndexedChunk.embedding` 只允许 `Float32Array`，在线模块已删除 `buildIndex()` 和全量重建分支。索引格式升级为 v3，并在 manifest（清单）中绑定 `chunks.jsonl` 与 `embeddings.f32` 的 SHA-256（安全哈希算法）摘要。
+`src/retrieval/index-builder.ts` 是唯一 document embedding `number[]`（文档向量数组）边界；`writeIndex()` 只接收该构建输入，按 chunk ID（知识片段标识）稳定排序并同步重排 embedding（向量嵌入），再写为 Float32 文件。`IndexedChunk.embedding` 只允许 `Float32Array`，在线模块已删除 `buildIndex()` 和全量重建分支。当前索引格式为 v5，在 manifest（清单）中显式记录 knowledge identity v2（知识身份版本 2）的 corpus manifestHash（语料清单哈希），并绑定 `chunks.jsonl` 与 `embeddings.f32` 的 SHA-256（安全哈希算法）摘要。
 
 - [x] **Step 3（步骤 3）：实现一次性本地初始化和封闭健康状态**
 
@@ -527,9 +528,9 @@ Task 8 review（任务 8 审核）期间继续全仓库核对错误类公开字�
 
 - [x] **Step 2（步骤 2）：实现 multi-stage build（多阶段构建）**
 
-至少建立 deps/verify/index/build/runtime（依赖 / 验证 / 索引 / 构建 / 运行时）职责。依赖只用 `npm ci`；build（构建）复制 `.next/standalone`、`.next/static`、`public`（如存在）、运行必需 `data` 和索引，不复制开发依赖。
+至少建立 deps/verify/index-build/index-artifact/build/runtime（依赖 / 验证 / 索引构建 / 索引产物 / 构建 / 运行时）职责。依赖只用 `npm ci`；build（构建）复制 `.next/standalone`、`.next/static`、`public`（如存在）和运行必需 `data`，runtime（运行时）再从外部 `verified-index` BuildKit context（BuildKit 构建上下文）复制已验证索引，不复制开发依赖。
 
-index stage（索引阶段）只能通过 BuildKit secret mount（BuildKit 密钥挂载）或审核后的等价机制读取 Voyage 发布凭据。构建指令不得把 key（密钥）变成 `ARG`、`ENV`、层、cache metadata（缓存元数据）或日志。Task 9（任务 9）只构建最终 runtime（运行时）真实复用的无索引 `runtime-base` stage（运行时基础阶段）和无密钥阶段；有效 index stage（索引阶段）留到 Task 11（任务 11）。
+index-build stage（索引构建阶段）只能通过 BuildKit secret mount（BuildKit 密钥挂载）或审核后的等价机制读取 Voyage 索引构建凭据。构建指令不得把 key（密钥）变成 `ARG`、`ENV`、层、cache metadata（缓存元数据）或日志。Task 9（任务 9）只构建最终 runtime（运行时）真实复用的无索引 `runtime-base` stage（运行时基础阶段）和无密钥阶段；有效 `index-build/index-artifact/verified-index`（索引构建 / 索引产物 / 已验证外部索引）衔接留到 Task 11（任务 11）。
 
 基础镜像和 runtime image（运行时镜像）必须固定 digest（内容摘要）。实施时核对“Debian bookworm-slim（Debian 精简镜像）工具链”和“最终镜像不新增 shell/curl/package manager（命令解释器 / 网络工具 / 包管理器）”能否同时满足；若选定镜像自带超出设计的工具，停止并修订设计，不静默接受。
 
@@ -594,7 +595,7 @@ Node.js build image（Node.js 构建镜像）固定为 `node:24.18.0-bookworm-sl
 
 immutable releases（不可变发布版本）能力可用，并在 2026-07-23 获得当次外部写入授权后启用；API（应用程序接口）回读为 `enabled=true`、`enforced_by_owner=false`，后者表示不是组织所有者策略强制，不影响仓库级开关生效。该设置只保护启用后发布的版本。私有仓库的 GitHub artifact attestation（GitHub 产物证明）要求 GitHub Enterprise Cloud（GitHub 企业云）；Task 11（任务 11）必须按既定设计单独审核 Sigstore/Cosign（Sigstore 镜像签名工具）的公开 transparency log metadata（透明日志元数据）边界。
 
-Actions（自动化流水线）已启用，默认 `GITHUB_TOKEN` 为只读且不能批准 Pull Request（合并请求）。获得当次授权后，仓库级 `sha_pinning_required=true` 已回读确认；当前保留 `allowed_actions=all`，但所有 Action（流水线动作）都必须引用完整 commit SHA（提交哈希）。当前 `gh` 授权缺少 `read:packages`，GHCR package（GHCR 软件包）清单留到 Task 11（任务 11）按最小权限核对，不为 Task 10（任务 10）扩张长期权限。
+Actions（自动化流水线）已启用，默认 `GITHUB_TOKEN` 为只读；每个 workflow job（流水线任务）仍必须单独声明更窄的实际权限。2026-07-23 只读回读为 `can_approve_pull_request_reviews=false`，对应仓库界面的 “Allow GitHub Actions to create and approve pull requests（允许流水线创建和批准合并请求）” 未启用。Release Please（发布自动化工具）使用内置 `GITHUB_TOKEN` 创建 Release Pull Request（发布合并请求）前，必须获得当次授权后启用该仓库设置，或者重新审核 GitHub App / fine-grained PAT（GitHub 应用 / 细粒度个人访问令牌）方案；不得静默扩大长期凭据。内置 `GITHUB_TOKEN` 创建的 Pull Request（合并请求）不会自行触发后续流水线，因此维护者整理 `CHANGELOG.md` 的人工提交必须触发常规 Pull Request gate（合并请求门禁），门禁完成前不得合并。获得当次授权后，仓库级 `sha_pinning_required=true` 已回读确认；当前保留 `allowed_actions=all`，但所有 Action（流水线动作）都必须引用完整 commit SHA（提交哈希）。当前 `gh` 授权缺少 `read:packages`，GHCR package（GHCR 软件包）清单留到首次推送后按最小权限核对，不为本地实现扩张长期权限。
 
 - [x] **Step 3（步骤 3）：实现无密钥 PR workflow（合并请求流水线）**
 
@@ -619,75 +620,138 @@ git diff --check
 
 本地反例先在 workflow/CODEOWNERS（流水线 / 代码所有者）文件缺失时按预期失败；实现后 `npm run workflow:check` 4/4、完整 `npm test` 164/164、schema/alias/corpus/eval contract（模式 / 别名 / 语料 / 评估契约）、TypeScript（类型检查）、Next.js build（Next.js 构建）、无索引容器构建和 fail-closed smoke test（失败关闭冒烟测试）均通过。容器构建仍使用 Task 9（任务 9）的已跟踪 clean context（干净上下文）；Task 10（任务 10）文件在提交前未进入该上下文，因此本地容器内运行的是基线 160 个测试。
 
-2026-07-23 创建的受控 [Pull Request #1](https://github.com/kkxiaoa/k8s-yaml-assistant/pull/1) 保持 OPEN（开启）且未合并。首轮 [PR verify run 29997143775](https://github.com/kkxiaoa/k8s-yaml-assistant/actions/runs/29997143775) 在 GitHub-hosted runner（GitHub 托管运行器）上对提交 `5d8d06cc960d48024558bb7833d8d95c47042baa` 成功完成全部步骤：宿主和容器内测试均为 164/164，curated closure（精选闭包）为 28 个资源入口、240 个依赖定义和 268 个文件，tracked build context（已跟踪构建上下文）为 490 个文件、3.01 MB，容器冒烟结果为 `live=200`、`ready=503/index_missing`、`provider network=none`。检查来源回读为 GitHub Actions（GitHub 自动化流水线）应用标识 `15368`，未使用 Secret（密钥）、模型、索引构建、GHCR push（GHCR 推送）、production Environment（生产环境）或 self-hosted runner（自托管运行器）。
+2026-07-23 创建的受控 [Pull Request #1](https://github.com/kkxiaoa/k8s-yaml-assistant/pull/1) 已通过必需检查并合并到 `main`，合并提交为 `273704fb72133abed5d70678d0259de9c600c21c`。首轮 [PR verify run 29997143775](https://github.com/kkxiaoa/k8s-yaml-assistant/actions/runs/29997143775) 在 GitHub-hosted runner（GitHub 托管运行器）上对提交 `5d8d06cc960d48024558bb7833d8d95c47042baa` 成功完成全部步骤：宿主和容器内测试均为 164/164，curated closure（精选闭包）为 28 个资源入口、240 个依赖定义和 268 个文件，tracked build context（已跟踪构建上下文）为 490 个文件、3.01 MB，容器冒烟结果为 `live=200`、`ready=503/index_missing`、`provider network=none`。检查来源回读为 GitHub Actions（GitHub 自动化流水线）应用标识 `15368`，未使用 Secret（密钥）、模型、索引构建、GHCR push（GHCR 推送）、production Environment（生产环境）或 self-hosted runner（自托管运行器）。
 
 **Rollback（回滚）：** 本地 workflow（流水线）可回退；外部仓库/规则变更先停止 Actions（自动化流水线）再恢复上一审核设置。删除仓库或 package（软件包）是破坏性操作，必须单独批准，不能作为自动回滚。
 
 **Stop and report（停止并汇报）：** 仓库归属/套餐、MFA（多因素认证）、规则、PR 权限、Action SHA（流水线动作提交哈希）、GHCR 边界、fork（分叉仓库）结果和剩余功能差异。等待 review（审核）。
 
-## Task 11（任务 11）：构建 8,410 条索引、候选镜像与 draft Release（草稿发布版本）
+## Task 11（任务 11）：独立索引产物、Release Please 与候选发布
 
-**Precondition（前置条件）：** Task 5-10（任务 5-10）全部通过；用户明确授权一次 Voyage document embedding（Voyage 文档向量嵌入）构建及费用、GHCR push（GHCR 推送）和创建 draft Release（草稿发布版本）。
+**Precondition（前置条件）：** Task 5-10（任务 5-10）全部通过。本地契约和流水线实现不需要模型授权；首次执行 `index-build`（索引构建）、写入 GHCR（GitHub 容器镜像仓库）、合并 Release Pull Request（发布合并请求）和人工发布 Draft Release（草稿发布版本）仍分别需要当次确认。
 
 **Files（文件）：**
 
 - Create（创建）：`src/release/manifest.ts`
 - Create（创建）：`src/release/manifest.test.ts`
 - Create（创建）：`scripts/release-manifest.ts`
-- Create（创建）：`.github/workflows/candidate-release.yml`
+- Create（创建）：`.release-please-manifest.json`
+- Create（创建）：`release-please-config.json`
+- Create（创建）：`.github/workflows/release.yml`
+- Create（创建）：`.github/workflows/release-artifacts.yml`
+- Create（创建）：`.github/workflows/index-build.yml`
+- Generate and review in Release PR（在发布合并请求中生成并审核）：`CHANGELOG.md`
+- Modify（修改）：`.github/workflows/pr-verify.yml`
+- Modify（修改）：`Dockerfile`
 - Modify（修改）：`scripts/workflow-contract.test.ts`
+- Modify（修改）：`scripts/container-smoke.ts`
+- Modify（修改）：`scripts/container-smoke.test.ts`
 - Modify（修改）：`package.json`
 - Modify（修改）：`scripts/README.md`
 
-- [ ] **Step 1（步骤 1）：先写 release manifest（发布清单）与候选流水线反例**
+- [x] **Step 1（步骤 1）：先写发布所有权、索引产物和清单反例**
 
-覆盖：
+反例覆盖：
 
-- 缺 source commit/image digest（源提交 / 镜像内容摘要）、Node/base image（Node / 基础镜像）、corpus/model/index identity（语料 / 模型 / 索引身份）、门禁链接、当前生产 digest（内容摘要）或回滚候选语义时失败；
-- 使用 tag（标签）代替 digest（内容摘要）、digest（内容摘要）与 provenance subject（来源证明主体）不一致或索引 count/hash（数量 / 哈希）不一致时失败；
-- manifest（清单）包含 Secret（密钥）、绝对路径、环境快照、用户 payload（负载）或完整日志时失败；
-- candidate workflow（候选流水线）可自动 Publish release（发布版本）、监听 Pull Request（合并请求）、调度 self-hosted runner（自托管运行器）或获取 `DEEPSEEK_API_KEY` 时失败；
-- `VOYAGE_API_KEY` 不在受保护发布 job（任务）内、以 Docker `ARG/ENV` 传递或出现在输出时失败；
-- 镜像标签不是完整 commit SHA（提交哈希）、第三方 Action（流水线动作）未固定完整 SHA（提交哈希）时失败。
+- `package.json`、`package-lock.json` 与 `.release-please-manifest.json` 版本漂移、占位版本 `0.0.0`、非稳定 SemVer（语义化版本）或 tag（标签）不一致时失败；
+- `CHANGELOG.md` 缺状态、用途、`Unreleased`（未发布）或唯一当前版本标题，以及包含占位、绝对路径或密钥赋值时失败；
+- Draft Release（草稿发布版本）不是 draft（草稿）、是 prerelease（预发布）、`tagName/targetCommitish`（标签名 / 目标提交）与 Release Please（发布自动化工具）输出不一致、发布说明缺少真实变更或 `Known limitations`（已知限制）时失败；
+- release manifest（发布清单）缺 source/image/corpus/model/index/index artifact/rollback/proof identity（源码 / 镜像 / 语料 / 模型 / 索引 / 索引产物 / 回滚 / 证明身份），或者 digest/count/hash（内容摘要 / 数量 / 哈希）不一致时失败；
+- Release Please（发布自动化工具）设置 `skip-github-release` 或把草稿、标签、版本和发布说明所有权拆回另一个流水线时失败；
+- release artifacts workflow（发布证据流水线）出现 `workflow_dispatch`（手工触发）、`VOYAGE_API_KEY`、`index:build`、`gh release create/edit`（创建 / 修改发布版本）、Git tag API（Git 标签接口）、`--notes-file`、自动 Publish（发布）或 self-hosted runner（自托管运行器）时失败；
+- `index-build`（索引构建）以外任一 workflow（流水线）读取 Voyage 密钥时失败；索引工作流非手工触发、第三方 Action（流水线动作）未固定完整 SHA（提交哈希）或索引 tag（标签）使用可变名称时失败。
 
-- [ ] **Step 2（步骤 2）：确定供应链证明实现**
+- [x] **Step 2（步骤 2）：固定 Release Please 的单一所有权**
 
-按 Task 10（任务 10）的实际套餐选择 GitHub artifact attestation（GitHub 产物证明）或固定版本 Sigstore/Cosign（Sigstore 镜像签名工具）。若私有仓库只能使用 Sigstore transparency log（Sigstore 透明日志），先向用户展示会公开的 workflow identity/digest metadata（工作流身份 / 摘要元数据）并获得接受；不接受则停止评审 KMS-backed signing（密钥管理服务签名），不能静默取消证明。
+Release Please（发布自动化工具）同时负责：
 
-- [ ] **Step 3（步骤 3）：实现候选流水线**
+1. 在普通 `main` push（主分支推送）后创建或更新唯一 Release Pull Request（发布合并请求）；
+2. 根据 Conventional Commit（约定式提交）更新 `package.json`、`package-lock.json`、`.release-please-manifest.json` 和 `CHANGELOG.md`；
+3. Release Pull Request（发布合并请求）合并后创建 Draft Release（草稿发布版本），并生成正文；
+4. 输出 `release_created/sha/tag_name/version`（发布已创建 / 提交 / 标签名 / 版本）给同一次 workflow run（流水线运行）的候选任务。
 
-`workflow_dispatch` 只接受受保护默认分支的完整 SHA（提交哈希）。GitHub-hosted runner（GitHub 托管运行器）重新执行门禁，通过受保护的发布构建 Secret（密钥）生成当前 8,410 条索引，在同一可信构建中校验 identity（身份）、构建最终镜像、扫描、生成软件物料清单和 provenance（来源证明），推送 SHA tag（提交哈希标签）并读取 registry digest（仓库内容摘要）。
+`release-please-config.json` 使用 `draft: true`。GitHub 官方语义是：创建 Draft Release（草稿发布版本）时只有 `tag_name/target_commitish`（标签名 / 目标提交）关联，不创建 Git tag（Git 标签）；维护者点击 Publish（发布）时才创建标签并产生 `release.published`（发布版本已发布）事件。
 
-流水线最后只创建 draft GitHub Release（GitHub 草稿发布版本）及不可变候选 tag（标签），附加不含 Secret（密钥）的 release manifest（发布清单）和证明包；不得 Publish（发布）、不得创建 deployment job（部署任务）、不得联系生产服务器。
+`manifest.ts` 不再从 `CHANGELOG.md` 摘取正文，也不生成 `release-notes.md`。它只验证源码版本与完整 changelog identity（变更日志身份），再对 Release Please（发布自动化工具）已经写入 Draft Release（草稿发布版本）的正文执行安全校验和 SHA-256（安全哈希算法）绑定。release artifacts workflow（发布证据流水线）不能修改该正文。
 
-- [ ] **Step 4（步骤 4）：执行一次受控候选构建**
+当前实现仍保留 `0.0.0` 占位版本且没有 `CHANGELOG.md`；首次实现合并必须使用真实 `feat:` Conventional Commit（功能类约定式提交）。Release Please（发布自动化工具）随后生成首个 `0.1.0` Release Pull Request（发布合并请求），维护者在其中补齐状态、用途、`Unreleased`（未发布）、真实用户变化与 `Known limitations`（已知限制），再由常规 Pull Request gate（合并请求门禁）审核。
 
-调用边界只允许构建 8,410 条 document embedding（文档向量嵌入）；不调用 answer model（回答模型）、judge（裁判）或正式评估，不把索引写回 Git。核对：
+- [x] **Step 3（步骤 3）：把付费索引构建拆成独立、可复用产物**
 
-- corpus count（语料数量）为 8,410；
-- model/dimension/hash（模型 / 维度 / 哈希）与 manifest（清单）一致；
-- 镜像内索引可 ready（就绪），缺失/篡改索引的负例不 ready（就绪）；
-- 镜像 history/layers/logs（历史 / 层 / 日志）没有 Voyage key（密钥）；
-- 最终镜像、软件物料清单和证明 subject digest（主体内容摘要）一致；
-- 草稿未发布时 K3s（轻量 Kubernetes）零变化。
+`.github/workflows/index-build.yml` 是唯一可读取 `VOYAGE_API_KEY` 的 workflow（流水线），且只允许管理员手工 `workflow_dispatch`（手工触发）：
 
-- [ ] **Step 5（步骤 5）：候选镜像本地/远程门禁**
+1. `inspect`（检查）在接触 Secret（密钥）前执行源码、语料、测试、类型和流水线门禁，并根据 `formatVersion + corpus identityVersion + corpus manifest hash + embedding model`（格式版本 + 语料身份版本 + 语料清单哈希 + 向量模型）计算确定性 `indexHash`（索引哈希）与 `index-v5-<indexHash>` 标签；`RELEASE_INDEX_EMBEDDING_MODEL` 是受版本控制的单一模型来源，三个 workflow（流水线）不得再传入模型字面量，Dockerfile（容器构建文件）只接收由该身份输出形成的构建参数；
+2. 已存在的 GHCR index artifact（GHCR 索引产物）必须先解析为 digest（内容摘要），通过固定 workflow identity（流水线身份）的 Cosign（签名工具）验证，并完整读取 `manifest.json/chunks.jsonl/embeddings.f32` 校验；有效则结束，不重复调用 Voyage；
+3. 只有明确的 `manifest unknown/not found`（清单未知 / 未找到）才进入受保护 `index-build` Environment（索引构建环境）；网络、鉴权、签名或内容异常一律 fail-closed（失败关闭），不能误当“缺失”后付费重建；
+4. `build`（构建）通过 BuildKit secret mount（BuildKit 密钥挂载）生成真实全量索引，推送 `ghcr.io/kkxiaoa/k8s-yaml-assistant-index:<identity>`，回读 digest（内容摘要）、完整校验索引并做 Cosign keyless signature（Cosign 无密钥签名）。
+
+Dockerfile（容器构建文件）中的 `index-artifact`（索引产物）目标是只包含 `/data/index` 的 scratch image（空基础镜像）。最终应用 `runtime`（运行时）目标只能通过 `verified-index=docker-image://...@sha256:...` 外部 BuildKit build context（构建上下文）复制索引；候选构建不依赖 `index-build` 阶段，也不接触 Voyage 密钥。最终应用镜像仍把索引烘焙到 `/app/data/index`，因此生产不需要 PVC（持久卷声明）、Kubernetes Job（Kubernetes 任务）、数据库或向量数据库，Pod（容器组）重启也不会重建索引。
+
+Release Pull Request（发布合并请求）额外运行一个不检出 PR head（合并请求头部提交）、不执行不可信代码的 `release_index`（发布索引）任务：它只检出受保护 `main`，确认当前 identity（身份）的索引 digest（内容摘要）存在且签名有效。普通 Pull Request（合并请求）不读取 GHCR（GitHub 容器镜像仓库），也不会被索引状态阻塞。索引工作流完成后需人工 rerun（重新运行）失败的 Release Pull Request check（发布合并请求检查）。
+
+- [x] **Step 4（步骤 4）：实现无人工参数的候选衔接**
+
+Release Pull Request（发布合并请求）合并后，`.github/workflows/release.yml` 的同一次 Release lifecycle run（发布生命周期流水线运行）只在 `release_created == true` 时调用 `.github/workflows/release-artifacts.yml` reusable workflow（可复用发布证据流水线）。维护者不需要查找 PR ID（合并请求标识）、输入 source SHA（源提交哈希）、版本或标签；这些值全部来自 Release Please（发布自动化工具）输出。
+
+发布证据流水线分为：
+
+1. `verify`（验证）：检出已通过受保护 Pull Request（合并请求）门禁的精确 source SHA（源提交哈希），只复核 release identity / Draft Release / index artifact（发布身份 / 草稿发布版本 / 索引产物）这些发布期状态；不重复执行 schema、corpus、eval、测试、类型检查、Next.js 构建或无索引容器门禁。最终 `runtime` Docker build（运行时容器构建）仍通过 Dockerfile 的 `verify` 与 `build` 阶段执行 `npm test`、TypeScript type check（TypeScript 类型检查）和 Next.js build（Next.js 构建）；
+2. `build`（构建）：以索引 digest（内容摘要）作为只读外部 build context（构建上下文）构建应用镜像，执行 ready smoke test（就绪冒烟测试）、镜像内容审计、Trivy（容器漏洞扫描）、SPDX SBOM（SPDX 软件物料清单）、SLSA provenance（SLSA 来源证明）和 Cosign（签名工具）门禁，生成严格 release manifest（发布清单）；
+3. `attach`（附加）：只使用 `gh release upload --clobber` 把六项证据附加到 Release Please（发布自动化工具）已经创建的 Draft Release（草稿发布版本），回读正文与资产并逐项核验；它没有创建/编辑发布版本、创建标签或 Publish（发布）的能力。
+
+若索引缺失，Release Pull Request（发布合并请求）应先失败；若被绕过或发布证据阶段才发现缺失，该流水线同样 fail-closed（失败关闭）。正确恢复顺序是：人工运行 `index-build`（索引构建）→ 审核索引结果 → 在原 Release lifecycle run（发布生命周期流水线运行）点击 rerun failed jobs（重新运行失败任务）。不重新执行版本准备，不改变 package version（包版本），也不创建第二个 Draft Release（草稿发布版本）。
+
+开发流程不等待某次 release finalize（发布收口）：Release Pull Request（发布合并请求）未合并时，后续 `feat/fix`（功能 / 修复）提交继续进入同一个 PR（合并请求）并刷新版本与 changelog（变更日志）。只有维护者决定合并时才冻结一个发布 source commit（源提交）。
+
+- [x] **Step 5（步骤 5）：固定六项证据与本地门禁**
+
+候选 Draft Release（草稿发布版本）只附加：
+
+1. `sbom.spdx.json`：SPDX SBOM（SPDX 软件物料清单）。
+2. `provenance.slsa.json`：SLSA provenance（SLSA 来源证明）。
+3. `release-manifest.json`：版本、源码、Release Please notes hash（发布说明哈希）、镜像、索引产物、回滚和证明身份。
+4. `sbom-attestation.sigstore.json`：绑定镜像 digest（内容摘要）的软件物料清单证明包。
+5. `provenance-attestation.sigstore.json`：绑定同一镜像 digest（内容摘要）的来源证明包。
+6. `release-manifest.sigstore.json`：绑定发布清单文件摘要的签名包。
+
+当前私有仓库与 GitHub Pro（GitHub 专业版）采用固定 Cosign `v3.1.2`（签名工具版本）的 keyless signing（无密钥签名），并接受 Sigstore transparency log（Sigstore 透明日志）公开 workflow identity/digest metadata（流水线身份 / 摘要元数据）。未来主代码开源后可以切换到 GitHub artifact attestation（GitHub 产物证明），但六项证据和 digest binding（内容摘要绑定）语义不变。
+
+本地验证命令：
 
 ```bash
-docker buildx imagetools inspect <ghcr-image>@sha256:<digest>
-npx tsx scripts/container-smoke.ts --image <ghcr-image>@sha256:<digest> --expect-ready
 node --import tsx --test src/release/manifest.test.ts
 node --import tsx --test scripts/workflow-contract.test.ts
+node --import tsx --test scripts/container-smoke.test.ts
+npm run release:check
+npm run workflow:check
 npm test
-npx tsc --noEmit -p tsconfig.json
+npm run typecheck
+npm run schemas:check
+npm run corpus:closure
+npm run eval:check
+npm run build
+npm run container:build:runtime-base
+npm run container:smoke:runtime-base
 git diff --check
 ```
 
-尖括号只在执行时替换为审核后的非敏感身份，不把命令原样运行。
+2026-07-26 本地门禁结果：四组定向契约 48/48、完整测试 201/201、TypeScript（类型检查）、schema/corpus/eval contract（模式 / 语料 / 评估契约）、Next.js build（Next.js 构建）和 `git diff --check` 全部通过。真实 clean-context container build（干净上下文容器构建）首次暴露“未暂存的 Task 11（任务 11）新文件未进入临时上下文”，先新增反例再把明确审核文件加入白名单；修复后容器内 201/201 与类型检查通过，无索引 runtime-base smoke test（运行时基础镜像冒烟测试）为 `live=200`、`ready=503/index_missing`、`provider network=none`。本轮未调用模型、未重建索引、未推送 GHCR（GitHub 容器镜像仓库）、未创建 Release（发布版本）或 Git tag（Git 标签）。
 
-**Rollback（回滚）：** 保留不可变 digest（内容摘要）作为审计证据但标记“不准发布”；删除/保留 draft Release（草稿发布版本）都不触发部署。若凭据疑似泄露，立即吊销、暂停 candidate workflow（候选流水线）、审计日志并用新 digest（内容摘要）重建，不能覆盖原镜像。
+- [ ] **Step 6（步骤 6）：执行首次独立索引和候选发布**
 
-**Phase 2 Stop（阶段 2 停止点）：** 汇报测试、索引身份、调用次数/费用、镜像 digest（内容摘要）和大小、漏洞、软件物料清单、证明方式、Secret（密钥）审计、草稿内容以及“生产 K3s 零变化”证据。等待独立 review（审核），不得手工发布草稿。
+外部执行前必须核对：
+
+- `index-build` GitHub Environment（索引构建环境）只含专用 `VOYAGE_API_KEY` Environment secret（环境密钥）；
+- repository variable（仓库变量）`CURRENT_PRODUCTION_DIGEST` 首次为 `none`，以后为当前生产镜像 digest（内容摘要）；
+- Actions（自动化流水线）可创建 Release Pull Request（发布合并请求），GHCR（GitHub 容器镜像仓库）写入和读取权限符合最小权限；
+- `v*` tag ruleset（标签规则集）允许维护者从 Draft Release（草稿发布版本）人工 Publish（发布），同时禁止非审核路径改写或删除已发布标签；
+- 当次 Voyage document embedding（Voyage 文档向量嵌入）费用、GHCR push（GHCR 推送）、Release Pull Request（发布合并请求）合并和 Draft Release（草稿发布版本）人工发布分别获得确认。
+
+执行时先手工运行 `index-build`（索引构建）并核对 8,410 条语料、model/dimension/hash/digest/signature（模型 / 维度 / 哈希 / 内容摘要 / 签名）；再重新运行 Release Pull Request check（发布合并请求检查）并合并。Release Please（发布自动化工具）创建 Draft Release（草稿发布版本）后自动进入候选构建。候选通过后仅停在草稿页面，K3s（轻量 Kubernetes）零变化；维护者审核六项证据后才点击 Publish（发布）。
+
+**Rollback（回滚）：** 索引或候选失败时保留 digest（内容摘要）作为审计证据但不发布；修复应生成新身份或新应用 source SHA（源提交哈希），不得覆盖已审核 digest（内容摘要）。凭据疑似泄露时立即吊销、暂停 `index-build`（索引构建）、审核日志和费用；保留或删除 Draft Release（草稿发布版本）都不会部署，只有 Publish（发布）才进入后续生产流水线。
+
+**Phase 2 Stop（阶段 2 停止点）：** 汇报本地门禁、Release Pull Request（发布合并请求）版本/changelog（变更日志）、独立索引调用次数与费用、索引 digest/signature（内容摘要 / 签名）、应用镜像 digest（内容摘要）和大小、漏洞、六项证据、Draft Release（草稿发布版本）正文及“生产 K3s 零变化”证据。等待独立 review（审核），不得未经审核点击 Publish（发布）。
 
 ## Phase 3（阶段 3）：私有部署与直接发布验证
 
@@ -1225,7 +1289,7 @@ npm run eval:fix -- --full
 - 部署镜像固定 commit SHA/digest（提交哈希 / 内容摘要），索引为 8,410 条当前 identity（身份）且运行时零重建；
 - 应用 non-root/read-only（非 root / 只读）、单副本和故障边界实测；
 - raw trace（原始轨迹）已退役，安全 observation（观测）持续启用并通过脱敏、轮转、保留、删除、容量和单写入端验证；
-- PR（合并请求）不接触 Secret（密钥）或生产 runner（运行器），candidate（候选）只创建 draft Release（草稿发布版本），只有人工发布才直接部署；
+- PR（合并请求）不接触 Secret（密钥）或生产 runner（运行器）；Release Please（发布自动化工具）只创建 Draft Release（草稿发布版本），release artifacts workflow（发布证据流水线）只附加证据，只有人工发布才直接部署；
 - 生产 runner（运行器）不执行仓库代码，只调用经过独立设计/测试的固定适配器；
 - 22 仍限固定来源，6443 不公开，80 只挑战/跳转，443 是唯一应用入口；
 - private/portfolio（私有 / 作品集展示）双模式、管理员控制、认证、请求保护和紧急收紧通过；

@@ -52,7 +52,6 @@ export function readinessCodeForIndexMiss(
     case 'incomplete_files':
       return 'index_missing';
     case 'corpus_count_mismatch':
-    case 'corpus_content_mismatch':
     case 'corpus_manifest_mismatch':
     case 'embedding_model_mismatch':
     case 'index_hash_mismatch':

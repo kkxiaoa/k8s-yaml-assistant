@@ -6,12 +6,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { decodeKnowledgeChunk, type KnowledgeChunk } from '../knowledge/chunk';
-import type { CorpusManifest } from '../knowledge/identity';
+import {
+  KNOWLEDGE_IDENTITY_VERSION,
+  type CorpusManifest,
+} from '../knowledge/identity';
 import { canonicalHash, canonicalJson } from '../shared/json';
 import type { IndexBuildChunk } from './index-builder';
 import { getRuntimeConfig } from '../server/runtime-config';
 
-export const INDEX_FORMAT_VERSION = 3 as const;
+export const INDEX_FORMAT_VERSION = 5 as const;
 
 const Sha256Schema = z
   .string()
@@ -25,10 +28,10 @@ const NonEmptyStringSchema = z
 
 export const IndexManifestSchema = z.strictObject({
   formatVersion: z.literal(INDEX_FORMAT_VERSION),
+  corpusIdentityVersion: z.literal(KNOWLEDGE_IDENTITY_VERSION),
   embeddingModel: NonEmptyStringSchema,
   dimension: z.int().positive(),
   count: z.int().positive(),
-  corpusContentHash: Sha256Schema,
   corpusManifestHash: Sha256Schema,
   chunksHash: Sha256Schema,
   embeddingsHash: Sha256Schema,
@@ -58,7 +61,6 @@ export type IndexMissReason =
   | 'invalid_manifest'
   // Identity 层：
   | 'corpus_count_mismatch'
-  | 'corpus_content_mismatch'
   | 'corpus_manifest_mismatch'
   | 'embedding_model_mismatch'
   | 'index_hash_mismatch'
@@ -131,19 +133,25 @@ export function decodeIndexManifest(value: unknown): IndexManifest {
 }
 
 export function computeIndexHash(
-  corpusManifest: Pick<CorpusManifest, 'contentHash' | 'manifestHash'>,
+  corpusManifest: Pick<
+    CorpusManifest,
+    'identityVersion' | 'manifestHash'
+  >,
   embeddingModel: string,
 ): string {
   assertEmbeddingModel(embeddingModel);
   return canonicalHash({
     formatVersion: INDEX_FORMAT_VERSION,
+    corpusIdentityVersion: corpusManifest.identityVersion,
     embeddingModel,
-    corpusContentHash: corpusManifest.contentHash,
     corpusManifestHash: corpusManifest.manifestHash,
   });
 }
 
-function canonicalChunk(chunk: IndexBuildChunk, index: number): KnowledgeChunk {
+function decodeIndexBuildChunk(
+  chunk: IndexBuildChunk,
+  index: number,
+): KnowledgeChunk {
   try {
     return decodeKnowledgeChunk({
       id: chunk.id,
@@ -161,7 +169,7 @@ function canonicalChunk(chunk: IndexBuildChunk, index: number): KnowledgeChunk {
   }
 }
 
-function canonicalExpectedChunks(
+function decodeExpectedChunksById(
   expectation: IndexExpectation,
 ): Map<string, KnowledgeChunk> {
   if (expectation.corpusChunks.length !== expectation.corpusManifest.count) {
@@ -189,27 +197,27 @@ function canonicalExpectedChunks(
   return chunks;
 }
 
-function chunkIdentityMismatch(
+function chunksMatchExpected(
   chunks: readonly KnowledgeChunk[],
   expected: ReadonlyMap<string, KnowledgeChunk>,
-): 'corpus_content_mismatch' | 'corpus_manifest_mismatch' | null {
+): boolean {
+  if (chunks.length !== expected.size) return false;
   for (const chunk of chunks) {
     const current = expected.get(chunk.id);
-    if (current === undefined || chunk.text !== current.text) {
-      return 'corpus_content_mismatch';
-    }
-    if (canonicalJson(chunk) !== canonicalJson(current)) {
-      return 'corpus_manifest_mismatch';
-    }
+    if (
+      current === undefined ||
+      canonicalJson(chunk) !== canonicalJson(current)
+    )
+      return false;
   }
-  return null;
+  return true;
 }
 
 function validateIndexForWrite(
   index: readonly IndexBuildChunk[],
   expectation: IndexExpectation,
 ): { chunks: KnowledgeChunk[]; embeddings: Float32Array; dimension: number } {
-  const expectedChunks = canonicalExpectedChunks(expectation);
+  const expectedChunks = decodeExpectedChunksById(expectation);
   if (index.length === 0) throw new Error('writeIndex: empty index');
   if (index.length !== expectation.corpusManifest.count) {
     throw new Error(
@@ -217,14 +225,28 @@ function validateIndexForWrite(
     );
   }
 
-  const dimension = index[0]!.embedding.length;
+  const ordered = index
+    .map((item, inputIndex) => ({
+      item,
+      inputIndex,
+      chunk: decodeIndexBuildChunk(item, inputIndex),
+    }))
+    .sort(({ chunk: left }, { chunk: right }) =>
+      left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+    );
+  const first = ordered[0]!;
+  if (!Array.isArray(first.item.embedding)) {
+    throw new Error(
+      `writeIndex: embedding must be number[] at index ${first.inputIndex}`,
+    );
+  }
+  const dimension = first.item.embedding.length;
   if (dimension === 0) throw new Error('writeIndex: embedding dimension is 0');
   const seen = new Set<string>();
   const chunks: KnowledgeChunk[] = [];
   const embeddings = new Float32Array(index.length * dimension);
 
-  index.forEach((item, itemIndex) => {
-    const chunk = canonicalChunk(item, itemIndex);
+  ordered.forEach(({ item, inputIndex, chunk }, outputIndex) => {
     if (seen.has(chunk.id)) {
       throw new Error(`writeIndex: duplicate chunk ID ${chunk.id}`);
     }
@@ -233,22 +255,22 @@ function validateIndexForWrite(
 
     if (!Array.isArray(item.embedding)) {
       throw new Error(
-        `writeIndex: embedding must be number[] at index ${itemIndex}`,
+        `writeIndex: embedding must be number[] at index ${inputIndex}`,
       );
     }
     if (item.embedding.length !== dimension) {
       throw new Error(
-        `writeIndex: embedding dimension mismatch at index ${itemIndex}`,
+        `writeIndex: embedding dimension mismatch at index ${inputIndex}`,
       );
     }
     item.embedding.forEach((value, valueIndex) => {
       if (!Number.isFinite(value)) {
         throw new Error(
-          `writeIndex: embedding must contain finite numbers at index ${itemIndex}:${valueIndex}`,
+          `writeIndex: embedding must contain finite numbers at index ${inputIndex}:${valueIndex}`,
         );
       }
     });
-    embeddings.set(item.embedding, itemIndex * dimension);
+    embeddings.set(item.embedding, outputIndex * dimension);
   });
 
   for (let index = 0; index < embeddings.length; index++) {
@@ -258,9 +280,8 @@ function validateIndexForWrite(
       );
     }
   }
-  const mismatch = chunkIdentityMismatch(chunks, expectedChunks);
-  if (mismatch) {
-    throw new Error(`writeIndex: ${mismatch}`);
+  if (!chunksMatchExpected(chunks, expectedChunks)) {
+    throw new Error('writeIndex: corpus_manifest_mismatch');
   }
   return { chunks, embeddings, dimension };
 }
@@ -283,10 +304,10 @@ export function writeIndex(
   );
   const manifest: IndexManifest = {
     formatVersion: INDEX_FORMAT_VERSION,
+    corpusIdentityVersion: expectation.corpusManifest.identityVersion,
     embeddingModel: expectation.embeddingModel,
     dimension,
     count: chunks.length,
-    corpusContentHash: expectation.corpusManifest.contentHash,
     corpusManifestHash: expectation.corpusManifest.manifestHash,
     chunksHash: fileHash(chunksText),
     embeddingsHash: fileHash(embeddingsBuffer),
@@ -343,9 +364,6 @@ function identityMismatch(
       'corpus_count_mismatch',
       `index=${manifest.count}, corpus=${expectation.corpusManifest.count}`,
     );
-  }
-  if (manifest.corpusContentHash !== expectation.corpusManifest.contentHash) {
-    return miss('corpus_content_mismatch');
   }
   if (manifest.corpusManifestHash !== expectation.corpusManifest.manifestHash) {
     return miss('corpus_manifest_mismatch');
@@ -449,7 +467,7 @@ export function readIndex(
   dir: string = resolveIndexDir(),
 ): IndexReadResult {
   assertEmbeddingModel(expectation.embeddingModel);
-  const expectedChunks = canonicalExpectedChunks(expectation);
+  const expectedChunks = decodeExpectedChunksById(expectation);
   const paths = indexPaths(dir);
   const presence = Object.values(paths).map((path) => existsSync(path));
   if (presence.every((exists) => !exists)) return miss('missing_files');
@@ -462,9 +480,8 @@ export function readIndex(
 
   const chunks = readChunks(paths.chunks, manifest);
   if (!Array.isArray(chunks)) return chunks;
-  const chunksMismatch = chunkIdentityMismatch(chunks, expectedChunks);
-  if (chunksMismatch)
-    return miss(chunksMismatch, 'chunks file differs from corpus');
+  if (!chunksMatchExpected(chunks, expectedChunks))
+    return miss('corpus_manifest_mismatch', 'chunks file differs from corpus');
   const embeddings = readEmbeddings(paths.embeddings, manifest);
   if (!(embeddings instanceof Float32Array)) return embeddings;
 

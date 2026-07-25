@@ -1,0 +1,635 @@
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
+import {
+  KNOWLEDGE_IDENTITY_VERSION,
+  type CorpusManifest,
+} from '../knowledge/identity';
+import {
+  computeIndexHash,
+  INDEX_FORMAT_VERSION,
+} from '../retrieval/index-store';
+
+export const RELEASE_ARTIFACT_FILES = [
+  'sbom.spdx.json',
+  'provenance.slsa.json',
+  'release-manifest.json',
+  'sbom-attestation.sigstore.json',
+  'provenance-attestation.sigstore.json',
+  'release-manifest.sigstore.json',
+] as const;
+export const RELEASE_MANIFEST_SCHEMA_VERSION = 2 as const;
+export const RELEASE_INDEX_EMBEDDING_MODEL = 'voyage-3' as const;
+
+const REPOSITORY = 'kkxiaoa/k8s-yaml-assistant';
+const IMAGE_NAME = `ghcr.io/${REPOSITORY}`;
+export const INDEX_ARTIFACT_IMAGE = `${IMAGE_NAME}-index`;
+const RELEASE_ARTIFACTS_WORKFLOW =
+  '.github/workflows/release-artifacts.yml';
+const INDEX_WORKFLOW = '.github/workflows/index-build.yml';
+const RELEASE_ARTIFACTS_WORKFLOW_REF =
+  `${REPOSITORY}/${RELEASE_ARTIFACTS_WORKFLOW}@refs/heads/main`;
+const INDEX_WORKFLOW_REF = `${REPOSITORY}/${INDEX_WORKFLOW}@refs/heads/main`;
+const COSIGN_CERTIFICATE_IDENTITY =
+  `https://github.com/${RELEASE_ARTIFACTS_WORKFLOW_REF}`;
+const INDEX_CERTIFICATE_IDENTITY = `https://github.com/${INDEX_WORKFLOW_REF}`;
+const GITHUB_OIDC_ISSUER = 'https://token.actions.githubusercontent.com';
+const RELEASE_VERSION_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const IMAGE_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
+const BASE_IMAGE_PATTERN = /^[^@\s]+@sha256:[a-f0-9]{64}$/u;
+const INDEX_TAG_PATTERN = new RegExp(
+  `^index-v${INDEX_FORMAT_VERSION}-[a-f0-9]{64}$`,
+  'u',
+);
+const COSIGN_SPDX_PREDICATE = 'https://spdx.dev/Document';
+const GITHUB_SPDX_PREDICATE = 'https://spdx.dev/Document/v2.3';
+const SLSA_PREDICATE = 'https://slsa.dev/provenance/v1';
+
+const SemverSchema = z.string().regex(RELEASE_VERSION_PATTERN);
+const Sha256Schema = z.string().regex(SHA256_PATTERN);
+const ImageDigestSchema = z.string().regex(IMAGE_DIGEST_PATTERN);
+const CommitSchema = z.string().regex(COMMIT_PATTERN);
+const BaseImageSchema = z.string().regex(BASE_IMAGE_PATTERN);
+const NonEmptyStringSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim() === value, {
+    message: 'must be trimmed',
+  });
+
+const PackageJsonSchema = z.object({
+  name: z.literal('k8s-yaml-assistant'),
+  version: SemverSchema,
+});
+
+const PackageLockSchema = z.object({
+  name: z.literal('k8s-yaml-assistant'),
+  version: SemverSchema,
+  packages: z.object({
+    '': z.object({
+      name: z.literal('k8s-yaml-assistant'),
+      version: SemverSchema,
+    }),
+  }),
+});
+
+const ReleasePleaseManifestSchema = z.strictObject({
+  '.': SemverSchema,
+});
+
+export interface ReleaseIdentity {
+  version: string;
+  tag: string;
+  changelogPath: 'CHANGELOG.md';
+  changelogSha256: string;
+}
+
+export interface IndexArtifactIdentity {
+  name: typeof INDEX_ARTIFACT_IMAGE;
+  tag: string;
+  indexHash: string;
+  formatVersion: typeof INDEX_FORMAT_VERSION;
+  corpusIdentityVersion: typeof KNOWLEDGE_IDENTITY_VERSION;
+  embeddingModel: string;
+}
+
+interface ReleaseVersionInput {
+  packageJson: unknown;
+  packageLock: unknown;
+  releasePleaseManifest: unknown;
+}
+
+interface ResolveReleaseIdentityInput extends ReleaseVersionInput {
+  changelog: string;
+}
+
+interface MarkdownSection {
+  label: string;
+  startLine: number;
+  endLine: number;
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function releaseHeadingVersion(label: string): string | null {
+  const match = label.match(
+    /^(?:\[(?<linked>[0-9A-Za-z.+-]+)\](?:\([^)]*\))?|(?<plain>[0-9A-Za-z.+-]+))(?:\s+(?:-|—|\().*)?$/u,
+  );
+  const version = match?.groups?.linked ?? match?.groups?.plain;
+  return version !== undefined && RELEASE_VERSION_PATTERN.test(version)
+    ? version
+    : null;
+}
+
+function markdownSections(
+  markdown: string,
+  level: 2 | 3,
+): MarkdownSection[] {
+  const lines = markdown.replaceAll('\r\n', '\n').split('\n');
+  const headings: Array<{ label: string; line: number }> = [];
+  const headingPattern = new RegExp(
+    `^${'#'.repeat(level)}\\s+(.+?)\\s*$`,
+    'u',
+  );
+  let fence: '`' | '~' | null = null;
+
+  lines.forEach((line, index) => {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/u);
+    if (fenceMatch) {
+      const marker = fenceMatch[1]![0] as '`' | '~';
+      fence = fence === null ? marker : fence === marker ? null : fence;
+      return;
+    }
+    if (fence !== null) return;
+    const heading = line.match(headingPattern);
+    if (heading) headings.push({ label: heading[1]!, line: index });
+  });
+
+  return headings.map((heading, index) => ({
+    label: heading.label,
+    startLine: heading.line + 1,
+    endLine: headings[index + 1]?.line ?? lines.length,
+  }));
+}
+
+function sectionText(markdown: string, section: MarkdownSection): string {
+  const lines = markdown.replaceAll('\r\n', '\n').split('\n');
+  const content = lines
+    .slice(section.startLine, section.endLine)
+    .join('\n')
+    .trim();
+  return content.length === 0 ? '' : `${content}\n`;
+}
+
+function canonicalMarkdown(value: string): string {
+  const normalized = value.replaceAll('\r\n', '\n').trimEnd();
+  return normalized.length === 0 ? '' : `${normalized}\n`;
+}
+
+function assertNoForbiddenReleaseMaterial(
+  value: string,
+  label: string,
+): void {
+  if (/\b(?:TODO|TBD|placeholder)\b|待补充|占位/iu.test(value)) {
+    throw new TypeError(`${label} must not contain placeholder content`);
+  }
+  if (
+    /(?:^|[\s"'`])(?:\/Users\/|\/home\/|\/root\/|\/private\/|[A-Za-z]:\\)/mu.test(
+      value,
+    )
+  ) {
+    throw new TypeError(`${label} must not contain local absolute paths`);
+  }
+  if (
+    /\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|TOKEN|PASSWORD|PRIVATE_KEY|COOKIE_SECRET)\s*[:=]\s*\S+/iu.test(
+      value,
+    )
+  ) {
+    throw new TypeError(`${label} must not contain secret assignments`);
+  }
+}
+
+function assertChangelogStructure(changelog: string, version: string): void {
+  if ((changelog.match(/^# Changelog\s*$/gmu) ?? []).length !== 1) {
+    throw new TypeError('CHANGELOG.md must contain one top-level Changelog heading');
+  }
+  if ((changelog.match(/^> 状态：\S.+$/gmu) ?? []).length !== 1) {
+    throw new TypeError('CHANGELOG.md must declare one current status');
+  }
+  if ((changelog.match(/^> 用途：\S.+$/gmu) ?? []).length !== 1) {
+    throw new TypeError('CHANGELOG.md must declare one purpose');
+  }
+
+  const sections = markdownSections(changelog, 2);
+  const unreleased = sections.filter((section) =>
+    /^\[?Unreleased\]?(?:\([^)]*\))?$/iu.test(section.label),
+  );
+  if (unreleased.length !== 1) {
+    throw new TypeError('CHANGELOG.md must contain one Unreleased section');
+  }
+  const releases = sections.filter(
+    (section) => releaseHeadingVersion(section.label) === version,
+  );
+  if (releases.length !== 1) {
+    throw new TypeError(
+      `CHANGELOG.md must contain one release heading for ${version}`,
+    );
+  }
+}
+
+function assertSafeReleaseNotes(notes: string): void {
+  if (notes.length === 0) {
+    throw new TypeError('release notes must not be empty');
+  }
+  const sections = markdownSections(notes, 3);
+  const limitations = sections.filter((section) =>
+    /^Known limitations$/iu.test(section.label),
+  );
+  if (limitations.length !== 1) {
+    throw new TypeError('release notes must include one Known limitations section');
+  }
+  if (!/^[-*]\s+\S.+$/mu.test(sectionText(notes, limitations[0]!))) {
+    throw new TypeError('Known limitations must contain a concrete entry');
+  }
+  const hasConcreteChange = sections
+    .filter((section) => !/^Known limitations$/iu.test(section.label))
+    .some((section) => /^[-*]\s+\S.+$/mu.test(sectionText(notes, section)));
+  if (!hasConcreteChange) {
+    throw new TypeError(
+      'release notes must contain a concrete change outside Known limitations',
+    );
+  }
+  assertNoForbiddenReleaseMaterial(notes, 'release notes');
+}
+
+function resolveReleaseVersion(input: ReleaseVersionInput): string {
+  const packageData = PackageJsonSchema.parse(input.packageJson);
+  const lockData = PackageLockSchema.parse(input.packageLock);
+  const releasePleaseData = ReleasePleaseManifestSchema.parse(
+    input.releasePleaseManifest,
+  );
+  const version = packageData.version;
+  if (
+    lockData.version !== version ||
+    lockData.packages[''].version !== version ||
+    releasePleaseData['.'] !== version
+  ) {
+    throw new TypeError(
+      'package, lockfile and release-please manifest versions must match',
+    );
+  }
+  return version;
+}
+
+export function resolveReleaseIdentity(
+  input: ResolveReleaseIdentityInput,
+): ReleaseIdentity {
+  const version = resolveReleaseVersion(input);
+  if (version === '0.0.0') {
+    throw new TypeError('package version 0.0.0 is a release placeholder');
+  }
+  assertNoForbiddenReleaseMaterial(input.changelog, 'CHANGELOG.md');
+  assertChangelogStructure(input.changelog, version);
+  return {
+    version,
+    tag: `v${version}`,
+    changelogPath: 'CHANGELOG.md',
+    changelogSha256: sha256(input.changelog),
+  };
+}
+
+export type ReleaseSourceState =
+  | {
+      status: 'placeholder';
+      version: '0.0.0';
+    }
+  | {
+      status: 'release';
+      version: string;
+      identity: ReleaseIdentity;
+    };
+
+export function resolveReleaseSourceState(
+  input: ReleaseVersionInput & { changelog: string | null },
+): ReleaseSourceState {
+  const version = resolveReleaseVersion(input);
+  if (version === '0.0.0') {
+    if (input.changelog !== null) {
+      throw new TypeError(
+        'placeholder release state must not contain CHANGELOG.md',
+      );
+    }
+    return {
+      status: 'placeholder',
+      version,
+    };
+  }
+  if (input.changelog === null) {
+    throw new TypeError('stable release state requires CHANGELOG.md');
+  }
+  return {
+    status: 'release',
+    version,
+    identity: resolveReleaseIdentity({
+      ...input,
+      changelog: input.changelog,
+    }),
+  };
+}
+
+export function deriveIndexArtifactIdentity(
+  corpusManifest: Pick<CorpusManifest, 'identityVersion' | 'manifestHash'>,
+  embeddingModel: string,
+): IndexArtifactIdentity {
+  const indexHash = computeIndexHash(corpusManifest, embeddingModel);
+  return {
+    name: INDEX_ARTIFACT_IMAGE,
+    tag: `index-v${INDEX_FORMAT_VERSION}-${indexHash}`,
+    indexHash,
+    formatVersion: INDEX_FORMAT_VERSION,
+    corpusIdentityVersion: corpusManifest.identityVersion,
+    embeddingModel,
+  };
+}
+
+export function releaseNotesSha256(notes: string): string {
+  const canonical = canonicalMarkdown(notes);
+  assertSafeReleaseNotes(canonical);
+  return sha256(canonical);
+}
+
+const ReleaseSchema = z.strictObject({
+  version: SemverSchema.refine((value) => value !== '0.0.0'),
+  tag: z.string(),
+  sourceCommit: CommitSchema,
+  changelogPath: z.literal('CHANGELOG.md'),
+  changelogSha256: Sha256Schema,
+  releaseNotesSha256: Sha256Schema,
+  manifestBundlePath: z.literal('release-manifest.sigstore.json'),
+});
+
+const ImageSchema = z.strictObject({
+  name: z.literal(IMAGE_NAME),
+  digest: ImageDigestSchema,
+  platform: z.literal('linux/amd64'),
+});
+
+const BuildSchema = z.strictObject({
+  nodeVersion: SemverSchema,
+  nextVersion: SemverSchema,
+  repository: z.literal(REPOSITORY),
+  workflow: z.literal(RELEASE_ARTIFACTS_WORKFLOW),
+  workflowRef: z.literal(RELEASE_ARTIFACTS_WORKFLOW_REF),
+  workflowRunUrl: z
+    .string()
+    .regex(
+      /^https:\/\/github\.com\/kkxiaoa\/k8s-yaml-assistant\/actions\/runs\/[1-9]\d*$/u,
+    ),
+  nodeBaseImage: BaseImageSchema,
+  runtimeBaseImage: BaseImageSchema,
+});
+
+const CorpusSchema = z.strictObject({
+  identityVersion: z.literal(KNOWLEDGE_IDENTITY_VERSION),
+  count: z.int().positive(),
+  manifestHash: Sha256Schema,
+});
+
+const IndexArtifactSchema = z.strictObject({
+  name: z.literal(INDEX_ARTIFACT_IMAGE),
+  tag: z.string().regex(INDEX_TAG_PATTERN),
+  digest: ImageDigestSchema,
+  certificateIdentity: z.literal(INDEX_CERTIFICATE_IDENTITY),
+  oidcIssuer: z.literal(GITHUB_OIDC_ISSUER),
+});
+
+const IndexSchema = z.strictObject({
+  formatVersion: z.literal(INDEX_FORMAT_VERSION),
+  corpusIdentityVersion: z.literal(KNOWLEDGE_IDENTITY_VERSION),
+  embeddingModel: NonEmptyStringSchema,
+  dimension: z.int().positive(),
+  count: z.int().positive(),
+  indexHash: Sha256Schema,
+  chunksHash: Sha256Schema,
+  embeddingsHash: Sha256Schema,
+  createdAt: z.iso.datetime({ offset: true }),
+  artifact: IndexArtifactSchema,
+});
+
+const SbomSchema = z.strictObject({
+  path: z.literal('sbom.spdx.json'),
+  format: z.literal('spdx-2.3-json'),
+  sha256: Sha256Schema,
+});
+
+const ProvenanceSchema = z.strictObject({
+  path: z.literal('provenance.slsa.json'),
+  sha256: Sha256Schema,
+  predicateType: z.literal(SLSA_PREDICATE),
+});
+
+const CosignSbomBundleSchema = z.strictObject({
+  bundlePath: z.literal('sbom-attestation.sigstore.json'),
+  bundleSha256: Sha256Schema,
+  predicateType: z.literal(COSIGN_SPDX_PREDICATE),
+});
+
+const CosignProvenanceBundleSchema = z.strictObject({
+  bundlePath: z.literal('provenance-attestation.sigstore.json'),
+  bundleSha256: Sha256Schema,
+  predicateType: z.literal(SLSA_PREDICATE),
+});
+
+const CosignAttestationsSchema = z.strictObject({
+  provider: z.literal('sigstore-cosign'),
+  subjectDigest: ImageDigestSchema,
+  certificateIdentity: z.literal(COSIGN_CERTIFICATE_IDENTITY),
+  oidcIssuer: z.literal(GITHUB_OIDC_ISSUER),
+  sbom: CosignSbomBundleSchema,
+  provenance: CosignProvenanceBundleSchema,
+});
+
+const GitHubSbomBundleSchema = z.strictObject({
+  bundlePath: z.literal('sbom-attestation.sigstore.json'),
+  bundleSha256: Sha256Schema,
+  predicateType: z.literal(GITHUB_SPDX_PREDICATE),
+});
+
+const GitHubProvenanceBundleSchema = z.strictObject({
+  bundlePath: z.literal('provenance-attestation.sigstore.json'),
+  bundleSha256: Sha256Schema,
+  predicateType: z.literal(SLSA_PREDICATE),
+});
+
+const GitHubAttestationsSchema = z.strictObject({
+  provider: z.literal('github-attestations'),
+  subjectDigest: ImageDigestSchema,
+  repository: z.literal(REPOSITORY),
+  sbom: GitHubSbomBundleSchema,
+  provenance: GitHubProvenanceBundleSchema,
+});
+
+const AttestationsSchema = z.discriminatedUnion('provider', [
+  CosignAttestationsSchema,
+  GitHubAttestationsSchema,
+]);
+
+const DeploymentSchema = z.strictObject({
+  status: z.literal('candidate'),
+  currentProductionDigest: ImageDigestSchema.nullable(),
+  rollback: z.strictObject({
+    eligible: z.boolean(),
+    digest: ImageDigestSchema.nullable(),
+    reason: z.enum(['not_deployed', 'accepted']),
+  }),
+});
+
+export const ReleaseManifestSchema = z
+  .strictObject({
+    schemaVersion: z.literal(RELEASE_MANIFEST_SCHEMA_VERSION),
+    release: ReleaseSchema,
+    image: ImageSchema,
+    build: BuildSchema,
+    corpus: CorpusSchema,
+    index: IndexSchema,
+    sbom: SbomSchema,
+    provenance: ProvenanceSchema,
+    attestations: AttestationsSchema,
+    deployment: DeploymentSchema,
+  })
+  .superRefine((value, context) => {
+    if (value.release.tag !== `v${value.release.version}`) {
+      context.addIssue({
+        code: 'custom',
+        path: ['release', 'tag'],
+        message: 'release tag must be derived from release version',
+      });
+    }
+    if (value.image.digest !== value.attestations.subjectDigest) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attestations', 'subjectDigest'],
+        message: 'attestation subject must match image digest',
+      });
+    }
+    if (value.corpus.count !== value.index.count) {
+      context.addIssue({
+        code: 'custom',
+        path: ['index', 'count'],
+        message: 'index count must match corpus count',
+      });
+    }
+    if (
+      value.index.artifact.tag !==
+      `index-v${INDEX_FORMAT_VERSION}-${value.index.indexHash}`
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['index', 'artifact', 'tag'],
+        message: 'index artifact tag must match index identity',
+      });
+    }
+    const rollback = value.deployment.rollback;
+    const currentProduction = value.deployment.currentProductionDigest;
+    const validRollback =
+      currentProduction === null
+        ? !rollback.eligible &&
+          rollback.digest === null &&
+          rollback.reason === 'not_deployed'
+        : rollback.eligible &&
+          rollback.digest === currentProduction &&
+          rollback.reason === 'accepted';
+    if (!validRollback) {
+      context.addIssue({
+        code: 'custom',
+        path: ['deployment', 'rollback'],
+        message:
+          'rollback identity must match the current production deployment',
+      });
+    }
+  });
+
+export type ReleaseManifest = z.infer<typeof ReleaseManifestSchema>;
+
+export function decodeReleaseManifest(value: unknown): ReleaseManifest {
+  return ReleaseManifestSchema.parse(value);
+}
+
+const DraftReleaseSchema = z.object({
+  name: z.string().min(1),
+  tagName: z.string().min(1),
+  targetCommitish: CommitSchema,
+  isDraft: z.literal(true),
+  isPrerelease: z.literal(false),
+  body: z.string(),
+  assets: z.array(
+    z.object({
+      name: z.string().min(1),
+    }),
+  ),
+});
+
+interface ResolveDraftReleaseIdentityInput {
+  release: unknown;
+  expectedTag: string;
+  expectedSourceCommit: string;
+}
+
+export interface DraftReleaseIdentity {
+  name: string;
+  tagName: string;
+  sourceCommit: string;
+  body: string;
+  releaseNotesSha256: string;
+}
+
+export function resolveDraftReleaseIdentity(
+  input: ResolveDraftReleaseIdentityInput,
+): DraftReleaseIdentity {
+  const release = DraftReleaseSchema.parse(input.release);
+  const expectedTag = z
+    .string()
+    .regex(/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u)
+    .parse(input.expectedTag);
+  const expectedSourceCommit = CommitSchema.parse(input.expectedSourceCommit);
+  if (
+    release.tagName !== expectedTag ||
+    release.targetCommitish !== expectedSourceCommit
+  ) {
+    throw new TypeError(
+      'draft release tag or target commit does not match Release Please output',
+    );
+  }
+  const body = canonicalMarkdown(release.body);
+  return {
+    name: release.name,
+    tagName: release.tagName,
+    sourceCommit: release.targetCommitish,
+    body,
+    releaseNotesSha256: releaseNotesSha256(body),
+  };
+}
+
+interface VerifyDraftReleaseInput extends ResolveDraftReleaseIdentityInput {
+  expectedReleaseNotesSha256: string;
+}
+
+export interface VerifiedDraftRelease extends DraftReleaseIdentity {
+  isDraft: true;
+  isPrerelease: false;
+  assets: Array<{ name: (typeof RELEASE_ARTIFACT_FILES)[number] }>;
+}
+
+export function verifyDraftRelease(
+  input: VerifyDraftReleaseInput,
+): VerifiedDraftRelease {
+  const release = DraftReleaseSchema.parse(input.release);
+  const identity = resolveDraftReleaseIdentity(input);
+  const expectedNotesHash = Sha256Schema.parse(
+    input.expectedReleaseNotesSha256,
+  );
+  if (identity.releaseNotesSha256 !== expectedNotesHash) {
+    throw new TypeError('draft release notes changed after candidate review');
+  }
+
+  const assetNames = release.assets.map((asset) => asset.name);
+  const expectedAssets = [...RELEASE_ARTIFACT_FILES];
+  if (
+    new Set(assetNames).size !== assetNames.length ||
+    assetNames.length !== expectedAssets.length ||
+    [...assetNames].sort().join('\n') !== expectedAssets.sort().join('\n')
+  ) {
+    throw new TypeError('draft release must contain exactly six evidence files');
+  }
+
+  return {
+    ...identity,
+    isDraft: true,
+    isPrerelease: false,
+    assets: RELEASE_ARTIFACT_FILES.map((name) => ({ name })),
+  };
+}

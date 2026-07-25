@@ -95,7 +95,6 @@ function definition(
     },
     metricDefinitionVersion: METRIC_DEFINITION_VERSION,
     config: {
-      corpusContentHash: 'b'.repeat(64),
       corpusManifestHash: 'e'.repeat(64),
       indexHash: 'c'.repeat(64),
       embeddingModel: 'voyage-4',

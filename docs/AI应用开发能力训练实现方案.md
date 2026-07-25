@@ -64,8 +64,8 @@ npm run corpus:stats
 - 已注册 provider：`schema`、`policy`。
 - 尚未注册真实数据 provider：`docs`、`example`。
 - `data/schemas/curated.json` 显式包含 2 个真实集群 CRD（自定义资源定义）：`gateway.networking.k8s.io/v1 HTTPRoute` 和 `cert-manager.io/v1 Certificate`。
-- corpus content hash（语料内容哈希）为 `ae509a3b469ce6c8d6da078901eb72c4976e1a04f6ad59dc5294378d25c5042e`，manifest hash（清单哈希）为 `a8a8cfb843289b7b66b37e6864221e887942f6183da97c9848ea93ea6b689daa`。
-- 现有 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求带 chunks/embeddings file hash（知识片段 / 向量文件哈希）的 v3 格式，因此当前优先以 `format_mismatch` 失效。默认 `voyage-3` 的 v3 index expectation hash（索引期望哈希）为 `4fb46b53480f663a90bb8c7ac62a362eb59b229e0dfec7ad826437bf9ef3bb65`，8,410 条新索引尚未重建。
+- corpus identityVersion（语料身份版本）为 `2`，manifest hash（清单哈希）为 `82621edc73530dffc86e21fe6488a332e98f7d2e1efba3d0d995e7b66fb880c4`。
+- 现有 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求 v5 索引格式和 knowledge identity v2（知识身份版本 2），因此当前以 `format_mismatch` 失效。默认 `voyage-3` 的 v5 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`，8,410 条新索引尚未重建。
 
 ### 3.2 Eval 数据
 
@@ -219,9 +219,9 @@ Case 至少有三个独立维度：
 
 Corpus 与索引要求：
 
-- provider 产出 content hash 和完整 manifest hash。
+- provider 产出覆盖提供方身份和完整 canonical chunks（规范知识片段）的 manifest hash（清单哈希），corpus manifest hash（语料清单哈希）只组合排序后的 provider manifest hash（提供方清单哈希）。
 - chunk ID 在全 corpus 唯一，并区分必要的 source/apiVersion/kind/path。
-- content 变化触发重新 embedding；metadata 变化至少触发 metadata/index identity 更新。
+- 任意 chunk 内容或 metadata（元数据）变化都会更新 corpus/index identity（语料 / 索引身份）；当前没有独立向量复用身份，索引失效后按完整产物重建。
 - serving、eval、index build、corpus stats 共用同一 identity 实现。
 - CRD schema 不得标成 Kubernetes 内置官方 schema。
 
@@ -315,7 +315,7 @@ Stage 是能力分类，不代表执行时序。
 
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引、private/portfolio（私有 / 作品集展示）双模式和安全 observation（观测）边界。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
-3. Phase 2（阶段 2）的 Task 5-7（任务 5-7）已审核；Task 7（任务 7）已把在线索引收紧为共享连续 `Float32Array`、v3 文件哈希身份和 fail-closed（失败关闭）加载，并增加本地一次性 readiness/liveness（就绪 / 存活）状态与 Ask（询问）503 门禁。Task 8（任务 8）已完成 Flash/Pro（快速模型 / 高能力模型）身份分离、显式非敏感配置、能力降级与上游封闭错误边界，当前停在 Task 8 review（任务 8 审核）。尚未创建远程仓库、生产镜像、应用 Kubernetes（容器编排系统）资源或公网入口。
+3. Phase 2（阶段 2）的 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的本地发布契约和流水线门禁等待审核。在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，当前索引契约为 knowledge identity v2（知识身份版本 2）与 index format v5（索引格式版本 5），并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。个人私有 GitHub remote（GitHub 远程仓库）和 `main` 规则集已建立；尚未调用模型构建 8,410 条发布索引，也未创建生产镜像、应用 Kubernetes（容器编排系统）资源或公网入口。
 4. 私有部署和受限入口验证通过后，在公开发布前恢复 Phase B（阶段 B）正式质量重建；新 baseline（基线）审核通过或形成显式风险接受记录后，才进入公开发布。
 5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 

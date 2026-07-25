@@ -3,6 +3,7 @@
 > 状态：已实施并完成逐 Task（任务）审核。
 > 对应设计：`docs/superpowers/specs/2026-07-12-knowledge-provenance-corpus-identity-design.md`。
 > 顺序：纠偏计划 2/4；四份纠偏计划均已完成。
+> 2026-07-25 收敛：当前契约升级为 knowledge identity v2（知识身份版本 2），删除 corpus contentHash（语料内容哈希）及其重复消费者。
 
 ## Goal
 
@@ -72,21 +73,28 @@ Policy 保留当前稳定业务 ID `policy.*`，但 targets/provenance 使用 ca
 
 ```ts
 interface SourceManifest {
-  sourceType: SourceType;
   providerId: string;
+  sourceType: SourceType;
   version?: string;
   generatedAt?: string;
   count: number;
-  contentHash: string;
+  manifestHash: string;
+}
+
+interface CorpusManifest {
+  identityVersion: 2;
+  providers: SourceManifest[];
+  count: number;
   manifestHash: string;
 }
 ```
 
-- `contentHash` 覆盖会影响 embedding 的 canonical `id + text`。
-- `manifestHash` 覆盖 providerId、sourceType、version 和完整 chunk，包括 sourceType、provenance、targets。
-- `generatedAt` 是审计字段，不进入 contentHash/manifestHash。
+- provider 只保留覆盖 providerId、sourceType、version 和完整 chunk 的 `manifestHash`。
+- corpus `manifestHash` 只组合按 providerId 排序后的 provider `manifestHash`；provider `manifestHash` 已绑定 providerId。
+- `generatedAt` 是审计字段，不进入 manifestHash；corpus `identityVersion` 作为独立契约字段并由 index identity 绑定，版本变化必须使索引身份失效。
 - corpus manifest 按 providerId 排序组合，并验证 ID 全局唯一。
 - hash canonicalization 只有一个实现，禁止 corpus/index/eval 各算一套。
+- index（索引）写盘按 chunk ID（知识片段标识）稳定排序并保持 embedding（向量嵌入）对齐；写入后通过 runtime（运行时）读取路径立即回读，失败时不得报告构建成功。
 
 ## File Structure
 
@@ -240,19 +248,18 @@ Stop and report：authority 分布、ID 迁移数量、删除的 snapshot、旧�
 
 - [ ] **Step 1: 写 hash 与 duplicate 反例**
 
-覆盖输入重排、text 变化、metadata-only 变化、generatedAt 变化、provider version 变化，以及 provider 内/跨 provider duplicate ID。`generatedAt` 不进入 hash；provider version 只改变 manifestHash。
+覆盖输入重排、text 变化、metadata-only 变化、generatedAt 变化、provider version 变化，以及 provider 内/跨 provider duplicate ID。`generatedAt` 不进入 hash；其余有效身份变化必须传递到 provider/corpus manifestHash。
 
 - [ ] **Step 2: 建立 provider manifests**
 
 - schema providerId = `schema.curated-openapi`。
 - policy providerId = `policy.organization`。
-- contentHash 覆盖排序后的 canonical id+text。
-- manifestHash 覆盖 providerId/sourceType/version 和完整 canonical chunks。
-- corpus manifest 按 providerId 排序组合，并验证全局 ID 唯一。
+- provider manifestHash 覆盖 providerId/sourceType/version 和完整 canonical chunks。
+- corpus manifestHash 只组合排序后的 provider manifestHash，并验证全局 ID 唯一；corpus identityVersion 由 index identity 独立绑定。
 
 - [ ] **Step 3: 删除重复 hash 实现**
 
-corpus、stats 和 eval run config 只使用 knowledge identity 公开入口。retrieval/faith 记录 corpus contentHash/manifestHash；generation/fix validation identity 使用 schema provider manifest。
+corpus、stats 和 eval run config 只使用 knowledge identity 公开入口。retrieval/faith 记录 corpus manifestHash，并通过 indexHash 绑定 identityVersion；generation/fix validation identity 使用 schema provider manifest。
 
 ```bash
 npx tsx src/knowledge/identity.test.ts
@@ -263,7 +270,7 @@ npx tsc --noEmit -p tsconfig.json
 
 Stop and report：provider manifests、corpus identity、chunk count 和 text 是否保持。
 
-## Task 4: Index v2 与 Runtime 一致性
+## Task 4: Index 与 Runtime 一致性
 
 **Files:**
 
@@ -273,9 +280,9 @@ Stop and report：provider manifests、corpus identity、chunk count 和 text �
 - Modify: `src/retrieval/trace.ts`
 - Modify: `scripts/index-build.ts`
 
-- [ ] **Step 1: 写 index v2 反例**
+- [ ] **Step 1: 写 index identity 反例**
 
-IndexManifest 必须包含 formatVersion、embeddingModel、dimension、count、corpus contentHash/manifestHash、indexHash 和 createdAt。测试 text/metadata/model/dimension/count 不匹配、损坏 JSON、NaN embedding 与 duplicate ID 均明确失败。
+IndexManifest 必须包含 formatVersion、embeddingModel、dimension、count、corpus manifestHash、indexHash 和 createdAt。测试 chunk manifest/model/dimension/count 不匹配、损坏 JSON、NaN embedding 与 duplicate ID 均明确失败。
 
 - [ ] **Step 2: 实现单一 identity 输入**
 

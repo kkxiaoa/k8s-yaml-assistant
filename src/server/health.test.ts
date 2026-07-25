@@ -155,7 +155,6 @@ test('所有索引 miss reason 收敛为有限 readiness 错误码', async () =>
     ['missing_files', 'index_missing'],
     ['incomplete_files', 'index_missing'],
     ['corpus_count_mismatch', 'index_identity_mismatch'],
-    ['corpus_content_mismatch', 'index_identity_mismatch'],
     ['corpus_manifest_mismatch', 'index_identity_mismatch'],
     ['embedding_model_mismatch', 'index_identity_mismatch'],
     ['index_hash_mismatch', 'index_identity_mismatch'],
