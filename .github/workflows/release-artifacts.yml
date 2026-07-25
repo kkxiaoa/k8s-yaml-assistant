@@ -1,0 +1,467 @@
+name: Build draft release artifacts
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Release Please source commit
+        required: true
+        type: string
+      tag:
+        description: Release Please tag name
+        required: true
+        type: string
+      version:
+        description: Release Please semantic version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify draft release and index
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      index_digest: ${{ steps.index_artifact.outputs.digest }}
+      embedding_model: ${{ steps.index.outputs.embedding_model }}
+      release_notes_sha256: ${{ steps.release.outputs.release_notes_sha256 }}
+      current_production_digest: ${{ steps.release.outputs.current_production_digest }}
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate Release Please outputs
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "source_sha must be a full lowercase commit SHA" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "version must be stable semantic version" >&2
+            exit 1
+          fi
+          test "$RELEASE_TAG" = "v$RELEASE_VERSION"
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check reviewed release identity
+        run: npm run release:manifest -- check
+
+      - name: Read Release Please draft and notes
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          CURRENT_PRODUCTION_DIGEST: ${{ vars.CURRENT_PRODUCTION_DIGEST }}
+        run: |
+          if [[ "$CURRENT_PRODUCTION_DIGEST" != "none" ]] &&
+             [[ ! "$CURRENT_PRODUCTION_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "CURRENT_PRODUCTION_DIGEST must be none or an image digest" >&2
+            exit 1
+          fi
+          test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
+          mkdir -p candidate-state release-artifacts
+          gh release view "$RELEASE_TAG" \
+            --json name,tagName,targetCommitish,isDraft,isPrerelease,body,assets \
+            > candidate-state/draft-release.json
+          npm run release:manifest -- prepare \
+            --release-json candidate-state/draft-release.json \
+            --source-sha "$SOURCE_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+          echo "current_production_digest=$CURRENT_PRODUCTION_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve required index identity
+        id: index
+        run: |
+          npm run release:manifest -- index-identity \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.2
+
+      - name: Verify immutable index artifact
+        id: index_artifact
+        env:
+          INDEX_IMAGE: ${{ steps.index.outputs.index_image }}
+          INDEX_TAG: ${{ steps.index.outputs.index_tag }}
+          EMBEDDING_MODEL: ${{ steps.index.outputs.embedding_model }}
+        run: |
+          INDEX_DIGEST="$(
+            docker buildx imagetools inspect "$INDEX_IMAGE:$INDEX_TAG" \
+              --format '{{json .Manifest.Digest}}' | tr -d '"'
+          )"
+          if [[ ! "$INDEX_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "required index artifact is missing or has no immutable digest" >&2
+            exit 1
+          fi
+          INDEX_REF="$INDEX_IMAGE@$INDEX_DIGEST"
+          CERTIFICATE_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/index-build.yml@refs/heads/main"
+          OIDC_ISSUER="https://token.actions.githubusercontent.com"
+          cosign verify \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$INDEX_REF" \
+            > candidate-state/index-signature-verification.json
+          docker pull "$INDEX_REF"
+          container_id="$(docker create "$INDEX_REF" ignored)"
+          docker cp "$container_id:/data/index" candidate-state/index
+          docker rm "$container_id"
+          npm run release:manifest -- verify-index \
+            --index-dir candidate-state/index \
+            --embedding-model "$EMBEDDING_MODEL"
+          echo "digest=$INDEX_DIGEST" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build, scan, and attest release image
+    needs:
+      - verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build and push immutable candidate
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/kkxiaoa/k8s-yaml-assistant:${{ inputs.source_sha }}
+          build-contexts: verified-index=docker-image://ghcr.io/kkxiaoa/k8s-yaml-assistant-index@${{ needs.verify.outputs.index_digest }}
+          provenance: mode=min,version=v1
+          sbom: false
+          cache-from: type=gha,scope=release-${{ inputs.source_sha }}
+          cache-to: type=gha,mode=max,scope=release-${{ inputs.source_sha }}
+
+      - name: Pull and inspect candidate
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          mkdir -p candidate-state release-artifacts
+          IMAGE_REF="ghcr.io/kkxiaoa/k8s-yaml-assistant@$IMAGE_DIGEST"
+          docker pull "$IMAGE_REF"
+          container_id="$(docker create "$IMAGE_REF")"
+          docker cp "$container_id:/app/data/index/manifest.json" \
+            candidate-state/index-manifest.json
+          docker rm "$container_id"
+          docker history --no-trunc "$IMAGE_REF" \
+            > candidate-state/image-history.txt
+          node --import tsx scripts/container-smoke.ts \
+            --image "$IMAGE_REF" \
+            --expect-ready
+
+      - name: Read unchanged draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release view "$RELEASE_TAG" \
+            --json name,tagName,targetCommitish,isDraft,isPrerelease,body,assets \
+            > candidate-state/draft-release.json
+
+      - name: Export SLSA provenance
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          IMAGE_REF="ghcr.io/kkxiaoa/k8s-yaml-assistant@$IMAGE_DIGEST"
+          docker buildx imagetools inspect "$IMAGE_REF" \
+            --format "{{ json .Provenance.SLSA }}" \
+            > release-artifacts/provenance.slsa.json
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ghcr.io/kkxiaoa/k8s-yaml-assistant@${{ steps.image.outputs.digest }}
+          format: spdx-json
+          output-file: release-artifacts/sbom.spdx.json
+          syft-version: v1.44.0
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Record vulnerability report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/kkxiaoa/k8s-yaml-assistant@${{ steps.image.outputs.digest }}
+          format: json
+          output: candidate-state/trivy-results.json
+          exit-code: "0"
+          ignore-unfixed: false
+          vuln-type: os,library
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          scanners: vuln
+          hide-progress: true
+          version: v0.70.0
+
+      - name: Reject high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/kkxiaoa/k8s-yaml-assistant@${{ steps.image.outputs.digest }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: false
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          hide-progress: true
+          version: v0.70.0
+          skip-setup-trivy: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.2
+
+      - name: Attest and verify candidate evidence
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          IMAGE_REF="ghcr.io/kkxiaoa/k8s-yaml-assistant@$IMAGE_DIGEST"
+          CERTIFICATE_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/release-artifacts.yml@refs/heads/main"
+          OIDC_ISSUER="https://token.actions.githubusercontent.com"
+          SUBJECT_DIGEST="${IMAGE_DIGEST#sha256:}"
+
+          cosign attest --yes \
+            --use-signing-config=true \
+            --predicate release-artifacts/sbom.spdx.json \
+            --type spdxjson \
+            --bundle release-artifacts/sbom-attestation.sigstore.json \
+            "$IMAGE_REF"
+          cosign attest --yes \
+            --use-signing-config=true \
+            --predicate release-artifacts/provenance.slsa.json \
+            --type slsaprovenance1 \
+            --bundle release-artifacts/provenance-attestation.sigstore.json \
+            "$IMAGE_REF"
+          cosign verify-attestation \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            --type spdxjson \
+            "$IMAGE_REF" \
+            > candidate-state/sbom-registry-verification.json
+          cosign verify-attestation \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            --type slsaprovenance1 \
+            "$IMAGE_REF" \
+            > candidate-state/provenance-registry-verification.json
+          cosign verify-blob-attestation \
+            --bundle release-artifacts/sbom-attestation.sigstore.json \
+            --digest "$SUBJECT_DIGEST" \
+            --digestAlg sha256 \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            --type spdxjson \
+            > candidate-state/sbom-bundle-verification.json
+          cosign verify-blob-attestation \
+            --bundle release-artifacts/provenance-attestation.sigstore.json \
+            --digest "$SUBJECT_DIGEST" \
+            --digestAlg sha256 \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            --type slsaprovenance1 \
+            > candidate-state/provenance-bundle-verification.json
+
+      - name: Build and sign release manifest
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          INDEX_DIGEST: ${{ needs.verify.outputs.index_digest }}
+          EMBEDDING_MODEL: ${{ needs.verify.outputs.embedding_model }}
+          CURRENT_PRODUCTION_DIGEST: ${{ needs.verify.outputs.current_production_digest }}
+          EXPECTED_RELEASE_NOTES_SHA256: ${{ needs.verify.outputs.release_notes_sha256 }}
+          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          npm run release:manifest -- finalize \
+            --source-sha "${{ inputs.source_sha }}" \
+            --release-json candidate-state/draft-release.json \
+            --image-digest "$IMAGE_DIGEST" \
+            --workflow-run-url "$WORKFLOW_RUN_URL" \
+            --current-production-digest "$CURRENT_PRODUCTION_DIGEST" \
+            --index-manifest candidate-state/index-manifest.json \
+            --embedding-model "$EMBEDDING_MODEL" \
+            --index-artifact-digest "$INDEX_DIGEST" \
+            --sbom release-artifacts/sbom.spdx.json \
+            --provenance release-artifacts/provenance.slsa.json \
+            --sbom-bundle release-artifacts/sbom-attestation.sigstore.json \
+            --provenance-bundle release-artifacts/provenance-attestation.sigstore.json \
+            --out release-artifacts/release-manifest.json
+
+          test "$(
+            node -e "const m=require('./release-artifacts/release-manifest.json');process.stdout.write(m.release.releaseNotesSha256)"
+          )" = "$EXPECTED_RELEASE_NOTES_SHA256"
+          CERTIFICATE_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/release-artifacts.yml@refs/heads/main"
+          OIDC_ISSUER="https://token.actions.githubusercontent.com"
+          cosign sign-blob --yes \
+            --use-signing-config=true \
+            --bundle release-artifacts/release-manifest.sigstore.json \
+            release-artifacts/release-manifest.json
+          cosign verify-blob \
+            --bundle release-artifacts/release-manifest.sigstore.json \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            release-artifacts/release-manifest.json
+
+      - name: Upload release review package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-artifacts-${{ inputs.source_sha }}
+          path: |
+            candidate-state/
+            release-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  attach:
+    name: Attach and verify draft release evidence
+    needs:
+      - verify
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Download release review package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-artifacts-${{ inputs.source_sha }}
+          path: .
+
+      - name: Upload exactly six evidence files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          (
+            cd release-artifacts
+            sha256sum \
+              sbom.spdx.json \
+              provenance.slsa.json \
+              release-manifest.json \
+              sbom-attestation.sigstore.json \
+              provenance-attestation.sigstore.json \
+              release-manifest.sigstore.json
+          ) > candidate-state/release-assets.sha256
+          gh release upload "$RELEASE_TAG" \
+            release-artifacts/sbom.spdx.json \
+            release-artifacts/provenance.slsa.json \
+            release-artifacts/release-manifest.json \
+            release-artifacts/sbom-attestation.sigstore.json \
+            release-artifacts/provenance-attestation.sigstore.json \
+            release-artifacts/release-manifest.sigstore.json \
+            --clobber
+
+      - name: Verify draft release readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          gh release view "$RELEASE_TAG" \
+            --json name,tagName,targetCommitish,isDraft,isPrerelease,body,assets \
+            > candidate-state/draft-release-readback.json
+          mkdir -p candidate-state/release-readback
+          gh release download "$RELEASE_TAG" \
+            --dir candidate-state/release-readback
+          (
+            cd candidate-state/release-readback
+            sha256sum --check ../release-assets.sha256
+          )
+          npm run release:manifest -- verify-draft \
+            --release-json candidate-state/draft-release-readback.json \
+            --release-manifest candidate-state/release-readback/release-manifest.json \
+            --source-sha "$SOURCE_SHA" \
+            --tag "$RELEASE_TAG"

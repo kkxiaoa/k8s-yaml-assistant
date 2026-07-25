@@ -166,7 +166,6 @@ function faithRun(params: {
     artifactPaths: { trace: traceRelativePath(params.id, 'faith') },
     metricDefinitionVersion: 'legacy-v1',
     config: {
-      corpusContentHash: HASH_A,
       corpusManifestHash: HASH_B,
       indexHash: HASH_B,
       embeddingModel: 'voyage-3',

@@ -100,7 +100,6 @@ function requiredMetrics(
 
 function configForKind(kind: EvalKind): EvalRun['config'] {
   const retrieval = {
-    corpusContentHash: HASH_A,
     corpusManifestHash: HASH_B,
     indexHash: HASH_C,
     embeddingModel: 'embedding-model',

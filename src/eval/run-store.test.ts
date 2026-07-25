@@ -63,7 +63,6 @@ function runFixture(
     artifactPaths: { trace: `traces/${id}.retrieval.jsonl` },
     metricDefinitionVersion: 'legacy-v1',
     config: {
-      corpusContentHash: HASH_A,
       corpusManifestHash: HASH_B,
       indexHash: HASH_B,
       embeddingModel: 'embedding-model',

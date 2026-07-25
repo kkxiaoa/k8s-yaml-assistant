@@ -4,6 +4,7 @@
 > 用途：定义知识形态、权威来源、目标资源、provider manifest、corpus 指纹和索引失效边界；本轮不 ingest docs/examples。
 > 对应计划：`docs/superpowers/plans/2026-07-12-knowledge-provenance-corpus-identity.md`。
 > 顺序：第二项实施。依赖 Artifact Protocol，并在 Evaluator Validity 前完成知识 ID 和 identity 迁移。
+> 2026-07-25 收敛：当前契约升级为 knowledge identity v2（知识身份版本 2），删除无独立行为消费者的 corpus contentHash（语料内容哈希）。
 
 ## 1. 目标
 
@@ -80,30 +81,37 @@ schema chunk ID 至少区分 source type、apiVersion、kind 和 path。provider
 
 ```ts
 interface SourceManifest {
-  sourceType: SourceType;
   providerId: string;
+  sourceType: SourceType;
   version?: string;
   generatedAt?: string;
   count: number;
-  contentHash: string;
+  manifestHash: string;
+}
+
+interface CorpusManifest {
+  identityVersion: 2;
+  providers: SourceManifest[];
+  count: number;
   manifestHash: string;
 }
 ```
 
-- `contentHash` 覆盖影响 embedding 的 ID/text 内容。
-- `manifestHash` 覆盖 providerId、sourceType、version 和完整 canonical chunk，包括 sourceType、provenance 和 targets。
-- `generatedAt` 只用于审计，不进入 hash；相同输入重复 ingestion 不应仅因时间变化失效索引。
-- corpus manifest 组合所有 provider manifest，并验证 ID 唯一。
+- provider `manifestHash` 覆盖 providerId、sourceType、version 和完整 canonical chunk，包括 provenance 和 targets；provider 不再重复维护 `contentHash`。
+- corpus `manifestHash` 只组合按 providerId 排序后的 provider `manifestHash`；provider `manifestHash` 已绑定 providerId，不在 corpus 根输入中重复保存。
+- corpus `identityVersion` 明确整套哈希算法契约，并由 index identity 绑定；算法变化必须升级该版本。`generatedAt` 只用于审计，不进入 hash；相同输入重复 ingestion 不应仅因时间变化失效索引。
+- corpus manifest 组合所有 provider manifest，并验证 provider ID 和 chunk ID 全局唯一。
 - serving、eval 和 index build 必须记录同一 corpus manifest identity。
 
 ## 7. 索引一致性
 
-持久化索引至少记录 format version、embedding model、content hash 和 manifest hash。
+持久化索引至少记录 format version（格式版本）、embedding model（向量嵌入模型）和 corpus manifest hash（语料清单哈希）。
 
-- text/content 变化必须重新生成 embedding。
-- metadata-only 变化不得继续读取旧 chunk metadata；第一版可以重建索引，后续再优化为复用向量、刷新 metadata。
+- 任意 canonical chunk（规范知识片段）变化不得继续读取旧索引；当前没有独立向量复用身份，统一重建完整索引产物。
 - corpus hash 实现只能有一份，index-store、eval 和 corpus stats 共用。
+- index（索引）写盘按 chunk ID（知识片段标识）稳定排序并同步重排 embedding（向量嵌入），保证相同语料身份不因 provider（知识提供方）输入顺序产生不同数据文件。
 - runtime 读取索引时验证 manifest 与 chunk 数量、维度和 identity。
+- build runner（构建运行器）写入后必须通过同一 runtime（运行时）读取路径立即回读；校验失败不得报告构建成功。
 
 ## 8. Source Policy 与 Selection
 

@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { RELEASE_INDEX_EMBEDDING_MODEL } from '../src/release/manifest';
 
 const NODE_IMAGE_DIGEST =
   'sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d';
@@ -22,7 +23,8 @@ const RUNTIME_IMAGE_DIGEST =
 const REQUIRED_STAGES = [
   'deps',
   'verify',
-  'index',
+  'index-build',
+  'index-artifact',
   'build',
   'runtime-base',
   'runtime',
@@ -37,17 +39,31 @@ const REQUIRED_IGNORES = [
   'data/eval/runs',
   'data/eval/traces',
 ] as const;
-const WORKTREE_CONTAINER_FILES = [
+export const REVIEWED_WORKTREE_CONTEXT_FILES = [
+  '.github/workflows/index-build.yml',
+  '.github/workflows/release-artifacts.yml',
+  '.github/workflows/release.yml',
+  '.release-please-manifest.json',
   '.dockerignore',
   'Dockerfile',
+  'release-please-config.json',
   'scripts/container-smoke.ts',
   'scripts/container-smoke.test.ts',
+  'scripts/release-manifest-cli.test.ts',
+  'scripts/release-manifest.ts',
+  'src/release/manifest.test.ts',
+  'src/release/manifest.ts',
 ] as const;
 const LOCAL_IMAGE = /^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 const IMMUTABLE_IMAGE =
   /^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/;
 const APP_UID_GID = '10001:10001';
 const TMP_SIZE_BYTES = 64 * 1024 * 1024;
+const CANDIDATE_INDEX_PATHS = new Set([
+  'app/data/index/manifest.json',
+  'app/data/index/chunks.jsonl',
+  'app/data/index/embeddings.f32',
+]);
 
 interface ContainerBuildContract {
   dockerfile: string;
@@ -203,7 +219,13 @@ export function assertContainerBuildContract(
   const knownStages = new Set(stages.keys());
   for (const instruction of instructions) {
     const from = /^FROM\s+(\S+)\s+AS\s+(\S+)$/iu.exec(instruction);
-    if (!from || knownStages.has(from[1]!.toLowerCase())) continue;
+    if (
+      !from ||
+      from[1]!.toLowerCase() === 'scratch' ||
+      knownStages.has(from[1]!.toLowerCase())
+    ) {
+      continue;
+    }
     if (!/@sha256:[a-f0-9]{64}$/u.test(from[1]!)) {
       fail(`external base image must use a sha256 digest: ${from[1]}`);
     }
@@ -223,16 +245,16 @@ export function assertContainerBuildContract(
   if (!verify.includes('RUN npm test') || !verify.includes('RUN npm run typecheck')) {
     fail('verify stage must run tests and TypeScript typecheck');
   }
-  const index = requireStageText(stages, 'index');
+  const index = requireStageText(stages, 'index-build');
   if (
     !index.includes(
       '--mount=type=secret,id=voyage_api_key,required=true',
     )
   ) {
-    fail('index stage must use the required BuildKit secret mount');
+    fail('index-build stage must use the required BuildKit secret mount');
   }
   if (!index.includes('npm run index:build')) {
-    fail('index stage must build the real corpus index');
+    fail('index-build stage must build the real corpus index');
   }
   if (/^\s*(?:ARG|ENV)\s+.*VOYAGE_API_KEY/im.test(contract.dockerfile)) {
     fail('VOYAGE_API_KEY must not be declared by ARG or ENV');
@@ -241,6 +263,15 @@ export function assertContainerBuildContract(
   const build = requireStageText(stages, 'build');
   if (!build.includes('RUN --network=none npm run build')) {
     fail('Next build must run with network disabled');
+  }
+  const indexArtifact = requireStageText(stages, 'index-artifact');
+  if (
+    !indexArtifact.startsWith('FROM scratch AS index-artifact') ||
+    !indexArtifact.includes(
+      'COPY --from=index-build /app/data/index /data/index',
+    )
+  ) {
+    fail('index-artifact must contain only the independently built index');
   }
   const runtimeBase = requireStageText(stages, 'runtime-base');
   for (const required of [
@@ -258,8 +289,13 @@ export function assertContainerBuildContract(
   if (!runtime.startsWith('FROM runtime-base AS runtime')) {
     fail('runtime stage must inherit the tested runtime-base stage');
   }
-  if (!runtime.includes('COPY --from=index')) {
-    fail('runtime stage must receive the independently built index');
+  if (
+    !runtime.includes(
+      'COPY --from=verified-index --chown=10001:10001 /data/index ./data/index',
+    ) ||
+    runtime.includes('COPY --from=index-build')
+  ) {
+    fail('runtime stage must consume the immutable verified-index build context');
   }
 }
 
@@ -277,6 +313,7 @@ export function assertImmutableDeploymentImageReference(image: string): void {
 
 export function findForbiddenRuntimePaths(
   paths: readonly string[],
+  options: { allowCandidateIndex?: boolean } = {},
 ): string[] {
   return paths.filter((rawPath) => {
     const path = rawPath.replace(/^\.\//u, '').replace(/\/$/u, '');
@@ -295,7 +332,8 @@ export function findForbiddenRuntimePaths(
       isTypeScriptSource ||
       path.startsWith('app/node_modules/typescript/') ||
       path.startsWith('app/.npm/') ||
-      path.startsWith('app/data/index/') ||
+      (path.startsWith('app/data/index/') &&
+        (!options.allowCandidateIndex || !CANDIDATE_INDEX_PATHS.has(path))) ||
       path.startsWith('app/data/observability/') ||
       path.startsWith('app/data/eval/runs/') ||
       path.startsWith('app/data/eval/traces/') ||
@@ -388,7 +426,9 @@ function prepareTrackedBuildContext(root: string): {
   try {
     const paths = selectBuildContextPaths(
       gitTrackedFiles(root),
-      WORKTREE_CONTAINER_FILES.filter((path) => existsSync(join(root, path))),
+      REVIEWED_WORKTREE_CONTEXT_FILES.filter((path) =>
+        existsSync(join(root, path)),
+      ),
     );
     for (const path of paths) copyBuildContextFile(root, directory, path);
 
@@ -548,7 +588,10 @@ function assertContainerIsolation(name: string): void {
   }
 }
 
-function assertRuntimeContents(name: string): void {
+function assertRuntimeContents(
+  name: string,
+  allowCandidateIndex: boolean,
+): void {
   const auditRoot = mkdtempSync(join(tmpdir(), 'k8s-yaml-assistant-image-audit-'));
   const archive = join(auditRoot, 'rootfs.tar');
   try {
@@ -559,7 +602,9 @@ function assertRuntimeContents(name: string): void {
       .split(/\r?\n/u)
       .filter((path) => path.length > 0)
       .map((path) => path.replace(/^\.\//u, '').replace(/\/$/u, ''));
-    const forbidden = findForbiddenRuntimePaths(paths);
+    const forbidden = findForbiddenRuntimePaths(paths, {
+      allowCandidateIndex,
+    });
     if (forbidden.length > 0) {
       fail(`runtime image contains forbidden paths:\n${forbidden.join('\n')}`);
     }
@@ -568,6 +613,7 @@ function assertRuntimeContents(name: string): void {
       'app/data/policies.json',
       'app/data/aliases/schema-field-aliases.jsonl',
       'app/data/schemas/generated/resources/core.v1.Pod.json',
+      ...(allowCandidateIndex ? CANDIDATE_INDEX_PATHS : []),
     ]) {
       if (!paths.includes(required)) fail(`runtime image missing ${required}`);
     }
@@ -590,8 +636,16 @@ function assertRuntimeContents(name: string): void {
   }
 }
 
-async function smokeRuntimeBase(image: string): Promise<void> {
-  assertLocalSmokeImageReference(image);
+async function smokeRuntime(
+  image: string,
+  expectation: 'ready' | 'not-ready',
+): Promise<void> {
+  const expectReady = expectation === 'ready';
+  if (expectReady) {
+    assertImmutableDeploymentImageReference(image);
+  } else {
+    assertLocalSmokeImageReference(image);
+  }
   assertImageConfig(image);
   const name = `k8s-yaml-assistant-smoke-${randomUUID()}`;
   try {
@@ -620,7 +674,7 @@ async function smokeRuntimeBase(image: string): Promise<void> {
       '--env',
       'VOYAGE_RERANK_URL=https://api.voyageai.com/v1/rerank',
       '--env',
-      'VOYAGE_EMBEDDING_MODEL=voyage-3',
+      `VOYAGE_EMBEDDING_MODEL=${RELEASE_INDEX_EMBEDDING_MODEL}`,
       '--env',
       'VOYAGE_RERANK_MODEL=rerank-2.5',
       '--env',
@@ -638,31 +692,50 @@ async function smokeRuntimeBase(image: string): Promise<void> {
     if (live.status !== 200 || JSON.stringify(live.body) !== '{"status":"live"}') {
       fail(`unexpected liveness response: ${JSON.stringify(live)}`);
     }
-    const ready = await waitForHealth(name, '/api/health/ready');
-    if (
+    const ready = await waitForHealth(
+      name,
+      '/api/health/ready',
+      expectReady ? 60_000 : 30_000,
+    );
+    if (expectReady) {
+      if (
+        ready.status !== 200 ||
+        JSON.stringify(ready.body) !== '{"status":"ready"}'
+      ) {
+        fail(`candidate runtime must be ready: ${JSON.stringify(ready)}`);
+      }
+    } else if (
       ready.status !== 503 ||
       JSON.stringify(ready.body) !==
         '{"status":"not_ready","code":"index_missing"}'
     ) {
-      fail(`runtime-base must fail readiness on index_missing: ${JSON.stringify(ready)}`);
+      fail(
+        `runtime-base must fail readiness on index_missing: ${JSON.stringify(ready)}`,
+      );
     }
 
     assertContainerIsolation(name);
-    assertRuntimeContents(name);
+    assertRuntimeContents(name, expectReady);
     console.log(
-      'runtime-base smoke passed: live=200, ready=503/index_missing, provider network=none',
+      expectReady
+        ? 'candidate smoke passed: live=200, ready=200, provider network=none'
+        : 'runtime-base smoke passed: live=200, ready=503/index_missing, provider network=none',
     );
   } finally {
     run('docker', ['rm', '--force', name], { allowFailure: true });
   }
 }
 
-function parseArguments(argv: readonly string[]): {
+export function parseContainerSmokeArguments(argv: readonly string[]): {
   image: string;
-  mode: 'build-runtime-base' | 'expect-not-ready';
+  mode: 'build-runtime-base' | 'expect-not-ready' | 'expect-ready';
 } {
   let image = '';
-  let mode: 'build-runtime-base' | 'expect-not-ready' | undefined;
+  let mode:
+    | 'build-runtime-base'
+    | 'expect-not-ready'
+    | 'expect-ready'
+    | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--image') {
@@ -674,23 +747,33 @@ function parseArguments(argv: readonly string[]): {
     } else if (argument === '--expect-not-ready') {
       if (mode) fail('container command accepts exactly one mode');
       mode = 'expect-not-ready';
+    } else if (argument === '--expect-ready') {
+      if (mode) fail('container command accepts exactly one mode');
+      mode = 'expect-ready';
     } else {
       fail(`unknown container command argument: ${argument}`);
     }
   }
   if (!mode) fail('container command mode is required');
-  assertLocalSmokeImageReference(image);
+  if (mode === 'expect-ready') {
+    assertImmutableDeploymentImageReference(image);
+  } else {
+    assertLocalSmokeImageReference(image);
+  }
   return { image, mode };
 }
 
 async function main(): Promise<void> {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const arguments_ = parseArguments(process.argv.slice(2));
+  const arguments_ = parseContainerSmokeArguments(process.argv.slice(2));
   if (arguments_.mode === 'build-runtime-base') {
     buildRuntimeBase(root, arguments_.image);
     return;
   }
-  await smokeRuntimeBase(arguments_.image);
+  await smokeRuntime(
+    arguments_.image,
+    arguments_.mode === 'expect-ready' ? 'ready' : 'not-ready',
+  );
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

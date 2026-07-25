@@ -69,7 +69,6 @@ function retrievalRun(): Extract<EvalRun, { kind: 'retrieval' }> {
     artifactPaths: { trace: 'traces/current-run.retrieval.jsonl' },
     metricDefinitionVersion: METRIC_DEFINITION_VERSION,
     config: {
-      corpusContentHash: HASH_B,
       corpusManifestHash: HASH_B,
       indexHash: HASH_B,
       embeddingModel: 'embedding-current',
@@ -97,7 +96,6 @@ function retrievalBaseline(): Extract<EvalBaseline, { kind: 'retrieval' }> {
     metricDefinitionVersion: run.metricDefinitionVersion,
     config: {
       ...run.config,
-      corpusContentHash: HASH_A,
       corpusManifestHash: HASH_A,
       indexHash: HASH_A,
       embeddingModel: 'embedding-baseline',
@@ -263,7 +261,6 @@ check('system config changes remain comparable and are listed as experiment vari
   assert.equal(result.compatible, true);
   const paths = result.experimentChanges.map((change) => change.path);
   for (const path of [
-    'config.corpusContentHash',
     'config.corpusManifestHash',
     'config.indexHash',
     'config.embeddingModel',
