@@ -219,6 +219,7 @@ function assertCodeowners(): void {
 function validateReleasePleaseConfig(): void {
   const config = json(releasePleaseConfigPath);
   assert.equal(config['bootstrap-sha'], releaseBootstrapSha);
+  const versionManifest = json(releasePleaseManifestPath);
   const rootPackage = object(
     object(config.packages, 'release-please packages')['.'],
     'release-please root package',
@@ -229,9 +230,13 @@ function validateReleasePleaseConfig(): void {
   assert.equal(rootPackage['include-v-in-tag'], true);
   assert.equal(rootPackage['include-component-in-tag'], false);
   assert.equal(rootPackage.draft, true);
-  assert.doesNotMatch(JSON.stringify(config), /release-as/u);
+  assert.equal(rootPackage['bump-minor-pre-major'], true);
+  if (versionManifest['.'] === '0.0.0') {
+    assert.equal(rootPackage['release-as'], '0.1.0');
+  } else {
+    assert.equal(rootPackage['release-as'], undefined);
+  }
 
-  const versionManifest = json(releasePleaseManifestPath);
   const packageJson = json(join(root, 'package.json'));
   const packageLock = json(join(root, 'package-lock.json'));
   assert.equal(versionManifest['.'], packageJson.version);
