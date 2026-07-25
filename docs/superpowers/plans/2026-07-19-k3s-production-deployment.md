@@ -1,9 +1,10 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的本地发布契约、Release lifecycle（发布生命周期）、release artifacts workflow（发布证据流水线）和本地门禁已经完成，等待 review（审核）。尚未调用模型、推送镜像、创建标签或草稿发布版本。
+> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已经通过 Pull Request #2（合并请求 #2）合入 `main`，Release Please（发布自动化工具）已经创建 Release Pull Request #3（发布合并请求 #3）。首轮运行暴露首发版本和 merge commit（合并提交）重复说明问题，当前正在通过独立修正合并请求收口。尚未调用模型、推送镜像、创建标签或草稿发布版本。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。
+> Task 11（任务 11）实现提交：`59fa0b81bbe45082f8ee20c51e3aaefab614bb91 feat: add production release lifecycle`；GitHub merge commit（GitHub 合并提交）：`a6d12ad2b2430c1cd8bbf0f935085a7ce6f61432`。
 
 ## Goal（目标）
 
@@ -674,7 +675,9 @@ Release Please（发布自动化工具）同时负责：
 
 `manifest.ts` 不再从 `CHANGELOG.md` 摘取正文，也不生成 `release-notes.md`。它只验证源码版本与完整 changelog identity（变更日志身份），再对 Release Please（发布自动化工具）已经写入 Draft Release（草稿发布版本）的正文执行安全校验和 SHA-256（安全哈希算法）绑定。release artifacts workflow（发布证据流水线）不能修改该正文。
 
-当前实现仍保留 `0.0.0` 占位版本且没有 `CHANGELOG.md`；首次实现合并必须使用真实 `feat:` Conventional Commit（功能类约定式提交）。Release Please（发布自动化工具）随后生成首个 `0.1.0` Release Pull Request（发布合并请求），维护者在其中补齐状态、用途、`Unreleased`（未发布）、真实用户变化与 `Known limitations`（已知限制），再由常规 Pull Request gate（合并请求门禁）审核。
+首轮真实运行确认两个首发边界：没有历史 Release（发布版本）时，Node release type（Node 发布类型）默认生成 `1.0.0`；使用 merge commit（合并提交）合并同一个 `feat:` 提交时，原提交和包含相同正文的合并提交会分别进入发布说明。仓库已改为只允许 Squash merge（压缩合并），默认使用 Pull Request title（合并请求标题）且提交正文留空，后续 `main` 对每个合并请求只保留一个 Conventional Commit（约定式提交）。
+
+当前 `.release-please-manifest.json` 仍为 `0.0.0` 时，`release-please-config.json` 必须使用一次性 `release-as: 0.1.0` 强制首发版本，并以 `bump-minor-pre-major: true` 固定 `1.0.0` 前的破坏性变更策略。Release Pull Request #3（发布合并请求 #3）更新为 `0.1.0` 后，维护者必须在该分支删除一次性 `release-as`，保留长期版本策略，并补齐 `CHANGELOG.md` 的状态、用途、`Unreleased`（未发布）、单一真实用户变化与 `Known limitations`（已知限制）；其 Pull Request body（合并请求正文）也必须删除重复变化并增加同一已知限制，因为 Release Please（发布自动化工具）会从该正文解析 Draft Release（草稿发布版本）的发布说明。常规 Pull Request gate（合并请求门禁）和正式索引检查通过前不得合并。
 
 - [x] **Step 3（步骤 3）：把付费索引构建拆成独立、可复用产物**
 
