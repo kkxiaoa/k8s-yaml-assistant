@@ -490,7 +490,7 @@ Release Please（发布自动化工具）创建的 Release Pull Request（发布
 
 版本准备、索引构建和候选镜像构建是三条独立职责：
 
-1. Release Please（发布自动化工具）在普通 `main` push（主分支推送）后创建或更新同一个 Release Pull Request（发布合并请求），根据 Conventional Commit（约定式提交）维护 `package.json`、`package-lock.json`、`.release-please-manifest.json` 和 `CHANGELOG.md`。重复运行且没有新的可发布提交时不会增加版本，也不会创建第二个发布合并请求。
+1. Release Please（发布自动化工具）在普通 `main` push（主分支推送）后创建或更新同一个 Release Pull Request（发布合并请求），根据 Conventional Commit（约定式提交）维护 `package.json`、`package-lock.json`、`.release-please-manifest.json` 和 `CHANGELOG.md`。重复运行且没有新的可发布提交时不会增加版本，也不会创建第二个发布合并请求。仓库只允许 Squash merge（压缩合并），默认使用 Pull Request title（合并请求标题）并把提交正文留空，避免原功能提交和包含相同 Conventional Commit（约定式提交）正文的 merge commit（合并提交）重复进入发布说明。没有历史 Release（发布版本）的首次启动使用一次性 `release-as: 0.1.0`；Release Pull Request（发布合并请求）更新到 `0.1.0` 后必须在该分支删除该覆盖，只保留 `bump-minor-pre-major: true` 的长期 `1.0.0` 前版本策略。
 2. 管理员只在确定性 index identity（索引身份）缺少有效产物时手工运行 `index-build`（索引构建）。该工作流是唯一读取 `VOYAGE_API_KEY` 的位置，生成独立 GHCR index artifact（GHCR 索引产物）后按 digest（内容摘要）固定、完整校验并签名。
 3. Release Pull Request（发布合并请求）合并后，Release Please（发布自动化工具）使用 `draft: true` 创建 Draft Release（草稿发布版本），自动生成 release notes（发布说明），并输出精确 `sha/tag_name/version`（提交哈希 / 标签名 / 版本）。同一次 Release lifecycle run（发布生命周期流水线运行）只在 `release_created == true` 时调用 reusable release artifacts workflow（可复用发布证据流水线）。
 4. release artifacts workflow（发布证据流水线）不接受 `workflow_dispatch`（手工触发）或 PR ID（合并请求标识）、提交、版本、标签等人工输入，不读取 Voyage 或 DeepSeek 密钥，也不创建/编辑 Release（发布版本）或 Git tag（Git 标签）。它校验 Release Please（发布自动化工具）输出和既有草稿正文，验证精确索引产物 digest（内容摘要）及签名，再把该索引作为只读外部 BuildKit context（BuildKit 构建上下文）烘焙进应用镜像。
