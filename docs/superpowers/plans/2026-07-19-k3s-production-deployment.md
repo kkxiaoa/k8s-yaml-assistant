@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已经通过 Pull Request #2（合并请求 #2）合入 `main`，Release Please（发布自动化工具）已经创建 Release Pull Request #3（发布合并请求 #3）。首轮运行暴露首发版本和 merge commit（合并提交）重复说明问题，当前正在通过独立修正合并请求收口。尚未调用模型、推送镜像、创建标签或草稿发布版本。
+> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已经通过 Pull Request #2（合并请求 #2）合入 `main`。8,410 条正式索引已经构建、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`，`v0.1.0` Draft Release（草稿发布版本）已经创建。首轮证据流水线因 GitHub 草稿读取权限不足而失败关闭，当前正在补充最小权限和无参数恢复路径；尚未生成候选应用镜像、六项证据或实际 Git tag（Git 标签）。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。
@@ -702,7 +702,9 @@ Release Pull Request（发布合并请求）合并后，`.github/workflows/relea
 2. `build`（构建）：以索引 digest（内容摘要）作为只读外部 build context（构建上下文）构建应用镜像，执行 ready smoke test（就绪冒烟测试）、镜像内容审计、Trivy（容器漏洞扫描）、SPDX SBOM（SPDX 软件物料清单）、SLSA provenance（SLSA 来源证明）和 Cosign（签名工具）门禁，生成严格 release manifest（发布清单）；
 3. `attach`（附加）：只使用 `gh release upload --clobber` 把六项证据附加到 Release Please（发布自动化工具）已经创建的 Draft Release（草稿发布版本），回读正文与资产并逐项核验；它没有创建/编辑发布版本、创建标签或 Publish（发布）的能力。
 
-若索引缺失，Release Pull Request（发布合并请求）应先失败；若被绕过或发布证据阶段才发现缺失，该流水线同样 fail-closed（失败关闭）。正确恢复顺序是：人工运行 `index-build`（索引构建）→ 审核索引结果 → 在原 Release lifecycle run（发布生命周期流水线运行）点击 rerun failed jobs（重新运行失败任务）。不重新执行版本准备，不改变 package version（包版本），也不创建第二个 Draft Release（草稿发布版本）。
+GitHub 将 Draft Release（草稿发布版本）读取限制给具有 push access（推送权限）的身份，因此直接执行 `gh release view` 的 `verify/build`（验证 / 构建）任务必须声明 `contents:write`；令牌只注入对应只读步骤，checkout（检出）继续使用 `persist-credentials:false`，任务不调用创建、编辑、上传或发布命令。`attach`（附加）任务原有 `contents:write` 只用于向既有草稿上传并回读六项证据。
+
+若索引缺失，Release Pull Request（发布合并请求）应先失败；若被绕过或发布证据阶段才发现缺失，该流水线同样 fail-closed（失败关闭）。外部瞬时故障且 workflow（工作流）代码不变时，在原 Release lifecycle run（发布生命周期流水线运行）点击 rerun failed jobs（重新运行失败任务）。若故障需要修改 workflow（工作流），旧运行仍固定使用旧提交，必须先通过 Pull Request（合并请求）合入修复，再在 `main` 手工运行 `Release lifecycle`（发布生命周期）：手工路径不运行 Release Please（发布自动化工具）、不接收身份参数，而是从受保护 `main` 的版本推导当前草稿，只接受该版本、未发布状态和 `main` 祖先 source SHA（源提交哈希），然后复用同一证据流水线。不改变 package version（包版本），也不创建第二个 Draft Release（草稿发布版本）。
 
 开发流程不等待某次 release finalize（发布收口）：Release Pull Request（发布合并请求）未合并时，后续 `feat/fix`（功能 / 修复）提交继续进入同一个 PR（合并请求）并刷新版本与 changelog（变更日志）。只有维护者决定合并时才冻结一个发布 source commit（源提交）。
 
@@ -739,6 +741,8 @@ git diff --check
 ```
 
 2026-07-26 本地门禁结果：四组定向契约 48/48、完整测试 201/201、TypeScript（类型检查）、schema/corpus/eval contract（模式 / 语料 / 评估契约）、Next.js build（Next.js 构建）和 `git diff --check` 全部通过。真实 clean-context container build（干净上下文容器构建）首次暴露“未暂存的 Task 11（任务 11）新文件未进入临时上下文”，先新增反例再把明确审核文件加入白名单；修复后容器内 201/201 与类型检查通过，无索引 runtime-base smoke test（运行时基础镜像冒烟测试）为 `live=200`、`ready=503/index_missing`、`provider network=none`。本轮未调用模型、未重建索引、未推送 GHCR（GitHub 容器镜像仓库）、未创建 Release（发布版本）或 Git tag（Git 标签）。
+
+2026-07-26 外部执行结果：`index-build` Environment（索引构建环境）只允许 `main` 并只含 `VOYAGE_API_KEY` 环境密钥，repository variable（仓库变量）`CURRENT_PRODUCTION_DIGEST` 为 `none`。手工运行 `30171546490` 对 8,410 条语料执行一次 Voyage document embedding（Voyage 文档向量嵌入），成功生成、回读校验并签名独立索引产物；Release Pull Request #3（发布合并请求 #3）的索引门禁随后通过并压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`。Release lifecycle run（发布生命周期运行）`30192091050` 创建了 `v0.1.0` Draft Release（草稿发布版本），但证据 `verify`（验证）任务以 `contents:read` 读取仅对 push access（推送权限）可见的草稿时返回 `release not found`，在构建候选镜像前失败关闭。修复分支只把直接读取草稿的任务提升到 GitHub 要求的 `contents:write`，并增加从 `main` 无参数恢复同一草稿的路径；完整测试 201/201、workflow contract（流水线契约）6/6 与 TypeScript（类型检查）通过。
 
 - [ ] **Step 6（步骤 6）：执行首次独立索引和候选发布**
 
