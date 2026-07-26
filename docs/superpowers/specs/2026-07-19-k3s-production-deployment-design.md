@@ -47,7 +47,7 @@
 | Task 11（任务 11）开始时工作区 | 已包含经逐项 review（审核）的本地计划和规则差异；本任务继续保留未暂存边界 |
 | 本轮依赖恢复 | 已按要求执行 npm ci |
 
-GitHub private repository（GitHub 私有仓库）、GitHub Pro（GitHub 专业版）、MFA（多因素认证）、默认分支门禁和 Pull Request verify（合并请求验证）已经建立。Task 11（任务 11）只在本地实现 Release Please（发布自动化工具）、独立索引与候选发布契约；尚未调用模型、创建 GHCR package（GHCR 软件包）、推送镜像、创建 Draft Release（草稿发布版本）或标签。
+GitHub private repository（GitHub 私有仓库）、GitHub Pro（GitHub 专业版）、MFA（多因素认证）、默认分支门禁和 Pull Request verify（合并请求验证）已经建立。Task 11（任务 11）实现已经合入 `main`；8,410 条正式索引已经由独立流水线生成、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并，`v0.1.0` Draft Release（草稿发布版本）已经创建。首轮证据流水线在候选构建前因 GitHub 草稿读取权限不足而失败关闭，当前正在通过受控合并请求补充最小权限和无参数恢复路径。
 
 ### 2.2 构建与运行时
 
@@ -58,7 +58,7 @@ GitHub private repository（GitHub 私有仓库）、GitHub Pro（GitHub 专业�
 | Next.js（React 全栈框架）配置 | `next.config.mjs` 已启用 standalone output（独立运行产物），并固定开发与文件追踪根目录 | Task 5（任务 5）必须用真实构建验证 `.next/standalone/server.js` |
 | 当前构建 | Node.js 24.18.0 下真实构建通过，`.next/standalone/server.js` 已生成 | Task 5（任务 5）审核后才进入容器实现 |
 | 字体 | 已移除 `next/font` 和 IBM Plex，使用浏览器系统 sans/monospace（无衬线 / 等宽）字体栈 | 不下载外部字体，也不向仓库加入无能力收益的字体二进制 |
-| 现有交付文件 | Dockerfile、.dockerignore 和 Pull Request workflow（合并请求流水线）已经审核；Release lifecycle、独立 index-build 与 release artifacts workflow（发布生命周期、索引构建与发布证据流水线）已在本地实现并等待 Task 11 review（任务 11 审核）；尚无应用 Kubernetes 清单、Helm（Kubernetes 包管理）或 Kustomize（清单定制工具） | Task 11（任务 11）审核后才执行首次索引与候选发布；Phase 3（阶段 3）再实现应用资源 |
+| 现有交付文件 | Dockerfile、.dockerignore、Pull Request workflow、Release lifecycle、独立 index-build 与 release artifacts workflow（合并请求流水线 / 发布生命周期 / 索引构建 / 发布证据流水线）已经实现并审核；正式索引和草稿已经创建，候选镜像与六项证据仍待恢复构建；尚无应用 Kubernetes 清单、Helm（Kubernetes 包管理）或 Kustomize（清单定制工具） | 当前先修复草稿读取权限并完成候选发布；Phase 3（阶段 3）再实现应用资源 |
 | API（应用程序接口）路由 | /api/ask、/api/check、/api/generate、/api/fix，以及 /api/health/live、/api/health/ready | 存活端点只证明进程存活；就绪端点校验运行时配置和索引身份 |
 | 认证与保护 | 没有身份认证、授权、请求限流、请求体字节上限或费用硬门禁 | 不允许直接匿名公开 |
 | 请求解析 | 路由直接调用 req.json() 并做 TypeScript（类型化 JavaScript）类型断言，没有严格 runtime decode（运行时解码） | 仅配置入口 Content-Length（内容长度）不足以覆盖分块请求和字段语义 |
@@ -529,7 +529,7 @@ Phase 4（阶段 4）完成访问模式反例测试后，可以给同一 root-ow
 | Release Please（发布自动化） | GitHub-hosted（GitHub 托管） | contents:write、issues:write、pull-requests:write | 无 | 只能维护 Release Pull Request（发布合并请求）和 Draft Release（草稿发布版本），不部署 |
 | index inspect（索引检查） | GitHub-hosted（GitHub 托管） | contents:read、packages:read | 无 | 无 |
 | index build（索引构建） | GitHub-hosted（GitHub 托管） | contents:read、packages:write、id-token:write | 仅 `index-build` Environment（索引构建环境）的 VOYAGE_API_KEY | 无 |
-| release artifacts verify/build（发布证据验证 / 构建） | GitHub-hosted（GitHub 托管） | contents:read、packages:read/write、id-token:write | 无 | 无 |
+| release artifacts verify/build（发布证据验证 / 构建） | GitHub-hosted（GitHub 托管） | contents:write、packages:read/write、id-token:write | 无 | 无；`contents:write` 只因 GitHub 将 Draft Release（草稿发布版本）读取限制给具有 push access（推送权限）的身份，令牌只注入只读 `gh release view` 步骤 |
 | release artifacts attach（发布证据附加） | GitHub-hosted（GitHub 托管） | contents:write | 无 | 只能向既有草稿附加并回读六项证据，不创建、编辑或发布草稿 |
 | published release validate（已发布版本验证） | GitHub-hosted（GitHub 托管） | contents:read、actions:read、attestations:read | 无 | 无 |
 | deploy/rollback/access mode（部署 / 回滚 / 访问模式） | self-hosted production（生产自托管） | contents:read、actions:read、deployments:write | 无 environment secret（环境密钥） | 只能调用固定部署适配器；回滚只能回到台账内 digest（内容摘要），访问模式只能在 private/portfolio（私有 / 作品集展示）之间切换 |
@@ -1321,12 +1321,12 @@ sudo journalctl -u k3s --since "1 hour ago"
 按优先级排序：
 
 1. serving observation（在线观测）的严格 schema（模式）、脱敏、稳定采样、轮转、保留、删除和磁盘上限已实现；生产 PVC（持久卷声明）、单副本单写入端、目录权限、Pod（容器组）接线和告警验收尚未完成，因此生产模式仍必须保持 `off`（关闭）。
-2. data/index 只有 8,127 条且属于旧索引格式，当前 8,410 条语料会使其明确失效；运行时已经 fail-closed（失败关闭）且不会在线重建，但发布前仍必须离线构建、验证并交付 8,410 条语料对应的新索引。
+2. 工作区 data/index 仍只有 8,127 条且属于旧索引格式，当前加载会明确失效；它不再是生产交付来源。8,410 条正式索引已经作为独立、校验并签名的 GHCR artifact（GHCR 产物）交付，当前只剩候选应用镜像按 digest（内容摘要）引入并回读验证该产物。
 3. /api/health/live 和 /api/health/ready 健康端点已经实现；Kubernetes startup/readiness/liveness probe（启动 / 就绪 / 存活探针）资源接线和真实容器时序仍待验证。
 4. 没有 ACCESS_MODE（访问模式）服务端授权、管理员专用切换路径、认证、请求体大小、限流、并发和费用熔断；不能公开。
 5. 没有独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计，也没有 Turnstile（人机验证）服务端校验、匿名安全会话或 Interview Pass（面试临时通行证）实现；portfolio（作品集展示）可以公开页面和本地 YAML 检查，但匿名付费模型能力不能启用。存储介质尚未选择，不能把 SQLite/PVC（嵌入式数据库 / 持久卷声明）当作既定答案。
 6. DeepSeek/Voyage（深度求索 / 向量服务）端点和模型身份已按官方契约显式固定，安全错误映射与流式失败协议已实现；ConfigMap/Secret（普通配置 / 密钥）资源接线和供应商故障的生产冒烟测试仍待完成。
-7. Dockerfile、`.dockerignore`、私有 GitHub remote（GitHub 远程仓库）、Pull Request Actions（合并请求流水线）、默认分支规则、Action SHA pinning（流水线动作提交哈希固定）和 immutable releases（不可变发布版本）已经建立并审核；Release lifecycle、独立 `index-build`、release artifacts workflow 与 release manifest contract（发布生命周期、索引构建、发布证据流水线与发布清单契约）已在本地实现并等待 Task 11 review（任务 11 审核）。当前仍未创建 GHCR package（GHCR 软件包）、`index-build` Environment（索引构建环境）及其 VOYAGE_API_KEY 环境密钥、`CURRENT_PRODUCTION_DIGEST`（当前生产镜像摘要）变量、`v*` tag ruleset（标签规则集）、8,410 条正式索引或 Draft Release（草稿发布版本）。GitHub Pro private repository（GitHub 专业版私有仓库）不能使用 GitHub artifact attestation（GitHub 产物证明），已审核改用 Cosign（签名与证明工具）无密钥证明并接受公开透明日志元数据；生产部署 runner/adapter（运行器 / 适配器）仍待后续 Task（任务）独立实现。
+7. Dockerfile、`.dockerignore`、私有 GitHub remote（GitHub 远程仓库）、Pull Request Actions（合并请求流水线）、默认分支规则、Action SHA pinning（流水线动作提交哈希固定）、immutable releases（不可变发布版本）、`index-build` Environment（索引构建环境）、`CURRENT_PRODUCTION_DIGEST`（当前生产镜像摘要）变量、8,410 条正式索引和 `v0.1.0` Draft Release（草稿发布版本）已经建立。首轮证据流水线因 GitHub 草稿读取权限不足而失败关闭，候选镜像和六项证据仍待修复后恢复；`v*` tag ruleset（标签规则集）尚未建立，因此不得 Publish（正式发布）。GitHub Pro private repository（GitHub 专业版私有仓库）不能使用 GitHub artifact attestation（GitHub 产物证明），已审核改用 Cosign（签名与证明工具）无密钥证明并接受公开透明日志元数据；生产部署 runner/adapter（运行器 / 适配器）仍待后续 Task（任务）独立实现。
 8. K3s（轻量 Kubernetes）已经安装并完成 Phase 1（阶段 1）审核，但生产部署 runner/adapter（运行器 / 适配器）仍不存在。
 9. 最终域名、DNS（域名系统）控制权、OAuth（开放授权）允许名单和证书策略尚未确定；Turnstile（人机验证）生产配置、可承受日预算及计量契约只在准备开放匿名模型能力时进入设计。
 10. 当前尚未基于 8,410 条语料完成正式全量质量评估和错误解释人工正确性审核；在公开发布前必须完成或显式接受风险。

@@ -59,7 +59,7 @@
 
 四份 2026-07-12 纠偏计划已经完成结构实现与逐 Task（任务）审核。Case Governance（评估用例治理）也已完成实现和本地门禁，当前仍未重建正式 baseline（基线）；在新版本完整评估完成人工审核前，不晋升 baseline（基线），不根据旧指标继续优化 retrieval、prompt 或模型。
 
-生产部署设计、Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-10（任务 5-10）已经审核；Task 11（任务 11）的实现已通过受控 Pull Request #2（合并请求 #2）合入 `main`，Release Please（发布自动化工具）已创建 Release Pull Request #3（发布合并请求 #3）。首轮运行暴露首发版本默认生成 `1.0.0` 和 merge commit（合并提交）重复说明问题，当前正在通过独立修正合并请求收口。个人私有 GitHub remote（GitHub 远程仓库）和 `main` 规则集已经建立；仓库只允许 Squash merge（压缩合并）。尚未调用模型构建发布索引，也未创建生产镜像、标签、发布版本、应用 Kubernetes（容器编排系统）资源或公开入口。
+生产部署设计、Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-10（任务 5-10）已经审核；Task 11（任务 11）的实现已通过受控 Pull Request #2（合并请求 #2）合入 `main`。8,410 条正式索引已经由独立 `index-build`（索引构建）流水线生成、校验和签名，Release Pull Request #3（发布合并请求 #3）已通过 Squash merge（压缩合并）形成 `0.1.0` source commit（源提交）`aa3baeb047241f0bf3ead262c10b48f26f577a2c`，Release Please（发布自动化工具）已创建 `v0.1.0` Draft Release（草稿发布版本）。首轮证据流水线暴露 GitHub 草稿读取需要 push access（推送权限），当前通过独立修复分支补充最小权限与无参数恢复路径；尚未生成候选应用镜像、六项发布证据、实际 Git tag（Git 标签），也未修改应用 Kubernetes（容器编排系统）资源或公开入口。
 
 ## 当前执行优先级
 
@@ -68,7 +68,7 @@
 1. 已完成四份 `2026-07-12` 纠偏计划的结构实现与逐 Task（任务）审核；尚未执行真实模型完整评估或 baseline（基线）晋升。
 2. 已完成 Phase B（阶段 B）工程清理的 docs cleanup（文档清理）与 Deferred Risk Closure（延期风险收敛）第 1-6 项审核。
 3. 已完成 Case Governance（评估用例治理）：eval case 已建立 `task/origin/role` 分层，并补充 error explanation（错误解释）、真实 CRD（自定义资源定义）和 Holdout（留出集）。
-4. 当前优先主线是生产部署；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-10（任务 5-10）已经审核，Task 11（任务 11）的实现已合入 `main`，当前先修正首发 `0.1.0` 身份并人工收口 Release Pull Request #3（发布合并请求 #3）；之后才执行 8,410 条索引、候选镜像和草稿发布闭环。后续继续逐 Task（任务）和 Phase（阶段）停下审核。
+4. 当前优先主线是生产部署；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-10（任务 5-10）已经审核，Task 11（任务 11）的实现、8,410 条正式索引、`0.1.0` 发布身份和 Draft Release（草稿发布版本）已经完成。当前先合入草稿读取权限与无参数恢复路径，再恢复同一草稿的候选镜像和六项证据构建；完成后停在 Phase 2 Stop（阶段 2 停止点）等待审核，不 Publish（正式发布）。
 5. 私有部署和受限入口验证后、公开发布前，恢复质量主线：清理 ignored artifacts（被忽略的产物），使用与发布候选一致的 8,410 条 index（索引），重跑 retrieval/faith/judge/generation/fix 并人工审核 baseline（基线）。
 6. 贯通 token/usage/cost（令牌 / 用量 / 成本），在新尺子下复测仍存在的 retrieval/rerank bad case（检索 / 重排问题用例）。
 7. 接入 Stage 6.2 official docs（阶段 6.2 官方文档），再接 Stage 6.3 examples（阶段 6.3 示例）。

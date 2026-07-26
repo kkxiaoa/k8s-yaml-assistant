@@ -16,7 +16,7 @@ concurrency:
 jobs:
   release_please:
     name: Prepare or create release
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -37,6 +37,65 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  resume_draft:
+    name: Resolve current draft release
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # GitHub restricts draft release reads to identities with push access.
+      contents: write
+    outputs:
+      source_sha: ${{ steps.draft.outputs.source_sha }}
+      tag: ${{ steps.draft.outputs.tag }}
+      version: ${{ steps.draft.outputs.version }}
+    steps:
+      - name: Checkout protected main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve reviewed draft identity
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "package version must be stable semantic version" >&2
+            exit 1
+          fi
+          RELEASE_TAG="v$VERSION"
+          mkdir -p recovery-state
+          gh release view "$RELEASE_TAG" \
+            --json tagName,targetCommitish,isDraft,isPrerelease \
+            > recovery-state/draft-release.json
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            '.tagName == $tag and .isDraft == true and .isPrerelease == false' \
+            recovery-state/draft-release.json \
+            > /dev/null
+          SOURCE_SHA="$(
+            jq -r '.targetCommitish' recovery-state/draft-release.json
+          )"
+          if [[ ! "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "draft target must be a full lowercase commit SHA" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          git show "$SOURCE_SHA:package.json" \
+            > recovery-state/source-package.json
+          test "$(
+            node -p "require('./recovery-state/source-package.json').version"
+          )" = "$VERSION"
+          {
+            echo "source_sha=$SOURCE_SHA"
+            echo "tag=$RELEASE_TAG"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
   artifacts:
     name: Build evidence for the new draft release
     needs: release_please
@@ -50,3 +109,17 @@ jobs:
       source_sha: ${{ needs.release_please.outputs.source_sha }}
       tag: ${{ needs.release_please.outputs.tag }}
       version: ${{ needs.release_please.outputs.version }}
+
+  resume_artifacts:
+    name: Resume evidence for the current draft release
+    needs: resume_draft
+    if: needs.resume_draft.result == 'success'
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/release-artifacts.yml
+    with:
+      source_sha: ${{ needs.resume_draft.outputs.source_sha }}
+      tag: ${{ needs.resume_draft.outputs.tag }}
+      version: ${{ needs.resume_draft.outputs.version }}

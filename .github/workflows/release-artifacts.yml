@@ -29,7 +29,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
-      contents: read
+      # GitHub restricts draft release reads to identities with push access.
+      contents: write
       packages: read
     outputs:
       index_digest: ${{ steps.index_artifact.outputs.digest }}
@@ -160,7 +161,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
-      contents: read
+      # GitHub restricts draft release reads to identities with push access.
+      contents: write
       packages: write
       id-token: write
     steps:
