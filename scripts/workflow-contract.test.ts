@@ -300,6 +300,24 @@ function validatePrWorkflow(value: JsonObject, source: string): void {
   }
   assert.equal(verify['runs-on'], 'ubuntu-24.04');
   assert.doesNotMatch(JSON.stringify(verify), /\bghcr\.io\b/u);
+  assert.deepEqual(
+    object(
+      actionStep(verify, trivyAction, 'PR verify').with,
+      'PR runtime vulnerability gate inputs',
+    ),
+    {
+      'scan-type': 'image',
+      'image-ref': 'k8s-yaml-assistant:test-runtime-base',
+      format: 'table',
+      'exit-code': '1',
+      'ignore-unfixed': false,
+      'vuln-type': 'os,library',
+      severity: 'HIGH,CRITICAL',
+      scanners: 'vuln',
+      'hide-progress': true,
+      version: 'v0.70.0',
+    },
+  );
 
   const releaseIndex = job(value, 'release_index');
   assert.equal(releaseIndex.needs, 'release_state');

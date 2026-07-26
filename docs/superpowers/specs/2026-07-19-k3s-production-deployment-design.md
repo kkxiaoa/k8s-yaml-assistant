@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署设计
 
-> 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产，2026-07-23 审核批准六项发布证据和 Cosign（签名与证明工具）无密钥证明方案，2026-07-24 审核批准 Release Please（发布自动化工具）单一版本所有权与独立索引产物流程。
+> 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产，2026-07-23 审核批准六项发布证据和 Cosign（签名与证明工具）无密钥证明方案，2026-07-24 审核批准 Release Please（发布自动化工具）单一版本所有权与独立索引产物流程，2026-07-26 审核批准把候选镜像 `HIGH/CRITICAL`（高危 / 严重）漏洞扫描前移到 Pull Request（合并请求）门禁。
 > 用途：定义当前项目在华为云单机 K3s（轻量 Kubernetes）上的生产部署架构、实施边界和验收门禁。
 > 本文维护设计边界；实际实施状态和审核停止点以对应实施计划为准。
 
@@ -47,18 +47,18 @@
 | Task 11（任务 11）开始时工作区 | 已包含经逐项 review（审核）的本地计划和规则差异；本任务继续保留未暂存边界 |
 | 本轮依赖恢复 | 已按要求执行 npm ci |
 
-GitHub private repository（GitHub 私有仓库）、GitHub Pro（GitHub 专业版）、MFA（多因素认证）、默认分支门禁和 Pull Request verify（合并请求验证）已经建立。Task 11（任务 11）实现已经合入 `main`；8,410 条正式索引已经由独立流水线生成、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并，`v0.1.0` Draft Release（草稿发布版本）已经创建。首轮真实运行暴露草稿读取权限、手工恢复与旧 source commit（源提交）兼容，以及活动草稿期间错误创建下一版本发布合并请求的问题；当前受控修复分支正在补充最小任务权限、草稿快照传递、无参数恢复和活动应用草稿互斥门禁。错误创建的 Pull Request #5（合并请求 #5）已关闭且不作为版本历史。
+GitHub private repository（GitHub 私有仓库）、GitHub Pro（GitHub 专业版）、MFA（多因素认证）、默认分支门禁和 Pull Request verify（合并请求验证）已经建立。Task 11（任务 11）实现已经合入 `main`；8,410 条正式索引已经由独立流水线生成、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并，`v0.1.0` Draft Release（草稿发布版本）已经创建。草稿权限、无参数恢复和活动草稿互斥问题已由 Pull Request #6（合并请求 #6）修复；恢复运行成功构建旧源码候选，但在签名前因 5 项 `HIGH`（高危）运行时依赖漏洞失败关闭。当前受控安全修复分支升级受影响依赖并增加 Pull Request（合并请求）运行镜像扫描；既有草稿尚无附件或真实标签，合入后必须先重定向到精确新提交并更新发布说明。
 
 ### 2.2 构建与运行时
 
 | 类别 | 当前事实 | 部署影响 |
 | --- | --- | --- |
-| 依赖 | next 16.2.9、react 19.2.7、typescript 6.0.3，package-lock.json 已锁定 | 依赖安装必须使用 npm ci |
+| 依赖 | 当前安全修复固定 next 16.2.12、sharp 0.35.3、js-yaml 4.3.0、postcss 8.5.23、react 19.2.7 和 typescript 6.0.3，package-lock.json 已锁定 | 依赖安装必须使用 npm ci；运行镜像必须通过固定 Trivy（容器漏洞扫描器）的高危 / 严重门禁 |
 | Node.js（JavaScript 运行时）约束 | `.nvmrc`、`package.json` 和 `package-lock.json` 固定为 Node.js 24.18.0；本机默认 shell（命令行环境）仍是 Node.js 25.6.1 | 本地、流水线和容器门禁必须显式使用固定版本，不能继承默认 shell |
 | Next.js（React 全栈框架）配置 | `next.config.mjs` 已启用 standalone output（独立运行产物），并固定开发与文件追踪根目录 | Task 5（任务 5）必须用真实构建验证 `.next/standalone/server.js` |
 | 当前构建 | Node.js 24.18.0 下真实构建通过，`.next/standalone/server.js` 已生成 | Task 5（任务 5）审核后才进入容器实现 |
 | 字体 | 已移除 `next/font` 和 IBM Plex，使用浏览器系统 sans/monospace（无衬线 / 等宽）字体栈 | 不下载外部字体，也不向仓库加入无能力收益的字体二进制 |
-| 现有交付文件 | Dockerfile、.dockerignore、Pull Request workflow、Release lifecycle、独立 index-build 与 release artifacts workflow（合并请求流水线 / 发布生命周期 / 索引构建 / 发布证据流水线）已经实现并审核；正式索引和草稿已经创建，候选镜像与六项证据仍待恢复构建；尚无应用 Kubernetes 清单、Helm（Kubernetes 包管理）或 Kustomize（清单定制工具） | 当前先收口草稿最小权限、旧源提交恢复兼容和活动草稿互斥门禁，再完成候选发布；Phase 3（阶段 3）再实现应用资源 |
+| 现有交付文件 | Dockerfile、.dockerignore、Pull Request workflow、Release lifecycle、独立 index-build 与 release artifacts workflow（合并请求流水线 / 发布生命周期 / 索引构建 / 发布证据流水线）已经实现并审核；正式索引和草稿已经创建，旧源码候选因高危依赖被拒绝，六项证据未生成；尚无应用 Kubernetes 清单、Helm（Kubernetes 包管理）或 Kustomize（清单定制工具） | 当前先合入依赖安全与合并前镜像扫描门禁，再重定向未发布草稿并恢复候选证据；Phase 3（阶段 3）再实现应用资源 |
 | API（应用程序接口）路由 | /api/ask、/api/check、/api/generate、/api/fix，以及 /api/health/live、/api/health/ready | 存活端点只证明进程存活；就绪端点校验运行时配置和索引身份 |
 | 认证与保护 | 没有身份认证、授权、请求限流、请求体字节上限或费用硬门禁 | 不允许直接匿名公开 |
 | 请求解析 | 路由直接调用 req.json() 并做 TypeScript（类型化 JavaScript）类型断言，没有严格 runtime decode（运行时解码） | 仅配置入口 Content-Length（内容长度）不足以覆盖分块请求和字段语义 |
@@ -477,8 +477,10 @@ Kubernetes 官方建议启用静态加密、限制 Secret（密钥）的 watch/l
 - schema/corpus/eval contract check（模式 / 语料 / 评估契约检查）；
 - 禁止外网字体依赖后的 Next.js build（Next.js 构建）；
 - Docker build（Docker 镜像构建）到本地但不推送，或验证同一正式 Dockerfile 的无密钥阶段；
-- secret scan（密钥扫描）、依赖和镜像漏洞扫描；
+- 固定 Trivy（容器漏洞扫描器）版本扫描同一无索引运行镜像，发现 `HIGH/CRITICAL`（高危 / 严重）操作系统或运行时库漏洞时在合并前失败；该步骤不读取 Secret（密钥）、不推送 GHCR（GitHub 容器镜像仓库）、不构建索引或调用模型；
 - 无密钥镜像 smoke test（冒烟测试）：证明非 root、只读根文件系统，以及索引缺失或不匹配时 readiness（就绪状态）安全失败且不调用 Voyage；带真实索引并达到 ready（就绪）的测试只在受保护发布流水线执行。
+
+repository secret scan（仓库密钥扫描）和低于 `HIGH`（高危）的依赖风险处置仍是独立门禁；不得把当前镜像 `HIGH/CRITICAL`（高危 / 严重）扫描描述为已经覆盖所有供应链风险。发布证据流水线继续生成完整漏洞报告，并重复执行同一高危 / 严重阻断，防止基础镜像或漏洞数据库在合并后发生变化。
 
 来自 fork（分叉仓库）的不可信 Pull Request（合并请求）不能获得 repository secret（仓库密钥）、protected environment secret（受保护环境密钥）或有写权限的 token（令牌）。禁止用 pull_request_target 直接运行未审核代码。
 
@@ -501,7 +503,7 @@ Release Please Action（发布自动化流水线动作）的 `release_created`�
 
 `manifest.ts` 只验证 `CHANGELOG.md` 的完整身份和 Draft Release（草稿发布版本）的实际正文，不从 changelog（变更日志）摘取发布说明，也不生成 `release-notes.md`。发布说明由 Release Please（发布自动化工具）生成并拥有；release artifacts workflow（发布证据流水线）只能读取、校验和哈希绑定，不能修改。
 
-索引不存在时，Release Pull Request（发布合并请求）的 `release_index`（发布索引）检查先 fail-closed（失败关闭）。如果该门禁被绕过或索引在发布证据阶段失效，该流水线同样失败；恢复顺序是手工运行 `index-build`（索引构建），审核结果后重新运行原失败检查或原 Release lifecycle run（发布生命周期流水线运行）的 failed job（失败任务）。若必须先修改流水线，则合入修复后手工运行无参数 Release lifecycle（发布生命周期）：它从当前版本解析同一活动草稿，验证草稿 source SHA（源提交哈希）属于 `main` 历史，再完整重建证据。手工运行的 `GITHUB_SHA` 指向当前 `main`，不要求等于旧草稿源提交；证据工作流继续检出旧发布源，因此必须保持该源提交已有 CLI（命令行接口）的调用契约。该路径不重新运行版本准备、不修改 package version（包版本），也不创建第二个草稿。
+索引不存在时，Release Pull Request（发布合并请求）的 `release_index`（发布索引）检查先 fail-closed（失败关闭）。如果该门禁被绕过或索引在发布证据阶段失效，该流水线同样失败；恢复顺序是手工运行 `index-build`（索引构建），审核结果后重新运行原失败检查或原 Release lifecycle run（发布生命周期流水线运行）的 failed job（失败任务）。若只需修复流水线，合入修复后手工运行无参数 Release lifecycle（发布生命周期）仍验证并重建同一旧源提交的证据。若失败原因属于旧 source SHA（源提交哈希）的应用或依赖缺陷，重跑旧源码没有修复意义；只能在安全修复通过受保护 Pull Request（合并请求）门禁并合入 `main` 后，由管理员把尚未发布且无附件的草稿目标重定向到该精确提交、同步已审核发布说明，再运行无参数恢复。`resolve_draft`（解析草稿）必须重新验证版本、目标提交和 `main` 祖先关系；不得接受分支名、人工 SHA 输入、已发布版本或已有证据的草稿。两条路径都不重新运行版本准备、不修改 package version（包版本），也不创建第二个草稿；release artifacts workflow（发布证据流水线）本身仍无权编辑草稿正文或目标。
 
 候选 Release（发布版本）只附加以下六项正式证据；Release Please（发布自动化工具）的正文就是唯一发布说明，不存在临时发布说明附件：
 
@@ -1329,7 +1331,7 @@ sudo journalctl -u k3s --since "1 hour ago"
 4. 没有 ACCESS_MODE（访问模式）服务端授权、管理员专用切换路径、认证、请求体大小、限流、并发和费用熔断；不能公开。
 5. 没有独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计，也没有 Turnstile（人机验证）服务端校验、匿名安全会话或 Interview Pass（面试临时通行证）实现；portfolio（作品集展示）可以公开页面和本地 YAML 检查，但匿名付费模型能力不能启用。存储介质尚未选择，不能把 SQLite/PVC（嵌入式数据库 / 持久卷声明）当作既定答案。
 6. DeepSeek/Voyage（深度求索 / 向量服务）端点和模型身份已按官方契约显式固定，安全错误映射与流式失败协议已实现；ConfigMap/Secret（普通配置 / 密钥）资源接线和供应商故障的生产冒烟测试仍待完成。
-7. Dockerfile、`.dockerignore`、私有 GitHub remote（GitHub 远程仓库）、Pull Request Actions（合并请求流水线）、默认分支规则、Action SHA pinning（流水线动作提交哈希固定）、immutable releases（不可变发布版本）、`index-build` Environment（索引构建环境）、`CURRENT_PRODUCTION_DIGEST`（当前生产镜像摘要）变量、8,410 条正式索引和 `v0.1.0` Draft Release（草稿发布版本）已经建立。首轮真实运行暴露草稿读取权限、旧 source commit（源提交）恢复兼容和活动草稿期间重复创建发布合并请求的问题；最小权限、草稿快照、无参数恢复和活动草稿互斥门禁正在受控合并请求中收口，候选镜像和六项证据仍待合入后恢复。错误的 Pull Request #5（合并请求 #5）已关闭且不作为版本历史；`v*` tag ruleset（标签规则集）尚未建立，因此不得 Publish（正式发布）。GitHub Pro private repository（GitHub 专业版私有仓库）不能使用 GitHub artifact attestation（GitHub 产物证明），已审核改用 Cosign（签名与证明工具）无密钥证明并接受公开透明日志元数据；生产部署 runner/adapter（运行器 / 适配器）仍待后续 Task（任务）独立实现。
+7. Dockerfile、`.dockerignore`、私有 GitHub remote（GitHub 远程仓库）、Pull Request Actions（合并请求流水线）、默认分支规则、Action SHA pinning（流水线动作提交哈希固定）、immutable releases（不可变发布版本）、`index-build` Environment（索引构建环境）、`CURRENT_PRODUCTION_DIGEST`（当前生产镜像摘要）变量、8,410 条正式索引和 `v0.1.0` Draft Release（草稿发布版本）已经建立。最小权限、草稿快照、无参数恢复和活动草稿互斥门禁已经由 Pull Request #6（合并请求 #6）收口；旧源码候选因 5 项 `HIGH`（高危）运行时依赖漏洞被拒绝，草稿仍无附件或真实标签。当前阻断是合入依赖安全与 Pull Request Trivy（合并请求容器漏洞扫描）门禁、把尚未发布的草稿重定向到精确新提交并恢复六项证据；`v*` tag ruleset（标签规则集）尚未建立，因此不得 Publish（正式发布）。GitHub Pro private repository（GitHub 专业版私有仓库）不能使用 GitHub artifact attestation（GitHub 产物证明），已审核改用 Cosign（签名与证明工具）无密钥证明并接受公开透明日志元数据；生产部署 runner/adapter（运行器 / 适配器）仍待后续 Task（任务）独立实现。
 8. K3s（轻量 Kubernetes）已经安装并完成 Phase 1（阶段 1）审核，但生产部署 runner/adapter（运行器 / 适配器）仍不存在。
 9. 最终域名、DNS（域名系统）控制权、OAuth（开放授权）允许名单和证书策略尚未确定；Turnstile（人机验证）生产配置、可承受日预算及计量契约只在准备开放匿名模型能力时进入设计。
 10. 当前尚未基于 8,410 条语料完成正式全量质量评估和错误解释人工正确性审核；在公开发布前必须完成或显式接受风险。
