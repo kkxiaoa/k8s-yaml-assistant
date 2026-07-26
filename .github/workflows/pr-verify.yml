@@ -13,11 +13,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release_state:
+    name: Release preparation state
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      # This isolated job does not execute pull request code.
+      contents: write
+    steps:
+      - name: Reject an overlapping application draft
+        if: github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--branches--main')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release-state
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            > release-state/releases.json
+          if [[ "$(jq length release-state/releases.json)" -ge 100 ]]; then
+            echo "release inventory exceeds the bounded inspection page" >&2
+            exit 1
+          fi
+          ACTIVE_DRAFTS="$(
+            jq '[
+              .[]
+              | select(
+                  .draft == true
+                  and (.tag_name | test("^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))
+                )
+            ] | length' release-state/releases.json
+          )"
+          if [[ "$ACTIVE_DRAFTS" -ne 0 ]]; then
+            echo "active application draft blocks a new release PR" >&2
+            exit 1
+          fi
+
   verify:
     name: PR verify
+    needs: release_state
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      - name: Require release state gate
+        env:
+          RELEASE_STATE_RESULT: ${{ needs.release_state.result }}
+        run: |
+          if [[ "$RELEASE_STATE_RESULT" != "success" ]]; then
+            echo "release state gate must succeed before PR verification" >&2
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,6 +107,7 @@ jobs:
 
   release_index:
     name: Release index artifact
+    needs: release_state
     if: github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--branches--main')
     runs-on: ubuntu-24.04
     timeout-minutes: 20

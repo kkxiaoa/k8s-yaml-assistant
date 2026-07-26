@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已经通过 Pull Request #2（合并请求 #2）合入 `main`，Release Please（发布自动化工具）已经创建 Release Pull Request #3（发布合并请求 #3）。首轮运行暴露首发版本和 merge commit（合并提交）重复说明问题，当前正在通过独立修正合并请求收口。尚未调用模型、推送镜像、创建标签或草稿发布版本。
+> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已经通过 Pull Request #2（合并请求 #2）合入 `main`。8,410 条正式索引已经构建、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`，`v0.1.0` Draft Release（草稿发布版本）已经创建。首轮真实运行暴露草稿读取权限、旧 source commit（源提交）恢复兼容和活动草稿期间重复准备下一版本的问题；当前修复分支正在收口最小任务权限、草稿快照、无参数恢复和发布状态互斥门禁。错误创建的 Pull Request #5（合并请求 #5）已关闭且不作为版本历史；尚未生成候选应用镜像、六项证据或实际 Git tag（Git 标签）。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。
@@ -658,7 +658,8 @@ git diff --check
 - `CHANGELOG.md` 缺状态、用途、`Unreleased`（未发布）或唯一当前版本标题，以及包含占位、绝对路径或密钥赋值时失败；
 - Draft Release（草稿发布版本）不是 draft（草稿）、是 prerelease（预发布）、`tagName/targetCommitish`（标签名 / 目标提交）与 Release Please（发布自动化工具）输出不一致、发布说明缺少真实变更或 `Known limitations`（已知限制）时失败；
 - release manifest（发布清单）缺 source/image/corpus/model/index/index artifact/rollback/proof identity（源码 / 镜像 / 语料 / 模型 / 索引 / 索引产物 / 回滚 / 证明身份），或者 digest/count/hash（内容摘要 / 数量 / 哈希）不一致时失败；
-- Release Please（发布自动化工具）设置 `skip-github-release` 或把草稿、标签、版本和发布说明所有权拆回另一个流水线时失败；
+- Release Please（发布自动化工具）设置 `skip-github-release`、在非当前 Release Pull Request merge（发布合并请求合并）场景设置 `skip-github-pull-request`，或者把草稿、标签、版本和发布说明所有权拆回另一个流水线时失败；
+- 当前 source version / Git tag / GitHub Release / active application draft / associated Pull Request（源版本 / Git 标签 / GitHub 发布版本 / 活动应用草稿 / 关联的合并请求）状态不一致、多于一个稳定 SemVer draft（语义化版本草稿）、活动草稿期间仍准备下一版本，或发布合并提交同时存在草稿时失败；
 - release artifacts workflow（发布证据流水线）出现 `workflow_dispatch`（手工触发）、`VOYAGE_API_KEY`、`index:build`、`gh release create/edit`（创建 / 修改发布版本）、Git tag API（Git 标签接口）、`--notes-file`、自动 Publish（发布）或 self-hosted runner（自托管运行器）时失败；
 - `index-build`（索引构建）以外任一 workflow（流水线）读取 Voyage 密钥时失败；索引工作流非手工触发、第三方 Action（流水线动作）未固定完整 SHA（提交哈希）或索引 tag（标签）使用可变名称时失败。
 
@@ -674,6 +675,15 @@ Release Please（发布自动化工具）同时负责：
 `release-please-config.json` 使用 `draft: true`。GitHub 官方语义是：创建 Draft Release（草稿发布版本）时只有 `tag_name/target_commitish`（标签名 / 目标提交）关联，不创建 Git tag（Git 标签）；维护者点击 Publish（发布）时才创建标签并产生 `release.published`（发布版本已发布）事件。
 
 `manifest.ts` 不再从 `CHANGELOG.md` 摘取正文，也不生成 `release-notes.md`。它只验证源码版本与完整 changelog identity（变更日志身份），再对 Release Please（发布自动化工具）已经写入 Draft Release（草稿发布版本）的正文执行安全校验和 SHA-256（安全哈希算法）绑定。release artifacts workflow（发布证据流水线）不能修改该正文。
+
+每次 `main` push（主分支推送）先由独立 state inspection job（状态检查任务）读取源码版本、GitHub Release（GitHub 发布版本）、实际 Git tag（Git 标签）和当前提交关联的 Pull Request（合并请求），再决定是否调用 Release Please（发布自动化工具）：
+
+1. 首发占位版本且没有发布历史，或当前版本已有匹配的正式发布版本与真实标签：允许创建或更新 Release Pull Request（发布合并请求）。
+2. 当前提交正是 Release Pull Request merge（发布合并请求合并），且该版本尚无草稿、正式发布版本或真实标签：调用 Release Please（发布自动化工具）创建当前 Draft Release（草稿发布版本），同时设置 `skip-github-pull-request: true`，禁止同一次运行继续创建下一版本发布合并请求。
+3. 当前版本已有唯一、同版本且目标提交属于 `main` 历史的活动应用草稿：跳过 Release Please（发布自动化工具），普通功能开发和合并继续，但下一版本准备延后到当前草稿 Publish（发布）后出现新的 `main` push（主分支推送）。
+4. 其余缺标签、缺正式发布版本、版本不一致、多草稿或目标提交漂移状态一律 fail-closed（失败关闭），不猜测修复。
+
+稳定 `v<SemVer>` tag（语义化版本标签）保留给应用发布，只有这类 Draft Release（草稿发布版本）参与互斥；明确使用其他命名空间的 operational draft（运维草稿）不阻塞应用发布。Release Pull Request（发布合并请求）还包含一个不检出代码、不运行第三方 Action（流水线动作）的隔离状态任务：如果已经存在活动应用草稿，则在源码门禁前拒绝该发布合并请求。必需的 `PR verify`（合并请求验证）任务即使依赖门禁失败也会启动并显式失败，不能退化为可能被规则集接受的 `skipped`（已跳过）结论。该状态任务用于防御旧的、竞态产生的或人工误保留的下一版本发布合并请求，不能替代主分支状态检查。
 
 首轮真实运行确认两个首发边界：没有历史 Release（发布版本）时，Node release type（Node 发布类型）默认生成 `1.0.0`；使用 merge commit（合并提交）合并同一个 `feat:` 提交时，原提交和包含相同正文的合并提交会分别进入发布说明。仓库已改为只允许 Squash merge（压缩合并），默认使用 Pull Request title（合并请求标题）且提交正文留空，后续 `main` 对每个合并请求只保留一个 Conventional Commit（约定式提交）。
 
@@ -698,13 +708,15 @@ Release Pull Request（发布合并请求）合并后，`.github/workflows/relea
 
 发布证据流水线分为：
 
-1. `verify`（验证）：检出已通过受保护 Pull Request（合并请求）门禁的精确 source SHA（源提交哈希），只复核 release identity / Draft Release / index artifact（发布身份 / 草稿发布版本 / 索引产物）这些发布期状态；不重复执行 schema、corpus、eval、测试、类型检查、Next.js 构建或无索引容器门禁。最终 `runtime` Docker build（运行时容器构建）仍通过 Dockerfile 的 `verify` 与 `build` 阶段执行 `npm test`、TypeScript type check（TypeScript 类型检查）和 Next.js build（Next.js 构建）；
-2. `build`（构建）：以索引 digest（内容摘要）作为只读外部 build context（构建上下文）构建应用镜像，执行 ready smoke test（就绪冒烟测试）、镜像内容审计、Trivy（容器漏洞扫描）、SPDX SBOM（SPDX 软件物料清单）、SLSA provenance（SLSA 来源证明）和 Cosign（签名工具）门禁，生成严格 release manifest（发布清单）；
-3. `attach`（附加）：只使用 `gh release upload --clobber` 把六项证据附加到 Release Please（发布自动化工具）已经创建的 Draft Release（草稿发布版本），回读正文与资产并逐项核验；它没有创建/编辑发布版本、创建标签或 Publish（发布）的能力。
+1. `verify`（验证）：检出已通过受保护 Pull Request（合并请求）门禁的精确 source SHA（源提交哈希），只复核 release identity / Draft Release / index artifact（发布身份 / 草稿发布版本 / 索引产物）这些发布期状态；首次读取并校验草稿后，把该 JSON snapshot（JSON 快照）作为保留 1 天的 GitHub Artifact（GitHub 任务产物）传给后续构建。不重复执行 schema、corpus、eval、测试、类型检查、Next.js 构建或无索引容器门禁。最终 `runtime` Docker build（运行时容器构建）仍通过 Dockerfile 的 `verify` 与 `build` 阶段执行 `npm test`、TypeScript type check（TypeScript 类型检查）和 Next.js build（Next.js 构建）；
+2. `build`（构建）：下载已校验草稿快照，以索引 digest（内容摘要）作为只读外部 build context（构建上下文）构建应用镜像，执行 ready smoke test（就绪冒烟测试）、镜像内容审计、Trivy（容器漏洞扫描）、SPDX SBOM（SPDX 软件物料清单）、SLSA provenance（SLSA 来源证明）和 Cosign（签名工具）门禁，生成严格 release manifest（发布清单）。它不再读取 GitHub Draft Release（GitHub 草稿发布版本），因此 `contents:read` 足够；
+3. `attach`（附加）：上传前重新读取草稿并确认正文哈希仍与 release manifest（发布清单）一致，只使用 `gh release upload --clobber` 把六项证据附加到既有草稿，随后再次回读正文与资产、下载文件并逐项核验。三次草稿读取分别对应初始受信快照、外部写入前防漂移和外部写入后回读，不在同一信任边界重复计算；该任务没有创建/编辑发布版本、创建标签或 Publish（发布）的能力。
 
-若索引缺失，Release Pull Request（发布合并请求）应先失败；若被绕过或发布证据阶段才发现缺失，该流水线同样 fail-closed（失败关闭）。正确恢复顺序是：人工运行 `index-build`（索引构建）→ 审核索引结果 → 在原 Release lifecycle run（发布生命周期流水线运行）点击 rerun failed jobs（重新运行失败任务）。不重新执行版本准备，不改变 package version（包版本），也不创建第二个 Draft Release（草稿发布版本）。
+GitHub 将 Draft Release（草稿发布版本）读取限制给具有 push access（推送权限）的身份，因此直接读取草稿的 `verify`（验证）、`attach`（附加）、主分支状态检查和手工草稿解析任务声明 `contents:write`；它们各自只在需要的步骤注入令牌。`build`（构建）只使用 `contents:read + packages:write + id-token:write`（仓库读取 + 软件包写入 + 身份令牌写入）。checkout（检出）均保持 `persist-credentials:false`，只有 `attach`（附加）调用上传命令。
 
-开发流程不等待某次 release finalize（发布收口）：Release Pull Request（发布合并请求）未合并时，后续 `feat/fix`（功能 / 修复）提交继续进入同一个 PR（合并请求）并刷新版本与 changelog（变更日志）。只有维护者决定合并时才冻结一个发布 source commit（源提交）。
+若索引缺失，Release Pull Request（发布合并请求）应先失败；若被绕过或发布证据阶段才发现缺失，该流水线同样 fail-closed（失败关闭）。外部瞬时故障且 workflow（工作流）代码不变时，在原 Release lifecycle run（发布生命周期流水线运行）点击 rerun failed jobs（重新运行失败任务）。若故障需要修改 workflow（工作流），旧运行仍固定使用旧提交，必须先通过 Pull Request（合并请求）合入修复，再在 `main` 手工运行 `Release lifecycle`（发布生命周期）：`resolve_draft`（解析草稿）不运行 Release Please（发布自动化工具）、不接收身份参数，而是从受保护 `main` 的版本推导当前草稿，只接受该版本、未发布状态和 `main` 祖先 source SHA（源提交哈希）；`recover_artifacts`（恢复证据）对同一 source SHA（源提交哈希）重新执行完整证据流水线。手工运行时 `GITHUB_SHA` 指向当前 `main`，并不等于旧草稿目标提交，因此不能把两者相等作为门禁；真实约束是草稿目标属于 `main` 历史、该提交内版本匹配、检出结果等于目标提交。发布源提交中的 CLI（命令行接口）仍可能是修复前版本，所以恢复工作流保持其既有命令契约，并通过任务产物传递草稿快照。不改变 package version（包版本），也不创建第二个 Draft Release（草稿发布版本）。
+
+开发流程不等待某次 release finalize（发布收口）：Release Pull Request（发布合并请求）未合并时，后续 `feat/fix`（功能 / 修复）提交继续进入同一个 PR（合并请求）并刷新版本与 changelog（变更日志）。Release Pull Request（发布合并请求）合并并形成活动草稿后，普通功能合并仍可进入 `main`，但状态门禁暂停下一版本发布合并请求，避免一个尚未人工 Publish（发布）的源码版本被 Release Please（发布自动化工具）错误视为已发布基线。只有维护者决定合并时才冻结一个发布 source commit（源提交）。
 
 - [x] **Step 5（步骤 5）：固定六项证据与本地门禁**
 
@@ -738,7 +750,9 @@ npm run container:smoke:runtime-base
 git diff --check
 ```
 
-2026-07-26 本地门禁结果：四组定向契约 48/48、完整测试 201/201、TypeScript（类型检查）、schema/corpus/eval contract（模式 / 语料 / 评估契约）、Next.js build（Next.js 构建）和 `git diff --check` 全部通过。真实 clean-context container build（干净上下文容器构建）首次暴露“未暂存的 Task 11（任务 11）新文件未进入临时上下文”，先新增反例再把明确审核文件加入白名单；修复后容器内 201/201 与类型检查通过，无索引 runtime-base smoke test（运行时基础镜像冒烟测试）为 `live=200`、`ready=503/index_missing`、`provider network=none`。本轮未调用模型、未重建索引、未推送 GHCR（GitHub 容器镜像仓库）、未创建 Release（发布版本）或 Git tag（Git 标签）。
+2026-07-26 本地门禁结果：本轮相关定向契约 45/45、`npm run release:check` 9/9、`npm run workflow:check` 6/6、完整测试 208/208、TypeScript（类型检查）、schema/corpus/eval contract（模式 / 语料 / 评估契约）、Next.js build（Next.js 构建）和 `git diff --check` 全部通过。真实 clean-context container build（干净上下文容器构建）首次暴露“未暂存的 Task 11（任务 11）新文件未进入临时上下文”，先新增反例再把明确审核文件加入白名单；修复后容器内 208/208 与类型检查通过，无索引 runtime-base smoke test（运行时基础镜像冒烟测试）为 `live=200`、`ready=503/index_missing`、`provider network=none`。本轮未调用模型、未重建索引、未推送 GHCR（GitHub 容器镜像仓库）、未创建 Release（发布版本）或 Git tag（Git 标签）。
+
+2026-07-26 外部执行结果：`index-build` Environment（索引构建环境）只允许 `main` 并只含 `VOYAGE_API_KEY` 环境密钥，repository variable（仓库变量）`CURRENT_PRODUCTION_DIGEST` 为 `none`。手工运行 `30171546490` 对 8,410 条语料执行一次 Voyage document embedding（Voyage 文档向量嵌入），成功生成、回读校验并签名独立索引产物；Release Pull Request #3（发布合并请求 #3）的索引门禁随后通过并压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`。Release lifecycle run（发布生命周期运行）`30192091050` 创建了 `v0.1.0` Draft Release（草稿发布版本），但证据 `verify`（验证）任务以 `contents:read` 读取仅对 push access（推送权限）可见的草稿时返回 `release not found`，在构建候选镜像前失败关闭。后续恢复审查又发现：手工运行的 `GITHUB_SHA` 与旧草稿 source SHA（源提交哈希）天然不同；给 `build`（构建）写权限只为重复读取草稿不符合最小权限；同一次 Release Please（发布自动化工具）调用在创建草稿后继续创建了错误的 `0.2.0` Pull Request #5（合并请求 #5）。当前修复分支统一处理这些问题：只有实际读取草稿或上传附件的任务保留写权限，已校验草稿通过任务产物传给只读构建，手工恢复验证祖先关系而非错误的 SHA 相等，并在主分支与 Release Pull Request（发布合并请求）两侧建立活动应用草稿互斥门禁。Pull Request #5（合并请求 #5）已关闭且不作为版本历史。
 
 - [ ] **Step 6（步骤 6）：执行首次独立索引和候选发布**
 
@@ -750,7 +764,7 @@ git diff --check
 - `v*` tag ruleset（标签规则集）允许维护者从 Draft Release（草稿发布版本）人工 Publish（发布），同时禁止非审核路径改写或删除已发布标签；
 - 当次 Voyage document embedding（Voyage 文档向量嵌入）费用、GHCR push（GHCR 推送）、Release Pull Request（发布合并请求）合并和 Draft Release（草稿发布版本）人工发布分别获得确认。
 
-执行时先手工运行 `index-build`（索引构建）并核对 8,410 条语料、model/dimension/hash/digest/signature（模型 / 维度 / 哈希 / 内容摘要 / 签名）；再重新运行 Release Pull Request check（发布合并请求检查）并合并。Release Please（发布自动化工具）创建 Draft Release（草稿发布版本）后自动进入候选构建。候选通过后仅停在草稿页面，K3s（轻量 Kubernetes）零变化；维护者审核六项证据后才点击 Publish（发布）。
+首次索引和 Release Pull Request #3（发布合并请求 #3）已经完成，不得为了恢复候选而重复调用 Voyage。错误的 Pull Request #5（合并请求 #5）已经关闭；发布修复合并请求通过门禁并合入 `main` 后，手工运行无参数 `Release lifecycle`（发布生命周期），由 `resolve_draft`（解析草稿）定位既有 `v0.1.0` 草稿及其源提交，再由 `recover_artifacts`（恢复证据）完整构建候选镜像和六项证据。候选通过后仅停在草稿页面，K3s（轻量 Kubernetes）零变化；维护者审核六项证据和 `v*` tag ruleset（标签规则集）后才另行决定是否点击 Publish（发布）。
 
 **Rollback（回滚）：** 索引或候选失败时保留 digest（内容摘要）作为审计证据但不发布；修复应生成新身份或新应用 source SHA（源提交哈希），不得覆盖已审核 digest（内容摘要）。凭据疑似泄露时立即吊销、暂停 `index-build`（索引构建）、审核日志和费用；保留或删除 Draft Release（草稿发布版本）都不会部署，只有 Publish（发布）才进入后续生产流水线。
 

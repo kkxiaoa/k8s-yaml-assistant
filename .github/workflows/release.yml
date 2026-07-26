@@ -14,9 +14,78 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  inspect_release_state:
+    name: Inspect release preparation state
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      # Draft releases are visible only to tokens with push access.
+      contents: write
+      pull-requests: read
+    outputs:
+      release_action: ${{ steps.gate.outputs.release_action }}
+    steps:
+      - name: Checkout protected main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Resolve release preparation decision
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release-state
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq 'map({
+              tagName: .tag_name,
+              targetCommitish: .target_commitish,
+              isDraft: .draft,
+              isPrerelease: .prerelease
+            })' \
+            > release-state/releases.json
+          if [[ "$(jq length release-state/releases.json)" -ge 100 ]]; then
+            echo "release inventory exceeds the bounded inspection page" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq 'map({
+              author: .user.login,
+              base: .base.ref,
+              head: .head.ref,
+              mergedAt: .merged_at,
+              mergeCommitSha: .merge_commit_sha
+            })' \
+            > release-state/associated-prs.json
+          VERSION="$(jq -r '.version' package.json)"
+          TAG_COMMIT="none"
+          if git rev-parse --verify "refs/tags/v$VERSION^{commit}" \
+            > release-state/tag-commit; then
+            TAG_COMMIT="$(cat release-state/tag-commit)"
+          fi
+          npm run release:manifest -- gate \
+            --releases-json release-state/releases.json \
+            --associated-prs-json release-state/associated-prs.json \
+            --head-sha "$GITHUB_SHA" \
+            --tag-commit "$TAG_COMMIT" \
+            --github-output "$GITHUB_OUTPUT"
+
   release_please:
     name: Prepare or create release
-    if: github.ref == 'refs/heads/main'
+    needs: inspect_release_state
+    if: needs.inspect_release_state.outputs.release_action == 'prepare' || needs.inspect_release_state.outputs.release_action == 'create-draft'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -36,6 +105,66 @@ jobs:
           token: ${{ github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: ${{ needs.inspect_release_state.outputs.release_action == 'create-draft' }}
+
+  resolve_draft:
+    name: Resolve current draft release
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # GitHub restricts draft release reads to identities with push access.
+      contents: write
+    outputs:
+      source_sha: ${{ steps.draft.outputs.source_sha }}
+      tag: ${{ steps.draft.outputs.tag }}
+      version: ${{ steps.draft.outputs.version }}
+    steps:
+      - name: Checkout protected main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve reviewed draft identity
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "package version must be stable semantic version" >&2
+            exit 1
+          fi
+          RELEASE_TAG="v$VERSION"
+          mkdir -p recovery-state
+          gh release view "$RELEASE_TAG" \
+            --json tagName,targetCommitish,isDraft,isPrerelease \
+            > recovery-state/draft-release.json
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            '.tagName == $tag and .isDraft == true and .isPrerelease == false' \
+            recovery-state/draft-release.json \
+            > /dev/null
+          SOURCE_SHA="$(
+            jq -r '.targetCommitish' recovery-state/draft-release.json
+          )"
+          if [[ ! "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "draft target must be a full lowercase commit SHA" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          git show "$SOURCE_SHA:package.json" \
+            > recovery-state/source-package.json
+          test "$(
+            node -p "require('./recovery-state/source-package.json').version"
+          )" = "$VERSION"
+          {
+            echo "source_sha=$SOURCE_SHA"
+            echo "tag=$RELEASE_TAG"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
 
   artifacts:
     name: Build evidence for the new draft release
@@ -50,3 +179,16 @@ jobs:
       source_sha: ${{ needs.release_please.outputs.source_sha }}
       tag: ${{ needs.release_please.outputs.tag }}
       version: ${{ needs.release_please.outputs.version }}
+
+  recover_artifacts:
+    name: Recover evidence for the current draft release
+    needs: resolve_draft
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/release-artifacts.yml
+    with:
+      source_sha: ${{ needs.resolve_draft.outputs.source_sha }}
+      tag: ${{ needs.resolve_draft.outputs.tag }}
+      version: ${{ needs.resolve_draft.outputs.version }}
