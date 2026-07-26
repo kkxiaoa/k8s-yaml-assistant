@@ -15,6 +15,7 @@ import {
   deriveIndexArtifactIdentity,
   releaseNotesSha256,
   resolveDraftReleaseIdentity,
+  resolveReleasePreparation,
   resolveReleaseIdentity,
   resolveReleaseSourceState,
   verifyDraftRelease,
@@ -105,6 +106,41 @@ function draftRelease(
     body: releaseNotes.trimEnd(),
     assets,
     url: 'https://github.com/kkxiaoa/k8s-yaml-assistant/releases/tag/untagged-fixture',
+  };
+}
+
+function releaseSourceState() {
+  return resolveReleaseSourceState({
+    packageJson,
+    packageLock,
+    releasePleaseManifest,
+    changelog,
+  });
+}
+
+function listedRelease(input: {
+  tagName: string;
+  targetCommitish: string;
+  isDraft: boolean;
+  isPrerelease?: boolean;
+}): Record<string, unknown> {
+  return {
+    tagName: input.tagName,
+    targetCommitish: input.targetCommitish,
+    isDraft: input.isDraft,
+    isPrerelease: input.isPrerelease ?? false,
+  };
+}
+
+function releasePullRequest(
+  mergeCommitSha: string = sourceCommit,
+): Record<string, unknown> {
+  return {
+    author: 'github-actions[bot]',
+    base: 'main',
+    head: 'release-please--branches--main--components--k8s-yaml-assistant',
+    mergedAt: '2026-07-26T08:00:00Z',
+    mergeCommitSha,
   };
 }
 
@@ -428,6 +464,198 @@ test('draft release identity rejects unsafe or mismatched generated notes', asyn
       );
     });
   }
+});
+
+test('release preparation distinguishes development, release merge and active draft states', async (t) => {
+  await t.test('published version allows the next release PR update', () => {
+    assert.deepEqual(
+      resolveReleasePreparation({
+        sourceState: releaseSourceState(),
+        releases: [
+          listedRelease({
+            tagName: 'v0.1.0',
+            targetCommitish: sourceCommit,
+            isDraft: false,
+          }),
+        ],
+        associatedPullRequests: [],
+        headCommit: 'b'.repeat(40),
+        currentTagCommit: sourceCommit,
+      }),
+      {
+        action: 'prepare',
+        historyBoundaryCommit: sourceCommit,
+      },
+    );
+  });
+
+  await t.test('release PR merge creates only the current draft', () => {
+    assert.deepEqual(
+      resolveReleasePreparation({
+        sourceState: releaseSourceState(),
+        releases: [],
+        associatedPullRequests: [releasePullRequest()],
+        headCommit: sourceCommit,
+        currentTagCommit: null,
+      }),
+      {
+        action: 'create-draft',
+        historyBoundaryCommit: null,
+      },
+    );
+  });
+
+  await t.test('active draft defers the next release PR', () => {
+    assert.deepEqual(
+      resolveReleasePreparation({
+        sourceState: releaseSourceState(),
+        releases: [
+          listedRelease({
+            tagName: 'v0.1.0',
+            targetCommitish: sourceCommit,
+            isDraft: true,
+          }),
+          listedRelease({
+            tagName: 'rollback-2026-07-26',
+            targetCommitish: sourceCommit,
+            isDraft: true,
+          }),
+        ],
+        associatedPullRequests: [],
+        headCommit: 'b'.repeat(40),
+        currentTagCommit: null,
+      }),
+      {
+        action: 'defer',
+        historyBoundaryCommit: sourceCommit,
+      },
+    );
+  });
+
+  await t.test('placeholder source can prepare the first release PR', () => {
+    assert.deepEqual(
+      resolveReleasePreparation({
+        sourceState: {
+          status: 'placeholder',
+          version: '0.0.0',
+        },
+        releases: [],
+        associatedPullRequests: [],
+        headCommit: sourceCommit,
+        currentTagCommit: null,
+      }),
+      {
+        action: 'prepare',
+        historyBoundaryCommit: null,
+      },
+    );
+  });
+});
+
+test('release preparation fails closed on ambiguous or broken lifecycle state', () => {
+  const activeDraft = listedRelease({
+    tagName: 'v0.1.0',
+    targetCommitish: sourceCommit,
+    isDraft: true,
+  });
+  const published = listedRelease({
+    tagName: 'v0.1.0',
+    targetCommitish: sourceCommit,
+    isDraft: false,
+  });
+  const invalidInputs = [
+    {
+      releases: [],
+      associatedPullRequests: [],
+      currentTagCommit: null,
+    },
+    {
+      releases: [published],
+      associatedPullRequests: [],
+      currentTagCommit: null,
+    },
+    {
+      releases: [],
+      associatedPullRequests: [],
+      currentTagCommit: sourceCommit,
+    },
+    {
+      releases: [
+        listedRelease({
+          tagName: 'v0.1.0',
+          targetCommitish: 'b'.repeat(40),
+          isDraft: false,
+        }),
+      ],
+      associatedPullRequests: [],
+      currentTagCommit: sourceCommit,
+    },
+    {
+      releases: [activeDraft],
+      associatedPullRequests: [releasePullRequest()],
+      currentTagCommit: null,
+    },
+    {
+      releases: [
+        activeDraft,
+        listedRelease({
+          tagName: 'v0.2.0',
+          targetCommitish: 'b'.repeat(40),
+          isDraft: true,
+        }),
+      ],
+      associatedPullRequests: [],
+      currentTagCommit: null,
+    },
+    {
+      releases: [
+        listedRelease({
+          tagName: 'v0.2.0',
+          targetCommitish: sourceCommit,
+          isDraft: true,
+        }),
+      ],
+      associatedPullRequests: [],
+      currentTagCommit: null,
+    },
+    {
+      releases: [],
+      associatedPullRequests: [
+        releasePullRequest(),
+        releasePullRequest(),
+      ],
+      currentTagCommit: null,
+    },
+  ];
+
+  for (const input of invalidInputs) {
+    assert.throws(() =>
+      resolveReleasePreparation({
+        sourceState: releaseSourceState(),
+        headCommit: sourceCommit,
+        ...input,
+      }),
+    );
+  }
+
+  assert.throws(() =>
+    resolveReleasePreparation({
+      sourceState: {
+        status: 'placeholder',
+        version: '0.0.0',
+      },
+      releases: [
+        listedRelease({
+          tagName: 'v0.1.0',
+          targetCommitish: sourceCommit,
+          isDraft: false,
+        }),
+      ],
+      associatedPullRequests: [],
+      headCommit: sourceCommit,
+      currentTagCommit: null,
+    }),
+  );
 });
 
 test('index artifact identity is derived from corpus, model and format', () => {

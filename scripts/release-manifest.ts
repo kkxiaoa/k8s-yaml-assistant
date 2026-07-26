@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   existsSync,
@@ -20,6 +21,7 @@ import {
   decodeReleaseManifest,
   deriveIndexArtifactIdentity,
   resolveDraftReleaseIdentity,
+  resolveReleasePreparation,
   resolveReleaseSourceState,
   verifyDraftRelease,
 } from '../src/release/manifest';
@@ -95,8 +97,8 @@ function writeText(path: string, value: string): void {
   writeFileSync(path, value);
 }
 
-function currentReleaseIdentity() {
-  const sourceState = resolveReleaseSourceState({
+function currentReleaseSourceState() {
+  return resolveReleaseSourceState({
     packageJson: JSON.parse(readFileSync('package.json', 'utf8')) as unknown,
     packageLock: JSON.parse(
       readFileSync('package-lock.json', 'utf8'),
@@ -108,6 +110,10 @@ function currentReleaseIdentity() {
       ? readFileSync('CHANGELOG.md', 'utf8')
       : null,
   });
+}
+
+function currentReleaseIdentity() {
+  const sourceState = currentReleaseSourceState();
   if (sourceState.status === 'placeholder') {
     throw new TypeError('package version 0.0.0 is a release placeholder');
   }
@@ -160,9 +166,6 @@ function prepare(options: Options): void {
     expectedSourceCommit: options['source-sha']!,
   });
   appendGitHubOutputs(resolve(options['github-output']!), {
-    version: identity.version,
-    tag: identity.tag,
-    changelog_sha256: identity.changelogSha256,
     release_notes_sha256: draft.releaseNotesSha256,
   });
 }
@@ -176,6 +179,41 @@ function check(): void {
       changelogSha256: identity.changelogSha256,
     }),
   );
+}
+
+function gate(options: Options): void {
+  const tagCommit =
+    options['tag-commit'] === 'none' ? null : options['tag-commit']!;
+  const decision = resolveReleasePreparation({
+    sourceState: currentReleaseSourceState(),
+    releases: readJson(options['releases-json']!, jsonLimits.release),
+    associatedPullRequests: readJson(
+      options['associated-prs-json']!,
+      jsonLimits.release,
+    ),
+    headCommit: options['head-sha']!,
+    currentTagCommit: tagCommit,
+  });
+  if (decision.historyBoundaryCommit !== null) {
+    const ancestry = spawnSync(
+      'git',
+      [
+        'merge-base',
+        '--is-ancestor',
+        decision.historyBoundaryCommit,
+        options['head-sha']!,
+      ],
+      { stdio: 'ignore' },
+    );
+    if (ancestry.status !== 0) {
+      throw new TypeError(
+        'release history boundary is not an ancestor of the source commit',
+      );
+    }
+  }
+  appendGitHubOutputs(resolve(options['github-output']!), {
+    release_action: decision.action,
+  });
 }
 
 function indexIdentity(options: Options): void {
@@ -455,6 +493,18 @@ function main(): void {
     );
     return;
   }
+  if (command === 'gate') {
+    gate(
+      parseOptions(args, [
+        'releases-json',
+        'associated-prs-json',
+        'head-sha',
+        'tag-commit',
+        'github-output',
+      ]),
+    );
+    return;
+  }
   if (command === 'index-identity') {
     indexIdentity(
       parseOptions(args, ['github-output']),
@@ -497,7 +547,7 @@ function main(): void {
     return;
   }
   throw new TypeError(
-    'usage: release-manifest <check|prepare|index-identity|verify-index|finalize|verify-draft> [options]',
+    'usage: release-manifest <check|gate|prepare|index-identity|verify-index|finalize|verify-draft> [options]',
   );
 }
 
