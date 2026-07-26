@@ -35,6 +35,8 @@ const INDEX_CERTIFICATE_IDENTITY = `https://github.com/${INDEX_WORKFLOW_REF}`;
 const GITHUB_OIDC_ISSUER = 'https://token.actions.githubusercontent.com';
 const RELEASE_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+const RELEASE_TAG_PATTERN =
+  /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const IMAGE_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
@@ -321,6 +323,142 @@ export function resolveReleaseSourceState(
   };
 }
 
+const ReleaseListItemSchema = z.strictObject({
+  tagName: NonEmptyStringSchema,
+  targetCommitish: NonEmptyStringSchema,
+  isDraft: z.boolean(),
+  isPrerelease: z.boolean(),
+});
+
+const AssociatedPullRequestSchema = z.strictObject({
+  author: NonEmptyStringSchema,
+  base: NonEmptyStringSchema,
+  head: NonEmptyStringSchema,
+  mergedAt: NonEmptyStringSchema.nullable(),
+  mergeCommitSha: CommitSchema.nullable(),
+});
+
+interface ResolveReleasePreparationInput {
+  sourceState: ReleaseSourceState;
+  releases: unknown;
+  associatedPullRequests: unknown;
+  headCommit: string;
+  currentTagCommit: string | null;
+}
+
+interface ReleasePreparationDecision {
+  action: 'prepare' | 'create-draft' | 'defer';
+  historyBoundaryCommit: string | null;
+}
+
+export function resolveReleasePreparation(
+  input: ResolveReleasePreparationInput,
+): ReleasePreparationDecision {
+  const releases = z.array(ReleaseListItemSchema).parse(input.releases);
+  const pullRequests = z
+    .array(AssociatedPullRequestSchema)
+    .parse(input.associatedPullRequests);
+  const headCommit = CommitSchema.parse(input.headCommit);
+  const currentTagCommit =
+    input.currentTagCommit === null
+      ? null
+      : CommitSchema.parse(input.currentTagCommit);
+  const releaseMerges = pullRequests.filter(
+    (pullRequest) =>
+      pullRequest.author === 'github-actions[bot]' &&
+      pullRequest.base === 'main' &&
+      pullRequest.head.startsWith('release-please--branches--main') &&
+      pullRequest.mergedAt !== null &&
+      pullRequest.mergeCommitSha === headCommit,
+  );
+  if (releaseMerges.length > 1) {
+    throw new TypeError('source commit has multiple matching release PRs');
+  }
+  const releaseMerge = releaseMerges.length === 1;
+  const applicationReleases = releases.filter((release) =>
+    RELEASE_TAG_PATTERN.test(release.tagName),
+  );
+  const applicationDrafts = applicationReleases.filter(
+    (release) => release.isDraft,
+  );
+  if (applicationDrafts.length > 1) {
+    throw new TypeError('multiple application draft releases are active');
+  }
+
+  const currentTag = `v${input.sourceState.version}`;
+  const currentReleases = releases.filter(
+    (release) => release.tagName === currentTag,
+  );
+  if (currentReleases.length > 1) {
+    throw new TypeError('current version has multiple GitHub releases');
+  }
+
+  const activeDraft = applicationDrafts[0];
+  if (activeDraft !== undefined) {
+    if (
+      input.sourceState.status !== 'release' ||
+      activeDraft.tagName !== input.sourceState.identity.tag ||
+      activeDraft.isPrerelease ||
+      currentTagCommit !== null ||
+      releaseMerge
+    ) {
+      throw new TypeError('active application draft conflicts with source state');
+    }
+    return {
+      action: 'defer',
+      historyBoundaryCommit: CommitSchema.parse(activeDraft.targetCommitish),
+    };
+  }
+
+  if (releaseMerge) {
+    if (
+      input.sourceState.status !== 'release' ||
+      currentReleases.length !== 0 ||
+      currentTagCommit !== null
+    ) {
+      throw new TypeError('release PR merge conflicts with current release state');
+    }
+    return {
+      action: 'create-draft',
+      historyBoundaryCommit: null,
+    };
+  }
+
+  if (input.sourceState.status === 'placeholder') {
+    if (applicationReleases.length !== 0 || currentTagCommit !== null) {
+      throw new TypeError('placeholder source conflicts with release history');
+    }
+    return {
+      action: 'prepare',
+      historyBoundaryCommit: null,
+    };
+  }
+
+  const currentRelease = currentReleases[0];
+  if (
+    currentRelease === undefined ||
+    currentRelease.isDraft ||
+    currentRelease.isPrerelease ||
+    currentTagCommit === null
+  ) {
+    throw new TypeError(
+      'stable source requires a published release and matching Git tag',
+    );
+  }
+  const publishedTargetCommit = CommitSchema.parse(
+    currentRelease.targetCommitish,
+  );
+  if (publishedTargetCommit !== currentTagCommit) {
+    throw new TypeError(
+      'stable source requires a published release and matching Git tag',
+    );
+  }
+  return {
+    action: 'prepare',
+    historyBoundaryCommit: currentTagCommit,
+  };
+}
+
 export function deriveIndexArtifactIdentity(
   corpusManifest: Pick<CorpusManifest, 'identityVersion' | 'manifestHash'>,
   embeddingModel: string,
@@ -573,7 +711,7 @@ export function resolveDraftReleaseIdentity(
   const release = DraftReleaseSchema.parse(input.release);
   const expectedTag = z
     .string()
-    .regex(/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u)
+    .regex(RELEASE_TAG_PATTERN)
     .parse(input.expectedTag);
   const expectedSourceCommit = CommitSchema.parse(input.expectedSourceCommit);
   if (
