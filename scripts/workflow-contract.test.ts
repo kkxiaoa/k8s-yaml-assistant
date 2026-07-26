@@ -609,6 +609,46 @@ function validateReleaseArtifactsWorkflow(
   );
   assert.equal(imageWith['secret-envs'], undefined);
 
+  const vulnerabilityReport = actionStep(
+    build,
+    trivyAction,
+    'release artifact build',
+  );
+  assert.deepEqual(
+    object(vulnerabilityReport.with, 'release vulnerability report inputs'),
+    {
+      'scan-type': 'image',
+      'image-ref': `${applicationImage}@\${{ steps.image.outputs.digest }}`,
+      format: 'json',
+      output: 'candidate-state/trivy-results.json',
+      'exit-code': '0',
+      'ignore-unfixed': false,
+      'vuln-type': 'os,library',
+      severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL',
+      scanners: 'vuln',
+      'hide-progress': true,
+      version: 'v0.70.0',
+    },
+  );
+  const vulnerabilityGate = namedStep(
+    build,
+    'Reject high and critical vulnerabilities',
+    'release artifact build',
+  );
+  assert.equal(vulnerabilityGate.uses, undefined);
+  assert.equal(
+    typeof vulnerabilityGate.run,
+    'string',
+    'release vulnerability gate must be a command',
+  );
+  assert.equal(
+    (vulnerabilityGate.run as string)
+      .replace(/\\\r?\n\s*/gu, ' ')
+      .replace(/\s+/gu, ' ')
+      .trim(),
+    'trivy convert --format table --severity HIGH,CRITICAL --exit-code 1 --scanners vuln candidate-state/trivy-results.json',
+  );
+
   const attachText = runText(attach, 'release artifact attach');
   assertContains(attachText, [
     'gh release upload',
@@ -780,7 +820,7 @@ test('release index model has one source-controlled identity', () => {
   );
 });
 
-test('release contracts reject mutable actions, split ownership, and paid artifact builds', () => {
+test('release contracts reject mutable actions, split ownership, paid builds, and detached gates', () => {
   const releaseActual = workflow(releaseWorkflowPath, 'release workflow');
   const mutableRelease = structuredClone(releaseActual.value);
   actionStep(
@@ -820,4 +860,26 @@ test('release contracts reject mutable actions, split ownership, and paid artifa
       JSON.stringify(paidArtifacts),
     ),
   );
+
+  for (const [expected, replacement] of [
+    ['--exit-code 1', '--exit-code 0'],
+    [
+      'candidate-state/trivy-results.json',
+      'candidate-state/other-trivy-results.json',
+    ],
+  ] as const) {
+    const candidate = structuredClone(artifactsActual.value);
+    const gate = namedStep(
+      job(candidate, 'build'),
+      'Reject high and critical vulnerabilities',
+      'release artifact build',
+    );
+    assert.equal(typeof gate.run, 'string');
+    const mutatedRun = (gate.run as string).replace(expected, replacement);
+    assert.notEqual(mutatedRun, gate.run);
+    gate.run = mutatedRun;
+    assert.throws(() =>
+      validateReleaseArtifactsWorkflow(candidate, JSON.stringify(candidate)),
+    );
+  }
 });
