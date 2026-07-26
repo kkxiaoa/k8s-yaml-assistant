@@ -170,6 +170,12 @@ function actionStep(value: JsonObject, uses: string, label: string): JsonObject 
   return matches[0]!;
 }
 
+function namedStep(value: JsonObject, name: string, label: string): JsonObject {
+  const matches = steps(value, label).filter((step) => step.name === name);
+  assert.equal(matches.length, 1, `${label} must contain one ${name} step`);
+  return matches[0]!;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
@@ -255,9 +261,33 @@ function validatePrWorkflow(value: JsonObject, source: string): void {
   });
   assert.deepEqual(value.permissions, { contents: 'read' });
 
+  const releaseState = job(value, 'release_state');
+  assert.deepEqual(releaseState.permissions, { contents: 'write' });
+  assert.equal(releaseState['runs-on'], 'ubuntu-24.04');
+  assertContains(runText(releaseState, 'PR release state'), [
+    'gh api',
+    'releases?per_page=100',
+    'active application draft blocks a new release PR',
+  ]);
+  assert.equal(
+    steps(releaseState, 'PR release state')[0]?.if,
+    "github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--branches--main')",
+  );
+  assert.equal(
+    steps(releaseState, 'PR release state').some(
+      (step) => typeof step.uses === 'string',
+    ),
+    false,
+  );
+
   const verify = job(value, 'verify');
+  assert.equal(verify.needs, 'release_state');
+  assert.equal(verify.if, '${{ !cancelled() }}');
   const verifyText = runText(verify, 'PR verify');
-  assertContains(verifyText, prCommands);
+  assertContains(verifyText, [
+    'release state gate must succeed before PR verification',
+    ...prCommands,
+  ]);
   for (const command of commandLines(verify, 'PR verify')) {
     assert.equal(
       forbiddenModelCommands.some(
@@ -272,6 +302,7 @@ function validatePrWorkflow(value: JsonObject, source: string): void {
   assert.doesNotMatch(JSON.stringify(verify), /\bghcr\.io\b/u);
 
   const releaseIndex = job(value, 'release_index');
+  assert.equal(releaseIndex.needs, 'release_state');
   assert.equal(
     releaseIndex.if,
     "github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--branches--main')",
@@ -312,10 +343,40 @@ function validateReleaseWorkflow(value: JsonObject, source: string): void {
   });
   assert.deepEqual(value.permissions, { contents: 'read' });
 
+  const releaseState = job(value, 'inspect_release_state');
+  assert.equal(
+    releaseState.if,
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+  );
+  assert.deepEqual(releaseState.permissions, {
+    contents: 'write',
+    'pull-requests': 'read',
+  });
+  assert.deepEqual(releaseState.outputs, {
+    release_action: '${{ steps.gate.outputs.release_action }}',
+  });
+  assert.deepEqual(
+    object(
+      actionStep(releaseState, checkoutAction, 'release state').with,
+      'release state checkout inputs',
+    ),
+    {
+      'fetch-depth': 0,
+      'persist-credentials': false,
+    },
+  );
+  assertContains(runText(releaseState, 'release state'), [
+    'releases?per_page=100',
+    'commits/$GITHUB_SHA/pulls',
+    'release:manifest -- gate',
+    '--tag-commit "$TAG_COMMIT"',
+  ]);
+
   const releasePlease = job(value, 'release_please');
+  assert.equal(releasePlease.needs, 'inspect_release_state');
   assert.equal(
     releasePlease.if,
-    "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+    "needs.inspect_release_state.outputs.release_action == 'prepare' || needs.inspect_release_state.outputs.release_action == 'create-draft'",
   );
   assert.deepEqual(releasePlease.permissions, {
     contents: 'write',
@@ -338,22 +399,24 @@ function validateReleaseWorkflow(value: JsonObject, source: string): void {
     token: '${{ github.token }}',
     'config-file': 'release-please-config.json',
     'manifest-file': '.release-please-manifest.json',
+    'skip-github-pull-request':
+      "${{ needs.inspect_release_state.outputs.release_action == 'create-draft' }}",
   });
 
-  const resumeDraft = job(value, 'resume_draft');
+  const resolveDraft = job(value, 'resolve_draft');
   assert.equal(
-    resumeDraft.if,
+    resolveDraft.if,
     "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
   );
-  assert.deepEqual(resumeDraft.permissions, { contents: 'write' });
-  assert.deepEqual(resumeDraft.outputs, {
+  assert.deepEqual(resolveDraft.permissions, { contents: 'write' });
+  assert.deepEqual(resolveDraft.outputs, {
     source_sha: '${{ steps.draft.outputs.source_sha }}',
     tag: '${{ steps.draft.outputs.tag }}',
     version: '${{ steps.draft.outputs.version }}',
   });
   assert.deepEqual(
     object(
-      actionStep(resumeDraft, checkoutAction, 'draft recovery').with,
+      actionStep(resolveDraft, checkoutAction, 'draft recovery').with,
       'draft recovery checkout inputs',
     ),
     {
@@ -362,7 +425,7 @@ function validateReleaseWorkflow(value: JsonObject, source: string): void {
       'persist-credentials': false,
     },
   );
-  assertContains(runText(resumeDraft, 'draft recovery'), [
+  assertContains(runText(resolveDraft, 'draft recovery'), [
     'gh release view',
     'targetCommitish',
     'git merge-base --is-ancestor',
@@ -387,30 +450,27 @@ function validateReleaseWorkflow(value: JsonObject, source: string): void {
     version: '${{ needs.release_please.outputs.version }}',
   });
 
-  const resumedArtifacts = job(value, 'resume_artifacts');
-  assert.equal(resumedArtifacts.needs, 'resume_draft');
+  const recoveredArtifacts = job(value, 'recover_artifacts');
+  assert.equal(recoveredArtifacts.needs, 'resolve_draft');
+  assert.equal(recoveredArtifacts.if, undefined);
   assert.equal(
-    resumedArtifacts.if,
-    "needs.resume_draft.result == 'success'",
-  );
-  assert.equal(
-    resumedArtifacts.uses,
+    recoveredArtifacts.uses,
     './.github/workflows/release-artifacts.yml',
   );
-  assert.deepEqual(resumedArtifacts.permissions, {
+  assert.deepEqual(recoveredArtifacts.permissions, {
     contents: 'write',
     packages: 'write',
     'id-token': 'write',
   });
-  assert.deepEqual(resumedArtifacts.with, {
-    source_sha: '${{ needs.resume_draft.outputs.source_sha }}',
-    tag: '${{ needs.resume_draft.outputs.tag }}',
-    version: '${{ needs.resume_draft.outputs.version }}',
+  assert.deepEqual(recoveredArtifacts.with, {
+    source_sha: '${{ needs.resolve_draft.outputs.source_sha }}',
+    tag: '${{ needs.resolve_draft.outputs.tag }}',
+    version: '${{ needs.resolve_draft.outputs.version }}',
   });
 
   assertPinnedReviewedActions(value);
   assertSafeExecutionBoundary(source);
-  assert.doesNotMatch(source, /skip-github-(?:release|pull-request)/u);
+  assert.doesNotMatch(source, /skip-github-release/u);
   assert.doesNotMatch(source, /\b(?:VOYAGE|DEEPSEEK)_[A-Z0-9_]+\b/u);
   assert.doesNotMatch(
     source,
@@ -444,7 +504,7 @@ function validateReleaseArtifactsWorkflow(
     packages: 'read',
   });
   assert.deepEqual(build.permissions, {
-    contents: 'write',
+    contents: 'read',
     packages: 'write',
     'id-token': 'write',
   });
@@ -463,6 +523,10 @@ function validateReleaseArtifactsWorkflow(
     'cosign verify',
     'release:manifest -- verify-index',
   ]);
+  assert.doesNotMatch(
+    verifyText,
+    /test "\$SOURCE_SHA" = "\$GITHUB_SHA"/u,
+  );
   for (const command of repeatedPrCommands) {
     assert.doesNotMatch(
       verifyText,
@@ -472,6 +536,36 @@ function validateReleaseArtifactsWorkflow(
   }
   assert.equal(object(verify.outputs, 'verify outputs').index_tag, undefined);
   assert.equal(build.outputs, undefined);
+  assert.deepEqual(
+    object(
+      namedStep(
+        verify,
+        'Upload verified draft snapshot',
+        'release artifact verify',
+      ).with,
+      'verified draft upload inputs',
+    ),
+    {
+      name: 'verified-draft-${{ inputs.source_sha }}',
+      path: 'candidate-state/draft-release.json',
+      'if-no-files-found': 'error',
+      'retention-days': 1,
+    },
+  );
+  assert.deepEqual(
+    object(
+      namedStep(
+        build,
+        'Download verified draft snapshot',
+        'release artifact build',
+      ).with,
+      'verified draft download inputs',
+    ),
+    {
+      name: 'verified-draft-${{ inputs.source_sha }}',
+      path: 'candidate-state',
+    },
+  );
 
   const buildText = runText(build, 'release artifact build');
   assertContains(buildText, [
@@ -481,7 +575,9 @@ function validateReleaseArtifactsWorkflow(
     'cosign verify-attestation',
     'cosign sign-blob',
     'release:manifest -- finalize',
+    '--release-json candidate-state/draft-release.json',
   ]);
+  assert.doesNotMatch(buildText, /\bgh release view\b/u);
   const image = actionStep(build, buildPushAction, 'release artifact build');
   const imageWith = object(image.with, 'release image inputs');
   assert.equal(imageWith.target, 'runtime');
@@ -502,6 +598,10 @@ function validateReleaseArtifactsWorkflow(
     'gh release download',
     'release:manifest -- verify-draft',
   ]);
+  assert.equal(
+    (attachText.match(/\bgh release view\b/gu) ?? []).length,
+    2,
+  );
   for (const file of releaseArtifactFiles) {
     assert.match(source, new RegExp(file.replaceAll('.', '\\.'), 'u'));
   }

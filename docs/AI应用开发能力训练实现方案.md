@@ -1,7 +1,7 @@
 # AI 应用开发能力训练实现方案
 
 > 状态：当前执行依据。
-> 最近核对：2026-07-21。
+> 最近核对：2026-07-26。
 > 用途：维护当前能力状态、质量门禁和唯一执行顺序。具体数据契约由已确认的 design/spec 定义，不在本文重复维护。
 
 ## 1. 项目目标
@@ -65,7 +65,7 @@ npm run corpus:stats
 - 尚未注册真实数据 provider：`docs`、`example`。
 - `data/schemas/curated.json` 显式包含 2 个真实集群 CRD（自定义资源定义）：`gateway.networking.k8s.io/v1 HTTPRoute` 和 `cert-manager.io/v1 Certificate`。
 - corpus identityVersion（语料身份版本）为 `2`，manifest hash（清单哈希）为 `82621edc73530dffc86e21fe6488a332e98f7d2e1efba3d0d995e7b66fb880c4`。
-- 现有 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求 v5 索引格式和 knowledge identity v2（知识身份版本 2），因此当前以 `format_mismatch` 失效。默认 `voyage-3` 的 v5 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`，8,410 条新索引尚未重建。
+- 现有本地 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求 v5 索引格式和 knowledge identity v2（知识身份版本 2），因此当前以 `format_mismatch` 失效。默认 `voyage-3` 的 v5 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`；8,410 条正式索引已经由独立 GitHub Actions（GitHub 自动化流水线）生成、完整回读校验并签名，尚未复制回本地目录，也尚未烘焙进候选应用镜像。
 
 ### 3.2 Eval 数据
 
@@ -315,7 +315,7 @@ Stage 是能力分类，不代表执行时序。
 
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引、private/portfolio（私有 / 作品集展示）双模式和安全 observation（观测）边界。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
-3. Phase 2（阶段 2）的 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已通过受控合并请求进入 `main`。在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，当前索引契约为 knowledge identity v2（知识身份版本 2）与 index format v5（索引格式版本 5），并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。8,410 条正式索引已经由独立流水线生成、校验和签名；Release Pull Request #3（发布合并请求 #3）已压缩合并，`v0.1.0` Draft Release（草稿发布版本）已经创建。首轮证据流水线因 GitHub 草稿读取权限不足而失败关闭，当前正在补充最小权限和无参数恢复路径；尚未生成候选应用镜像、六项证据、应用 Kubernetes（容器编排系统）资源或公网入口。
+3. Phase 2（阶段 2）的 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已通过受控合并请求进入 `main`。在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，当前索引契约为 knowledge identity v2（知识身份版本 2）与 index format v5（索引格式版本 5），并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。8,410 条正式索引已经由独立流水线生成、校验和签名；Release Pull Request #3（发布合并请求 #3）已压缩合并，`v0.1.0` Draft Release（草稿发布版本）已经创建。首轮真实运行暴露草稿读取权限、恢复运行必须兼容旧 source commit（源提交），以及活动草稿期间错误创建下一版本发布合并请求的问题；当前受控修复分支增加最小任务权限、草稿快照传递、无参数恢复和发布状态互斥门禁。错误创建的 Pull Request #5（合并请求 #5）已关闭且不作为版本历史；尚未生成候选应用镜像、六项证据、应用 Kubernetes（容器编排系统）资源或公网入口。
 4. 私有部署和受限入口验证通过后，在公开发布前恢复 Phase B（阶段 B）正式质量重建；新 baseline（基线）审核通过或形成显式风险接受记录后，才进入公开发布。
 5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 
