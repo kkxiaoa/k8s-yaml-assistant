@@ -105,6 +105,20 @@ jobs:
       - name: Verify fail-closed runtime image
         run: npm run container:smoke:runtime-base
 
+      - name: Reject high and critical runtime vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: k8s-yaml-assistant:test-runtime-base
+          format: table
+          exit-code: "1"
+          ignore-unfixed: false
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          hide-progress: true
+          version: v0.70.0
+
   release_index:
     name: Release index artifact
     needs: release_state
