@@ -274,19 +274,13 @@ jobs:
           version: v0.70.0
 
       - name: Reject high and critical vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ghcr.io/kkxiaoa/k8s-yaml-assistant@${{ steps.image.outputs.digest }}
-          format: table
-          exit-code: "1"
-          ignore-unfixed: false
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
-          scanners: vuln
-          hide-progress: true
-          version: v0.70.0
-          skip-setup-trivy: true
+        run: |
+          trivy convert \
+            --format table \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --scanners vuln \
+            candidate-state/trivy-results.json
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
