@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已经通过 Pull Request #2（合并请求 #2）合入 `main`。8,410 条正式索引已经构建、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`，`v0.1.0` Draft Release（草稿发布版本）已经创建。首轮真实运行暴露草稿读取权限、旧 source commit（源提交）恢复兼容和活动草稿期间重复准备下一版本的问题；当前修复分支正在收口最小任务权限、草稿快照、无参数恢复和发布状态互斥门禁。错误创建的 Pull Request #5（合并请求 #5）已关闭且不作为版本历史；尚未生成候选应用镜像、六项证据或实际 Git tag（Git 标签）。
+> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已经通过 Pull Request #2（合并请求 #2）合入 `main`。8,410 条正式索引已经构建、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`，`v0.1.0` Draft Release（草稿发布版本）已经创建。发布状态和恢复修复已通过 Pull Request #6（合并请求 #6）合入 `main`；手工恢复已验证草稿、索引并构建候选镜像，但因 5 项 `HIGH`（高危）运行时依赖漏洞在签名和附件前失败关闭。当前安全修复分支升级受影响依赖并把 Trivy `HIGH/CRITICAL`（容器高危 / 严重漏洞）扫描前移到 Pull Request（合并请求）门禁；既有草稿仍无附件和实际 Git tag（Git 标签），合入后必须先重定向到精确新提交并更新发布说明，再恢复六项证据。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。
@@ -752,7 +752,9 @@ git diff --check
 
 2026-07-26 本地门禁结果：本轮相关定向契约 45/45、`npm run release:check` 9/9、`npm run workflow:check` 6/6、完整测试 208/208、TypeScript（类型检查）、schema/corpus/eval contract（模式 / 语料 / 评估契约）、Next.js build（Next.js 构建）和 `git diff --check` 全部通过。真实 clean-context container build（干净上下文容器构建）首次暴露“未暂存的 Task 11（任务 11）新文件未进入临时上下文”，先新增反例再把明确审核文件加入白名单；修复后容器内 208/208 与类型检查通过，无索引 runtime-base smoke test（运行时基础镜像冒烟测试）为 `live=200`、`ready=503/index_missing`、`provider network=none`。本轮未调用模型、未重建索引、未推送 GHCR（GitHub 容器镜像仓库）、未创建 Release（发布版本）或 Git tag（Git 标签）。
 
-2026-07-26 外部执行结果：`index-build` Environment（索引构建环境）只允许 `main` 并只含 `VOYAGE_API_KEY` 环境密钥，repository variable（仓库变量）`CURRENT_PRODUCTION_DIGEST` 为 `none`。手工运行 `30171546490` 对 8,410 条语料执行一次 Voyage document embedding（Voyage 文档向量嵌入），成功生成、回读校验并签名独立索引产物；Release Pull Request #3（发布合并请求 #3）的索引门禁随后通过并压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`。Release lifecycle run（发布生命周期运行）`30192091050` 创建了 `v0.1.0` Draft Release（草稿发布版本），但证据 `verify`（验证）任务以 `contents:read` 读取仅对 push access（推送权限）可见的草稿时返回 `release not found`，在构建候选镜像前失败关闭。后续恢复审查又发现：手工运行的 `GITHUB_SHA` 与旧草稿 source SHA（源提交哈希）天然不同；给 `build`（构建）写权限只为重复读取草稿不符合最小权限；同一次 Release Please（发布自动化工具）调用在创建草稿后继续创建了错误的 `0.2.0` Pull Request #5（合并请求 #5）。当前修复分支统一处理这些问题：只有实际读取草稿或上传附件的任务保留写权限，已校验草稿通过任务产物传给只读构建，手工恢复验证祖先关系而非错误的 SHA 相等，并在主分支与 Release Pull Request（发布合并请求）两侧建立活动应用草稿互斥门禁。Pull Request #5（合并请求 #5）已关闭且不作为版本历史。
+2026-07-26 外部执行结果：`index-build` Environment（索引构建环境）只允许 `main` 并只含 `VOYAGE_API_KEY` 环境密钥，repository variable（仓库变量）`CURRENT_PRODUCTION_DIGEST` 为 `none`。手工运行 `30171546490` 对 8,410 条语料执行一次 Voyage document embedding（Voyage 文档向量嵌入），成功生成、回读校验并签名独立索引产物；Release Pull Request #3（发布合并请求 #3）的索引门禁随后通过并压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`。Release lifecycle run（发布生命周期运行）`30192091050` 创建了 `v0.1.0` Draft Release（草稿发布版本），但证据 `verify`（验证）任务以 `contents:read` 读取仅对 push access（推送权限）可见的草稿时返回 `release not found`，在构建候选镜像前失败关闭。后续恢复审查发现的最小权限、旧 source commit（源提交）兼容和重复准备下一版本问题已由 Pull Request #6（合并请求 #6）合入 `423e18e6537a1b6fa5c8c6bf4bf0c2766d15bce2`；自动运行 `30208015368` 正确暂停 Release Please（发布自动化工具）。无参数恢复运行 `30208130964` 随后成功解析既有草稿、验证 8,410 条签名索引、构建并推送旧源码候选、执行就绪冒烟、导出 SLSA provenance（SLSA 来源证明）并生成 SPDX SBOM（SPDX 软件物料清单），但 Trivy（容器漏洞扫描器）拒绝了 5 项 `HIGH`（高危）依赖漏洞，后续签名、发布清单和附件任务均未执行。草稿仍指向 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`，没有附件或实际 Git tag（Git 标签），K3s（轻量 Kubernetes）保持零变化。
+
+2026-07-26 运行时安全修复本地证据：先以反例固定安全版本与 Pull Request（合并请求）镜像扫描契约，再把 Next.js（Next.js 框架）升级到 `16.2.12`、`sharp`（图像处理库）统一到 `0.35.3`、`js-yaml`（YAML 解析库）升级到 `4.3.0`，并把 `postcss`（CSS 处理库）统一到 `8.5.23`。`npm audit --omit=dev`（npm 生产依赖安全审计）不再包含 `HIGH/CRITICAL`（高危 / 严重），仍有 2 项来自 Monaco Editor（Monaco 编辑器）固定 DOMPurify（HTML 清理库）的 `MODERATE`（中危）报告，当前不属于高危发布阻断但必须保留为遗留风险。本地 214/214 测试、类型检查、Next.js 构建、无索引容器构建和失败关闭烟测通过；固定 Trivy `0.70.0` 对真实运行镜像扫描结果为 0 项 `HIGH/CRITICAL`（高危 / 严重）。
 
 - [ ] **Step 6（步骤 6）：执行首次独立索引和候选发布**
 
@@ -764,7 +766,7 @@ git diff --check
 - `v*` tag ruleset（标签规则集）允许维护者从 Draft Release（草稿发布版本）人工 Publish（发布），同时禁止非审核路径改写或删除已发布标签；
 - 当次 Voyage document embedding（Voyage 文档向量嵌入）费用、GHCR push（GHCR 推送）、Release Pull Request（发布合并请求）合并和 Draft Release（草稿发布版本）人工发布分别获得确认。
 
-首次索引和 Release Pull Request #3（发布合并请求 #3）已经完成，不得为了恢复候选而重复调用 Voyage。错误的 Pull Request #5（合并请求 #5）已经关闭；发布修复合并请求通过门禁并合入 `main` 后，手工运行无参数 `Release lifecycle`（发布生命周期），由 `resolve_draft`（解析草稿）定位既有 `v0.1.0` 草稿及其源提交，再由 `recover_artifacts`（恢复证据）完整构建候选镜像和六项证据。候选通过后仅停在草稿页面，K3s（轻量 Kubernetes）零变化；维护者审核六项证据和 `v*` tag ruleset（标签规则集）后才另行决定是否点击 Publish（发布）。
+首次索引和 Release Pull Request #3（发布合并请求 #3）已经完成，不得为了恢复候选而重复调用 Voyage。错误的 Pull Request #5（合并请求 #5）已经关闭；旧草稿源码的运行时漏洞不能通过重跑旧提交修复。安全修复合并请求通过全部门禁并合入 `main` 后，管理员必须先把尚未发布、无附件的 `v0.1.0` 草稿目标重定向到该精确合并提交，并把已审核的 `0.1.0` changelog（变更日志）安全修复写入草稿发布说明；不得指向分支名或未审核提交。随后手工运行无参数 `Release lifecycle`（发布生命周期），由 `resolve_draft`（解析草稿）重新校验版本、目标提交和 `main` 祖先关系，再由 `recover_artifacts`（恢复证据）完整构建新候选镜像和六项证据。候选通过后仅停在草稿页面，K3s（轻量 Kubernetes）零变化；维护者审核六项证据和 `v*` tag ruleset（标签规则集）后才另行决定是否点击 Publish（发布）。
 
 **Rollback（回滚）：** 索引或候选失败时保留 digest（内容摘要）作为审计证据但不发布；修复应生成新身份或新应用 source SHA（源提交哈希），不得覆盖已审核 digest（内容摘要）。凭据疑似泄露时立即吊销、暂停 `index-build`（索引构建）、审核日志和费用；保留或删除 Draft Release（草稿发布版本）都不会部署，只有 Publish（发布）才进入后续生产流水线。
 

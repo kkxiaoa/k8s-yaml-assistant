@@ -12,6 +12,10 @@ import test from 'node:test';
 const root = process.cwd();
 const expectedNodeVersion = '24.18.0';
 const expectedNodeTypesVersion = '24.13.3';
+const expectedJsYamlVersion = '4.3.0';
+const expectedNextVersion = '16.2.12';
+const expectedPostcssVersion = '8.5.23';
+const expectedSharpVersion = '0.35.3';
 const fontExtensions = new Set(['.otf', '.ttf', '.woff', '.woff2']);
 
 type JsonObject = Record<string, unknown>;
@@ -20,6 +24,10 @@ type ReleaseBuildBundle = {
   nodeVersion: string;
   packageJson: JsonObject;
   lockRoot: JsonObject;
+  resolvedJsYaml: JsonObject;
+  resolvedNext: JsonObject;
+  resolvedPostcssVersions: string[];
+  resolvedSharpVersions: string[];
   nextConfig: JsonObject;
   tsConfig: JsonObject;
   appSources: Record<string, string>;
@@ -59,6 +67,16 @@ async function readActualBundle(): Promise<ReleaseBuildBundle> {
     nodeVersion: readFileSync(join(root, '.nvmrc'), 'utf8').trim(),
     packageJson: readJson(join(root, 'package.json')),
     lockRoot: packages[''] as JsonObject,
+    resolvedJsYaml: packages['node_modules/js-yaml'] as JsonObject,
+    resolvedNext: packages['node_modules/next'] as JsonObject,
+    resolvedPostcssVersions: Object.entries(packages)
+      .filter(([path]) => /(?:^|\/)node_modules\/postcss$/u.test(path))
+      .map(([, value]) => (value as JsonObject).version as string)
+      .sort(),
+    resolvedSharpVersions: Object.entries(packages)
+      .filter(([path]) => /(?:^|\/)node_modules\/sharp$/u.test(path))
+      .map(([, value]) => (value as JsonObject).version as string)
+      .sort(),
     nextConfig: configModule.default,
     tsConfig: readJson(join(root, 'tsconfig.json')),
     appSources: Object.fromEntries(
@@ -79,10 +97,25 @@ function validateReleaseBuild(bundle: ReleaseBuildBundle): void {
   const lockDevDependencies = bundle.lockRoot.devDependencies as
     | JsonObject
     | undefined;
+  const dependencies = bundle.packageJson.dependencies as JsonObject | undefined;
+  const lockDependencies = bundle.lockRoot.dependencies as
+    | JsonObject
+    | undefined;
+  const overrides = bundle.packageJson.overrides as JsonObject | undefined;
   assert.equal(engines?.node, expectedNodeVersion);
   assert.equal(lockEngines?.node, expectedNodeVersion);
   assert.equal(devDependencies?.['@types/node'], expectedNodeTypesVersion);
   assert.equal(lockDevDependencies?.['@types/node'], expectedNodeTypesVersion);
+  assert.equal(dependencies?.['js-yaml'], expectedJsYamlVersion);
+  assert.equal(lockDependencies?.['js-yaml'], expectedJsYamlVersion);
+  assert.equal(bundle.resolvedJsYaml.version, expectedJsYamlVersion);
+  assert.equal(dependencies?.next, expectedNextVersion);
+  assert.equal(lockDependencies?.next, expectedNextVersion);
+  assert.equal(bundle.resolvedNext.version, expectedNextVersion);
+  assert.equal(overrides?.postcss, expectedPostcssVersion);
+  assert.deepEqual(bundle.resolvedPostcssVersions, [expectedPostcssVersion]);
+  assert.equal(overrides?.sharp, expectedSharpVersion);
+  assert.deepEqual(bundle.resolvedSharpVersions, [expectedSharpVersion]);
   assert.equal(bundle.nextConfig.output, 'standalone');
   const compilerOptions = bundle.tsConfig.compilerOptions as
     | JsonObject
@@ -120,6 +153,46 @@ test('release build contract rejects version, output, and font regressions', asy
     const candidate = structuredClone(source);
     const devDependencies = candidate.packageJson.devDependencies as JsonObject;
     devDependencies['@types/node'] = '25.9.2';
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('Next.js returns to the vulnerable release', () => {
+    const candidate = structuredClone(source);
+    const dependencies = candidate.packageJson.dependencies as JsonObject;
+    dependencies.next = '16.2.9';
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('js-yaml returns to the vulnerable release', () => {
+    const candidate = structuredClone(source);
+    const dependencies = candidate.packageJson.dependencies as JsonObject;
+    dependencies['js-yaml'] = '4.2.0';
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('postcss security override is removed', () => {
+    const candidate = structuredClone(source);
+    const overrides = candidate.packageJson.overrides as JsonObject;
+    delete overrides.postcss;
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('lockfile resolves a vulnerable postcss copy', () => {
+    const candidate = structuredClone(source);
+    candidate.resolvedPostcssVersions = ['8.4.31', expectedPostcssVersion];
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('sharp security override is removed', () => {
+    const candidate = structuredClone(source);
+    const overrides = candidate.packageJson.overrides as JsonObject;
+    delete overrides.sharp;
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('lockfile resolves a vulnerable sharp copy', () => {
+    const candidate = structuredClone(source);
+    candidate.resolvedSharpVersions = ['0.34.5', expectedSharpVersion];
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
