@@ -11,6 +11,7 @@ import {
   INDEX_ARTIFACT_IMAGE,
   RELEASE_ARTIFACT_FILES,
   RELEASE_MANIFEST_SCHEMA_VERSION,
+  assertBuildKitSlsaV1Provenance,
   decodeReleaseManifest,
   deriveIndexArtifactIdentity,
   releaseNotesSha256,
@@ -23,6 +24,9 @@ import {
 
 const sha = (value: string): string =>
   createHash('sha256').update(value).digest('hex');
+
+const buildKitSlsaV1BuildType =
+  'https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md';
 
 const packageJson = {
   name: 'k8s-yaml-assistant',
@@ -239,6 +243,33 @@ function validManifest(): Record<string, unknown> {
     },
   };
 }
+
+test('BuildKit SLSA v1 provenance uses the v1 build definition identity', () => {
+  assert.doesNotThrow(() =>
+    assertBuildKitSlsaV1Provenance({
+      buildDefinition: {
+        buildType: buildKitSlsaV1BuildType,
+      },
+      runDetails: {
+        builder: {
+          id: 'https://github.com/docker/build-push-action',
+        },
+      },
+    }),
+  );
+  assert.throws(() =>
+    assertBuildKitSlsaV1Provenance({
+      buildType: 'https://mobyproject.org/buildkit@v1',
+    }),
+  );
+  assert.throws(() =>
+    assertBuildKitSlsaV1Provenance({
+      buildDefinition: {
+        buildType: 'https://mobyproject.org/buildkit@v1',
+      },
+    }),
+  );
+});
 
 test('release identity validates source metadata without extracting release notes', () => {
   const identity = resolveReleaseIdentity({
