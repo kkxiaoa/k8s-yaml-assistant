@@ -709,7 +709,7 @@ Release Pull Request（发布合并请求）合并后，`.github/workflows/relea
 发布证据流水线分为：
 
 1. `verify`（验证）：检出已通过受保护 Pull Request（合并请求）门禁的精确 source SHA（源提交哈希），只复核 release identity / Draft Release / index artifact（发布身份 / 草稿发布版本 / 索引产物）这些发布期状态；首次读取并校验草稿后，把该 JSON snapshot（JSON 快照）作为保留 1 天的 GitHub Artifact（GitHub 任务产物）传给后续构建。不重复执行 schema、corpus、eval、测试、类型检查、Next.js 构建或无索引容器门禁。最终 `runtime` Docker build（运行时容器构建）仍通过 Dockerfile 的 `verify` 与 `build` 阶段执行 `npm test`、TypeScript type check（TypeScript 类型检查）和 Next.js build（Next.js 构建）；
-2. `build`（构建）：下载已校验草稿快照，以索引 digest（内容摘要）作为只读外部 build context（构建上下文）构建应用镜像，执行 ready smoke test（就绪冒烟测试）、镜像内容审计、Trivy（容器漏洞扫描）、SPDX SBOM（SPDX 软件物料清单）、SLSA provenance（SLSA 来源证明）和 Cosign（签名工具）门禁，生成严格 release manifest（发布清单）。它不再读取 GitHub Draft Release（GitHub 草稿发布版本），因此 `contents:read` 足够；
+2. `build`（构建）：下载已校验草稿快照，以索引 digest（内容摘要）作为只读外部 build context（构建上下文）构建应用镜像，执行 ready smoke test（就绪冒烟测试）、镜像内容审计、单次 Trivy（容器漏洞扫描）完整报告及其 `HIGH/CRITICAL`（高危 / 严重）转换门禁、SPDX SBOM（SPDX 软件物料清单）、SLSA provenance（SLSA 来源证明）和 Cosign（签名工具）门禁，生成严格 release manifest（发布清单）。漏洞阻断使用 `trivy convert`（Trivy 报告转换）读取同一份 `trivy-results.json`，不再次扫描镜像；它不再读取 GitHub Draft Release（GitHub 草稿发布版本），因此 `contents:read` 足够；
 3. `attach`（附加）：上传前重新读取草稿并确认正文哈希仍与 release manifest（发布清单）一致，只使用 `gh release upload --clobber` 把六项证据附加到既有草稿，随后再次回读正文与资产、下载文件并逐项核验。三次草稿读取分别对应初始受信快照、外部写入前防漂移和外部写入后回读，不在同一信任边界重复计算；该任务没有创建/编辑发布版本、创建标签或 Publish（发布）的能力。
 
 GitHub 将 Draft Release（草稿发布版本）读取限制给具有 push access（推送权限）的身份，因此直接读取草稿的 `verify`（验证）、`attach`（附加）、主分支状态检查和手工草稿解析任务声明 `contents:write`；它们各自只在需要的步骤注入令牌。`build`（构建）只使用 `contents:read + packages:write + id-token:write`（仓库读取 + 软件包写入 + 身份令牌写入）。checkout（检出）均保持 `persist-credentials:false`，只有 `attach`（附加）调用上传命令。
@@ -755,6 +755,8 @@ git diff --check
 2026-07-26 外部执行结果：`index-build` Environment（索引构建环境）只允许 `main` 并只含 `VOYAGE_API_KEY` 环境密钥，repository variable（仓库变量）`CURRENT_PRODUCTION_DIGEST` 为 `none`。手工运行 `30171546490` 对 8,410 条语料执行一次 Voyage document embedding（Voyage 文档向量嵌入），成功生成、回读校验并签名独立索引产物；Release Pull Request #3（发布合并请求 #3）的索引门禁随后通过并压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`。Release lifecycle run（发布生命周期运行）`30192091050` 创建了 `v0.1.0` Draft Release（草稿发布版本），但证据 `verify`（验证）任务以 `contents:read` 读取仅对 push access（推送权限）可见的草稿时返回 `release not found`，在构建候选镜像前失败关闭。后续恢复审查发现的最小权限、旧 source commit（源提交）兼容和重复准备下一版本问题已由 Pull Request #6（合并请求 #6）合入 `423e18e6537a1b6fa5c8c6bf4bf0c2766d15bce2`；自动运行 `30208015368` 正确暂停 Release Please（发布自动化工具）。无参数恢复运行 `30208130964` 随后成功解析既有草稿、验证 8,410 条签名索引、构建并推送旧源码候选、执行就绪冒烟、导出 SLSA provenance（SLSA 来源证明）并生成 SPDX SBOM（SPDX 软件物料清单），但 Trivy（容器漏洞扫描器）拒绝了 5 项 `HIGH`（高危）依赖漏洞，后续签名、发布清单和附件任务均未执行。草稿仍指向 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`，没有附件或实际 Git tag（Git 标签），K3s（轻量 Kubernetes）保持零变化。
 
 2026-07-26 运行时安全修复本地证据：先以反例固定安全版本与 Pull Request（合并请求）镜像扫描契约，再把 Next.js（Next.js 框架）升级到 `16.2.12`、`sharp`（图像处理库）统一到 `0.35.3`、`js-yaml`（YAML 解析库）升级到 `4.3.0`，并把 `postcss`（CSS 处理库）统一到 `8.5.23`。`npm audit --omit=dev`（npm 生产依赖安全审计）不再包含 `HIGH/CRITICAL`（高危 / 严重），仍有 2 项来自 Monaco Editor（Monaco 编辑器）固定 DOMPurify（HTML 清理库）的 `MODERATE`（中危）报告，当前不属于高危发布阻断但必须保留为遗留风险。本地 214/214 测试、类型检查、Next.js 构建、无索引容器构建和失败关闭烟测通过；固定 Trivy `0.70.0` 对真实运行镜像扫描结果为 0 项 `HIGH/CRITICAL`（高危 / 严重）。
+
+2026-07-27 发布扫描收敛证据：反例契约先识别出发布构建对同一镜像调用两次 Trivy Action（Trivy 流水线动作），随后保留一次完整 JSON（结构化报告）扫描，并用 `trivy convert`（Trivy 报告转换）复用该报告执行高危 / 严重门禁。本机固定 Trivy `0.70.0` 验证中，仅含中危的报告退出 0，含高危、报告缺失和 JSON 损坏均非零退出；完整 214/214 测试、TypeScript（类型检查）、workflow contract（流水线契约）和 `git diff --check` 通过。
 
 - [ ] **Step 6（步骤 6）：执行首次独立索引和候选发布**
 

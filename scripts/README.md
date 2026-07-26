@@ -23,7 +23,7 @@
 | `deployment-contract.test.ts` | `npm run deploy:check` | `deploy/k3s` 的 release identity（发布身份）、K3s（轻量 Kubernetes）配置、准入配置与恢复边界 | 无 | 无 | 解析真实 YAML（配置文件），拒绝浮动版本、弱权限、缺失加密、放宽准入、公网控制面、占位 Secret（密钥）和不可恢复的备份边界。 |
 | `release-build-contract.test.ts` | `npm run release:check` | Node.js（JavaScript 运行时）与已审核运行依赖版本声明、Next.js（React 全栈框架）构建配置和前端字体依赖 | 无 | 无 | 拒绝 Node.js、Next.js、js-yaml、postcss 或 sharp（JavaScript 运行时 / React 全栈框架 / YAML 解析库 / CSS 处理库 / 图像处理库）安全版本漂移、重复易受影响依赖、缺失 standalone output（独立运行产物）、外部字体加载、自带字体二进制和旧 IBM Plex 变量。 |
 | `container-smoke.test.ts` | `node --import tsx --test scripts/container-smoke.test.ts` | `Dockerfile`、`.dockerignore` 和容器发布契约 | 无 | 无 | 无 Docker daemon（Docker 后台服务）也可执行的纯契约门禁；覆盖不可变基础镜像、构建阶段、密钥挂载、干净上下文和运行时内容边界。 |
-| `workflow-contract.test.ts` | `npm run workflow:check` | Pull Request / release lifecycle / index-build / release artifacts workflow（合并请求 / 发布生命周期 / 索引构建 / 发布证据流水线）、发布配置和 `.github/CODEOWNERS` | 无 | 无 | 解析真实 YAML（配置文件），拒绝特权触发器、自托管运行器、越权 Secret（密钥）、浮动 Action（流水线动作）、可变镜像标签和自动发布；固定 Pull Request（合并请求）真实运行镜像的 Trivy `HIGH/CRITICAL`（容器高危 / 严重漏洞）门禁、Release Please（发布自动化工具）的版本 / 草稿 / 发布说明所有权、唯一付费索引入口、不可变索引产物、无人工参数发布证据衔接和六份证据文件边界，不绑定无关 YAML 字段或步骤顺序。 |
+| `workflow-contract.test.ts` | `npm run workflow:check` | Pull Request / release lifecycle / index-build / release artifacts workflow（合并请求 / 发布生命周期 / 索引构建 / 发布证据流水线）、发布配置和 `.github/CODEOWNERS` | 无 | 无 | 解析真实 YAML（配置文件），拒绝特权触发器、自托管运行器、越权 Secret（密钥）、浮动 Action（流水线动作）、可变镜像标签和自动发布；固定 Pull Request（合并请求）真实运行镜像的 Trivy `HIGH/CRITICAL`（容器高危 / 严重漏洞）门禁、发布阶段单次完整扫描与同一报告失败关闭、Release Please（发布自动化工具）的版本 / 草稿 / 发布说明所有权、唯一付费索引入口、不可变索引产物、无人工参数发布证据衔接和六份证据文件边界，不绑定无关 YAML 字段或步骤顺序。 |
 
 ## 容器交付脚本
 
