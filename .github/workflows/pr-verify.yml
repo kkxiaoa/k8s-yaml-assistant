@@ -78,6 +78,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Check deployment adapter
+        run: npm run adapter:check
+
       - name: Check schema closure
         run: npm run schemas:check
 

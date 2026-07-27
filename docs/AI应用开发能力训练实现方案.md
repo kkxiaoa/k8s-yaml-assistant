@@ -315,7 +315,7 @@ Stage 是能力分类，不代表执行时序。
 
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引、private/portfolio（私有 / 作品集展示）双模式和安全 observation（观测）边界。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
-3. Phase 2（阶段 2）的 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已通过受控合并请求进入 `main`。在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，当前索引契约为 knowledge identity v2（知识身份版本 2）与 index format v5（索引格式版本 5），并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。8,410 条正式索引已经由独立流水线生成、校验和签名；Release Pull Request #3（发布合并请求 #3）已压缩合并，`v0.1.0` Draft Release（草稿发布版本）已经创建。发布状态和无参数恢复修复已通过 Pull Request #6（合并请求 #6）进入 `main`；恢复运行已成功验证草稿、索引和候选构建，但因 5 项 `HIGH`（高危）运行时依赖漏洞在证据签名前失败关闭。当前受控修复分支升级 Next.js/sharp/js-yaml/postcss（Next.js 框架 / 图像处理库 / YAML 解析库 / CSS 处理库），并把 Trivy `HIGH/CRITICAL`（容器高危 / 严重漏洞）扫描前移到普通 Pull Request（合并请求）门禁。合入后先重定向尚未发布且无附件的草稿到精确新提交，再恢复六项证据；应用 Kubernetes（容器编排系统）资源和公网入口仍未创建。
+3. Phase 0-2（阶段 0-2）已经完成实现和审核；在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，当前索引契约为 knowledge identity v2（知识身份版本 2）与 index format v5（索引格式版本 5），并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。`v0.1.0` Draft Release（草稿发布版本）具有固定候选镜像、8,410 条正式索引和六项发布证据，但尚未 Publish（正式发布）或创建实际 Git tag（Git 标签）。特权 deployment adapter（部署适配器）独立计划的 Task 1-4（任务 1-4）已完成实现和审核。Task 5（任务 5）已经安装固定产物、适配器和仓库级生产 runner（运行器）；修正后的 systemd（系统服务管理器）配置已经通过真实 tmpfs（内存文件系统）容量、所有权、写入、服务重启、GitHub 在线空闲和集群零工作负载验证。运行器当前为 `active/enabled`（运行中 / 开机自启）并等待审核；应用 Deployment（工作负载）和公网入口仍未创建。
 4. 私有部署和受限入口验证通过后，在公开发布前恢复 Phase B（阶段 B）正式质量重建；新 baseline（基线）审核通过或形成显式风险接受记录后，才进入公开发布。
 5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 

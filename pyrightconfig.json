@@ -1,0 +1,7 @@
+{
+  "include": [
+    "deploy/adapter"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic"
+}

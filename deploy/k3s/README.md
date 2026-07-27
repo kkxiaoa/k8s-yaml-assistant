@@ -141,8 +141,8 @@ implementationEvidence:
 
 # 固定版本 K3s（轻量 Kubernetes）单节点变更包
 
-> 状态：Task 4（任务 4）已实施，等待 review（审核）。
-> 用途：定义固定版本 K3s（轻量 Kubernetes）安装输入、主机加固边界、恢复材料和 Task 4（任务 4）非敏感验收证据。K3s 与备份工具已安装；尚未创建应用 Namespace（命名空间）、Secret（密钥）或工作负载，也未修改公网安全组。
+> 状态：Task 4（任务 4）已完成实施和 review（审核）。
+> 用途：定义固定版本 K3s（轻量 Kubernetes）安装输入、主机加固边界、恢复材料和 Phase 1 Task 4（阶段 1 任务 4）非敏感验收证据。K3s 与备份工具已安装；后续适配器实施计划 Task 4（任务 4）已创建应用固定 Namespace/bootstrap/Secret（命名空间 / 引导配置 / 密钥），Task 5（任务 5）的生产 runner（运行器）已完成真实隔离验证并在线空闲；仍未创建应用工作负载或修改公网安全组。
 
 ## 1. 使用边界
 
