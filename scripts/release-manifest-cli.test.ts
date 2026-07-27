@@ -100,22 +100,16 @@ test('prepare emits only the release notes identity consumed by the workflow', (
   writeFileSync(
     releasePath,
     JSON.stringify({
-      name: version,
       tagName: `v${version}`,
       targetCommitish: sourceCommit,
       isDraft: true,
       isPrerelease: false,
       body: [
-        '### Features',
+        '### Bug Fixes',
         '',
-        '- Build verified release evidence.',
-        '',
-        '### Known limitations',
-        '',
-        '- Production deployment is not enabled.',
+        '- Fix editor input rendering.',
         '',
       ].join('\n'),
-      assets: [],
     }),
   );
 
@@ -159,13 +153,9 @@ test('verify-published writes only the deployment authorization identity', () =>
   const sourceCommit = 'a'.repeat(40);
   const imageDigest = `sha256:${'b'.repeat(64)}`;
   const releaseNotes = [
-    '### Features',
+    '### Bug Fixes',
     '',
-    '- Build verified release evidence.',
-    '',
-    '### Known limitations',
-    '',
-    '- Production is single-node and single-replica.',
+    '- Fix editor input rendering.',
     '',
   ].join('\n');
   const sha256 = (value: string | Uint8Array): string =>

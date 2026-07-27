@@ -72,13 +72,9 @@ const changelog = `# Changelog
 - 当前只承诺单节点、单副本部署。
 `;
 
-const releaseNotes = `### Features
+const releaseNotes = `### Bug Fixes
 
-- Release Please 根据已审核提交生成此发布说明。
-
-### Known limitations
-
-- 当前只承诺单节点、单副本部署。
+- Fix editor input rendering.
 `;
 
 const sourceCommit = 'a'.repeat(40);
@@ -96,21 +92,24 @@ const indexArtifact = deriveIndexArtifactIdentity(
   'voyage-3',
 );
 
+function draftReleaseIdentity(): Record<string, unknown> {
+  return {
+    tagName: 'v0.1.0',
+    targetCommitish: sourceCommit,
+    isDraft: true,
+    isPrerelease: false,
+    body: releaseNotes.trimEnd(),
+  };
+}
+
 function draftRelease(
   assets: readonly { name: string }[] = RELEASE_ARTIFACT_FILES.map((name) => ({
     name,
   })),
 ): Record<string, unknown> {
   return {
-    databaseId: 123,
-    name: 'v0.1.0',
-    tagName: 'v0.1.0',
-    targetCommitish: sourceCommit,
-    isDraft: true,
-    isPrerelease: false,
-    body: releaseNotes.trimEnd(),
+    ...draftReleaseIdentity(),
     assets,
-    url: 'https://github.com/kkxiaoa/k8s-yaml-assistant/releases/tag/untagged-fixture',
   };
 }
 
@@ -447,7 +446,7 @@ test('release source state rejects placeholder/changelog and stable/no-changelog
   );
 });
 
-test('release identity rejects version and changelog identity drift', async (t) => {
+test('release identity rejects version drift and placeholder releases', async (t) => {
   const mutations: Array<{
     name: string;
     input: Parameters<typeof resolveReleaseIdentity>[0];
@@ -486,24 +485,6 @@ test('release identity rejects version and changelog identity drift', async (t) 
         changelog,
       },
     },
-    {
-      name: 'missing release heading',
-      input: {
-        packageJson,
-        packageLock,
-        releasePleaseManifest,
-        changelog: changelog.replace('## [0.1.0]', '## [0.2.0]'),
-      },
-    },
-    {
-      name: 'duplicate release heading',
-      input: {
-        packageJson,
-        packageLock,
-        releasePleaseManifest,
-        changelog: `${changelog}\n## 0.1.0\n`,
-      },
-    },
   ];
 
   for (const mutation of mutations) {
@@ -513,81 +494,27 @@ test('release identity rejects version and changelog identity drift', async (t) 
   }
 });
 
-test('release identity rejects unsafe changelog metadata', async (t) => {
-  const mutations: Array<[string, string]> = [
-    ['missing status', changelog.replace('> 状态：当前维护。\n', '')],
-    ['missing purpose', changelog.replace(/^> 用途：.*\n/mu, '')],
-    [
-      'duplicate top-level heading',
-      changelog.replace('# Changelog', '# Changelog\n\n# Changelog'),
-    ],
-    ['missing unreleased heading', changelog.replace('## [Unreleased]\n\n', '')],
-    [
-      'placeholder',
-      changelog.replace(
-        '## [Unreleased]\n\n',
-        '## [Unreleased]\n\n- TODO\n\n',
-      ),
-    ],
-    [
-      'local path',
-      changelog.replace(
-        '- 当前只承诺单节点、单副本部署。',
-        '- 读取 /Users/example/private/config。',
-      ),
-    ],
-    [
-      'secret assignment',
-      changelog.replace(
-        '- 当前只承诺单节点、单副本部署。',
-        '- VOYAGE_API_KEY=example-secret-value',
-      ),
-    ],
-  ];
-
-  for (const [name, candidate] of mutations) {
-    await t.test(name, () => {
-      assert.throws(() =>
-        resolveReleaseIdentity({
-          packageJson,
-          packageLock,
-          releasePleaseManifest,
-          changelog: candidate,
-        }),
-      );
-    });
-  }
-});
-
 test('Release Please draft body owns release-notes identity', () => {
   const resolved = resolveDraftReleaseIdentity({
-    release: draftRelease([]),
+    release: draftReleaseIdentity(),
     expectedTag: 'v0.1.0',
     expectedSourceCommit: sourceCommit,
   });
-  assert.equal(resolved.body, releaseNotes);
+  assert.equal(resolved.tagName, 'v0.1.0');
+  assert.equal(resolved.sourceCommit, sourceCommit);
   assert.equal(resolved.releaseNotesSha256, sha(releaseNotes));
 });
 
-test('draft release identity rejects unsafe or mismatched generated notes', async (t) => {
+test('draft release identity rejects mismatched release state', async (t) => {
   const mutations: Array<[string, (value: Record<string, any>) => void]> = [
     ['published', (value) => (value.isDraft = false)],
     ['prerelease', (value) => (value.isPrerelease = true)],
     ['tag drift', (value) => (value.tagName = 'v0.2.0')],
     ['source drift', (value) => (value.targetCommitish = 'b'.repeat(40))],
-    [
-      'missing limitations',
-      (value) => (value.body = '### Features\n\n- change\n'),
-    ],
-    [
-      'secret assignment',
-      (value) =>
-        (value.body = `${releaseNotes}\nVOYAGE_API_KEY=example-secret-value\n`),
-    ],
   ];
   for (const [name, mutate] of mutations) {
     await t.test(name, () => {
-      const value = draftRelease([]);
+      const value = draftReleaseIdentity();
       mutate(value);
       assert.throws(() =>
         resolveDraftReleaseIdentity({

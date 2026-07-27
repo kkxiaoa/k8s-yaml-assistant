@@ -109,7 +109,12 @@ jobs:
           SOURCE_TAG: ${{ inputs.source_tag }}
           IMAGE_DIGEST: ${{ steps.source.outputs.image_digest }}
         run: |
-          gh release list --limit 101 --json tagName,isDraft \
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            jq 'add | map({
+              tagName: .tag_name,
+              isDraft: .draft
+            })' \
             > rollback-state/releases.json
           npm run deployment:authorize -- rollback-candidate \
             --source-tag "$SOURCE_TAG" \
