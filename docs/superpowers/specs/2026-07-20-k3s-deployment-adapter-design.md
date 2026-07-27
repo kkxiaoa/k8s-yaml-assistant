@@ -1,8 +1,8 @@
 # K3s 特权部署适配器设计
 
-> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-2（任务 7 步骤 1-2）已完成，`v0.1.0` 已 Publish（正式发布）；Step 3（步骤 3）的冷拉取已在安全回退后完整进入 containerd（容器运行时），再次部署暴露的 OCI Image Index（开放容器镜像索引）根摘要与 CRI `imageID`（容器运行时接口镜像标识）混淆已完成本地修复，等待 review（审核）。
+> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-2（任务 7 步骤 1-2）已完成，`v0.1.0` 已 Publish（正式发布）；Step 3（步骤 3）的冷拉取已在安全回退后完整进入 containerd（容器运行时），OCI Image Index（开放容器镜像索引）根摘要与配置摘要已经分层，没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已完成本地收敛，等待 review（审核）。
 > 用途：定义华为云单机 K3s（轻量 Kubernetes）中固定应用发布的 deployment adapter（部署适配器）协议、信任边界、权限、并发、回滚和测试门禁。
-> 当前仓库和服务器已有固定适配器、信任根与权限配置，生产集群已有固定 bootstrap/Secret（引导配置 / 密钥）；仓库级 self-hosted runner（自托管运行器）已经注册并通过真实隔离与重启验证。涉及集群的两次失败均已删除本轮新建的 Deployment（工作负载）并清除操作标记，没有成功台账；目标镜像已完整缓存，80/443 仍未公开。
+> 当前仓库和服务器已有固定适配器、信任根与权限配置，生产集群已有固定 bootstrap/Secret（引导配置 / 密钥）；仓库级 self-hosted runner（自托管运行器）已经注册并通过真实隔离与重启验证。涉及集群的三次失败均已删除本轮新建的 Deployment（工作负载）并清除操作标记，没有成功台账；目标镜像已完整缓存，80/443 仍未公开。
 > 对应总计划：`docs/superpowers/plans/2026-07-19-k3s-production-deployment.md` 的 Task 12（任务 12）。独立实施计划位于 `docs/superpowers/plans/2026-07-20-k3s-deployment-adapter.md`。
 
 ## 1. 结论
@@ -309,7 +309,7 @@ ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:<64-hex>
 1. 读取固定 Deployment（工作负载）的 JSON（JSON 文本）状态；
 2. 通过标准输入对固定模板执行 server-side apply（服务端应用）；
 3. 等待固定 Deployment（工作负载） rollout status（滚动发布状态）；
-4. 读取固定 label selector（标签选择器）的 Pod（容器组）状态和 `imageID`；
+4. 读取固定 label selector（标签选择器）的 Pod spec/status（容器组声明 / 状态）；
 5. 在首次部署失败且本次调用确实新建 Deployment（工作负载）时删除该固定 Deployment；
 6. 在已有版本更新失败时用同一模板恢复上一个台账内容摘要。
 
@@ -324,10 +324,9 @@ ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:<64-hex>
 - 只有一个匹配 Pod（容器组）处于 Ready（就绪）；
 - Deployment（工作负载）镜像引用严格等于固定镜像加请求摘要；
 - Pod spec image（容器组声明镜像）严格等于固定镜像加请求摘要；
-- 容器运行时 `imageID` 是 `containerd://sha256:<64-hex>` 形式的不可变标识；
 - 本轮没有遗留未完成操作标记。
 
-授权和发布清单绑定的是 OCI Image Index root digest（开放容器镜像索引根摘要）。containerd（容器运行时）按节点平台选择 manifest（清单）后，CRI（容器运行时接口）的 `imageID` 使用镜像 config digest（配置摘要）；它与根摘要属于不同身份层，不能要求相等。适配器通过 Deployment/Pod 声明镜像继续绑定已签名根摘要，通过 Ready 状态和合法 `imageID` 证明容器已由运行时创建；不把可从镜像索引解析的配置摘要再加入发布协议。
+授权和发布清单绑定的是 OCI Image Index root digest（开放容器镜像索引根摘要）。适配器通过 Deployment/Pod 声明镜像绑定已签名根摘要，containerd（容器运行时）再按内容寻址校验并解析节点平台镜像。CRI `imageID`（容器运行时接口镜像标识）只表达运行时内部配置摘要，不能独立证明它对应授权根摘要；节点失陷时，该字段也与其他 Pod status（容器组状态）处于同一不可信边界。因此适配器不读取或解析 `imageID`，不把可从镜像索引派生的配置摘要加入发布协议。
 
 ## 9. 并发、幂等与状态
 
@@ -529,7 +528,7 @@ Task 13（任务 13）必须先写失败测试，再实现生产代码。测试�
 | 重放 | 旧 deploy（部署）授权不能把当前版本退回；未记录内容摘要不能 rollback（回滚） |
 | 超时 | Cosign（签名工具）、apply（应用）、rollout（滚动发布）分别超时且没有后台进程 |
 | 部分失败 | 首次部署失败删除本轮固定 Deployment（工作负载）；升级失败恢复上一摘要；恢复失败保留操作标记 |
-| 就绪 | generation（代次）、副本、Pod Ready（容器组就绪）、Deployment/Pod 声明镜像引用任一不符，或运行时 `imageID` 不是合法不可变标识时，都不写成功台账 |
+| 就绪 | generation（代次）、副本、Pod Ready（容器组就绪）或 Deployment/Pod 声明镜像引用任一不符时，都不写成功台账 |
 | 日志 | 输入包含伪 Secret（密钥）、YAML（配置文件）和长错误体时，stdout（标准输出）与 journald（系统日志）均不出现原文 |
 | sudoers（提权规则） | 只允许无参数固定入口；带参数、环境赋值、替代路径和其他命令均拒绝 |
 | runner offline（运行器离线） | 已发布任务只排队，不触发其他 runner（运行器）或服务器变更；恢复在线后仍需同一证明验证 |
