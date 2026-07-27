@@ -1,9 +1,9 @@
-状态：Task 4（任务 4）已完成实施和 review（审核）；Task 5（任务 5）的生产 runner（运行器）已完成安装、注册和真实 systemd hardening（系统服务加固）验证，当前在线空闲并等待 review（审核）。
+状态：Task 4-5（任务 4-5）已完成实施和 review（审核）；`v0.1.0` 已通过固定部署适配器运行在私有 K3s（轻量 Kubernetes）。Task 7 Step 5（任务 7 步骤 5）的只读验收发现 observation PVC root（观测持久卷声明根目录）权限阻断，真实轨迹尚未落盘。
 用途：定义生产 Kubernetes（容器编排系统）固定非敏感资源、应用模板及其审核和回退边界。
 
 # K3s 生产资源边界
 
-2026-07-27 在单独获得 bootstrap/Secret（引导配置 / 密钥）授权后，生产集群已创建本目录的固定 bootstrap（引导配置）和三类运行时 Secret（密钥）。`app/deployment-template.yaml` 仍只是仓库交付物，尚未应用；集群没有应用 Deployment/Pod/Ingress（工作负载 / 容器组 / 入口），也没有开放 80/443。
+2026-07-27 在单独获得 bootstrap/Secret（引导配置 / 密钥）授权后，生产集群已创建本目录的固定 bootstrap（引导配置）和三类运行时 Secret（密钥）。同日 `app/deployment-template.yaml` 已由固定部署适配器替换唯一镜像摘要并应用，`v0.1.0` 的固定单副本 Deployment/Pod（工作负载 / 容器组）为 `1/1` 可用；集群仍没有 Ingress（入口），80/443 没有开放。
 
 同日已把 GitHub Actions runner `v2.336.0`（GitHub 自动化流水线运行器版本 2.336.0）安装并注册为 `huawei-k3s-prod-1`。首次真实隔离验证发现旧 drop-in（附加配置）的 `ReadWritePaths` 会遮蔽工作/诊断目录的有界 tmpfs（内存文件系统），且 `RuntimeDirectory`（运行时目录）最终把适配器运行时目录交给服务账号；首次修正又证明 `ExecStartPre`（启动前命令）无法修改下一执行阶段的私有挂载。最终配置由 tmpfs 挂载直接使用固定 `UID 996 / GID 988`（用户 / 组数字标识），已通过真实启动、写入和第二次服务重启验证。当前服务为 `active/enabled`（运行中 / 开机自启），GitHub 状态在线空闲。
 
@@ -56,7 +56,7 @@ bootstrap（引导配置）只管理不随应用版本变化的固定资源。�
 
 ## 存储边界
 
-`k8s-yaml-assistant-observation` 只挂载到 `/app/data/observability`。应用配置仍执行 7 天、单文件 16 MiB、总量 256 MiB 的轮转和删除边界；1 GiB PVC（持久卷声明）不是应用可无限使用的配额。
+`k8s-yaml-assistant-observation` 只挂载到 `/app/data/observability`。应用配置定义 7 天、单文件 16 MiB、总量 256 MiB 的轮转和删除边界；1 GiB PVC（持久卷声明）不是应用可无限使用的配额。2026-07-28 的真实验收发现 local-path PV（本地路径持久卷）的挂载根目录为 `0777 root:10001`，不符合 local sink（本地写入端）的 `0700` 根目录契约，应用因此以 `root_unsafe` 安全关闭观测。修复并重新部署前，不得声称上述轮转、保留和删除边界已经在生产生效。
 
 索引固定在镜像 `/app/data/index` 中，依靠只读根文件系统读取，不挂载 PVC（持久卷声明），Pod（容器组）重启也不会重建索引。`/tmp` 使用上限为 64 MiB 的 emptyDir（临时卷）。不得把索引、原始 YAML、模型回答、Secret（密钥）或未来计量状态写入 observation PVC（观测持久卷声明）。
 

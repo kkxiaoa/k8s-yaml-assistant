@@ -1,6 +1,6 @@
 # K3s 特权部署适配器实施计划
 
-> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-3（任务 7 步骤 1-3）已完成，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。固定单副本 Deployment（工作负载）当前为 `1/1` 可用，成功台账只有该发布的一条事件，80/443 仍未公开。下一步是 Step 4（步骤 4）的真实回滚草稿生命周期；同区域镜像分发仍作为未来冷拉取的独立风险。
+> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-4（任务 7 步骤 1-4）已完成，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes），真实回滚草稿生命周期也已完成无部署验证。Step 5（步骤 5）的只读验收发现 production observation root（生产观测根目录）权限阻断，真实观测生命周期和模型冒烟尚未完成。固定单副本 Deployment（工作负载）仍为 `1/1` 可用，成功台账只有该发布的一条事件，80/443 仍未公开；同区域镜像分发仍作为未来冷拉取的独立风险。
 > 用途：把已审核的 K3s（轻量 Kubernetes）特权 deployment adapter（部署适配器）设计拆成反例优先的仓库实现、Kubernetes bootstrap（Kubernetes 引导配置）、生产 runner（运行器）、发布工作流和私有验收步骤。
 > 对应设计：`docs/superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md`。
 > 执行位置：本计划的 Task 1-5（任务 1-5）服务于生产部署总计划的 Task 13（任务 13）；Task 6-7（任务 6-7）服务于总计划的 Task 14（任务 14）。每个 Task（任务）完成后独立停止审核。
@@ -812,7 +812,7 @@ Publish（正式发布）必须由管理员在 GitHub UI/API（GitHub 网页 / �
 
 已撤回扩大 Deployment `progressDeadlineSeconds`（工作负载进度期限）、适配器 rollout（滚动发布）和生产任务超时的候选改动。当前镜像因 attempt 2（尝试 2）的后台拉取已命中完整缓存；同区域镜像分发仍须在下一次真实冷拉取前解决，不能把本次热缓存成功解释为 GHCR（GitHub 容器镜像仓库）跨境分发风险已经消失。
 
-- [ ] **Step 4（步骤 4）：证明真实回滚草稿生命周期不部署**
+- [x] **Step 4（步骤 4）：证明真实回滚草稿生命周期不部署**
 
 首次发布和部署成功后，`v0.1.0` 才是 `rollback-candidate.yml` 可验证的真实已发布来源。经创建和删除分别授权后：
 
@@ -829,6 +829,14 @@ Publish（正式发布）必须由管理员在 GitHub UI/API（GitHub 网页 / �
 
 Draft Release（草稿发布版本）不创建实际 Git tag（Git 标签）。删除草稿属于外部破坏性动作，执行前必须再次确认精确 Release ID（发布版本标识）和标签。不得在首发前伪造已发布来源来提前完成本步骤。
 
+2026-07-27 外部执行结果：
+
+- 创建前基线为 4 条 `production-private` GitHub deployment（私有生产部署记录），最新记录 `5624354635`；生产运行器 `huawei-k3s-prod-1` 在线空闲；K3s Deployment（工作负载）的 generation/resourceVersion（版本 / 资源版本）为 `1/251605`，Pod UID（容器组唯一标识）为 `2417b102-2624-4a35-a0ba-a618931b3d58` 且重启次数为 0；没有 `rollback-*` 草稿、实际标签或历史候选运行。
+- 只输入 `v0.1.0` 后，`Prepare rollback release`（准备回滚发布）运行 `30281209698/1` 在 GitHub Actions（GitHub 托管运行器）成功完成发布证据、来源证明和草稿回读验证。它创建 Release ID（发布版本标识）`360535505`，标签为 `rollback-v0.1.0-sha256-8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4-r30281209698`，目标提交为 `50fe2578b03a222b473034e5a01630493282558c`，且只有 `provenance-attestation.sigstore.json` 一份附件。
+- 第一次正文更新只发送 `body` 时，GitHub 再次把同一草稿的标签改为内部 `untagged-*`；草稿始终保持 `draft=true`、`published_at=null`，没有发布、部署或实际 Git tag（Git 标签）。随后在同一 PATCH（部分更新请求）中显式回传 `name/tag_name/target_commitish/body/draft/prerelease`（名称 / 标签 / 目标提交 / 正文 / 草稿 / 预发布），恢复原 Release ID（发布版本标识）和完整回滚标签。即使只编辑不参与回滚身份的正文，也必须提交并回读完整草稿身份。
+- 创建和正文编辑后只有运行 `30281209698`；`published-release.yml` 和 `published-release-deploy.yml` 均未运行。生产部署记录仍为 4 条，生产运行器保持在线空闲，K3s Deployment generation/resourceVersion（工作负载版本 / 资源版本）和 Pod UID（容器组唯一标识）与创建前完全一致。
+- 经再次确认精确 Release ID（发布版本标识）和完整标签并获得单独删除授权后，草稿及其唯一附件已经删除。删除后只剩已发布 `v0.1.0`，没有 `rollback-*` 草稿或实际标签；生产部署、运行器和 K3s 工作负载状态仍与创建前一致。
+
 - [ ] **Step 5（步骤 5）：通过固定来源隧道完成私有验收**
 
 80/443 保持不公开，只验证：
@@ -843,6 +851,17 @@ Draft Release（草稿发布版本）不创建实际 Git tag（Git 标签）。�
 - 日志无 YAML、prompt、answer、Secret（配置文件 / 提示词 / 回答 / 密钥）。
 
 Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准的非敏感输入、次数和费用；不执行正式评估或索引重建。
+
+2026-07-28 部分验收结果，本步骤保持未完成：
+
+- GitHub（代码托管平台）生产运行器在线空闲，`production-private` GitHub deployment（私有生产部署记录）仍为 4 条且最新记录仍是首次发布的 `5624354635`。固定单副本 Deployment/Pod（工作负载 / 容器组）的 generation/resourceVersion（版本 / 资源版本）、UID（唯一标识）、镜像摘要和 0 次重启均未变化。
+- 只绑定本机 `127.0.0.1` 的 SSH tunnel（SSH 隧道）访问 `/api/health/live` 和 `/api/health/ready` 均返回 200 与固定状态；使用非敏感、故意非法的 YAML（配置文件）调用 `/api/check` 返回结构化解析错误。该路由只执行本地校验，不调用 DeepSeek/Voyage（模型供应商）。
+- 容器内索引的 format/identity version（格式 / 身份版本）为 `5/2`，模型为 `voyage-3`，维度为 1024，条数为 8,410；corpus/index/chunks/embeddings hash（语料 / 索引 / 知识片段 / 向量文件哈希）逐字段等于 `v0.1.0` 发布清单。索引创建时间和三个文件修改时间均早于 Pod（容器组），根文件系统只读，readiness（就绪）又完整验证索引文件哈希，因此运行时没有重建索引。
+- 实际进程 UID/GID（用户 / 组标识）为 `10001/10001`，容器根挂载为只读，ServiceAccount token（服务账户令牌）未挂载，能力全部删除。资源请求/上限仍为 `500m/2 CPU`、`768Mi/2Gi` 内存和 `256Mi/1Gi` 临时存储；只读采样时工作集为 136 MiB、CPU 为 1m，进程自启动以来的 RSS high-water mark（常驻内存高水位）为 302,428 KiB（约 295 MiB）。
+- 单副本、`RollingUpdate maxSurge=0/maxUnavailable=1`（滚动更新最大新增 0 / 最大不可用 1）、单容器写入挂载和 `ReadWriteOnce`（单节点读写）共同保证当前最多一个 observation writer（观测写入端）。从本机验证公网 80/443/6443 均超时不可达。
+- 阻断：local-path PV（本地路径持久卷）的宿主目录实际为 `2777 root`，容器内挂载根目录为 `0777 root:10001`；安全 local sink（本地写入端）要求根目录不向组或其他用户开放，因此启动日志明确记录 `stage=sink code=root_unsafe` 并关闭观测。目录仍为空，5 行应用日志没有 YAML、prompt、answer、Secret、API key（配置文件 / 提示词 / 回答 / 密钥 / 应用程序接口密钥）模式，但这不能替代真实脱敏、轮转、7 天/256 MiB、人工删除和符号链接拒绝验收。
+
+在修复、安全发布并重新部署前，不调用 Ask/Generate/Fix（询问 / 生成 / 修复）制造无法持久化的线上请求，也不把本地单元测试当作生产观测验收。推荐的最小修复是让应用在已挂载 PVC（持久卷声明）内创建并固定使用自身拥有的 `0700` 子目录；不引入 root init container（root 初始化容器）、宿主机手工改权或新的存储基础设施。该修复必须先写能复现 `0777` 挂载根目录的反例测试，再通过受控 Pull Request（合并请求）、新发布版本和相同私有部署路径验证。
 
 - [ ] **Step 6（步骤 6）：演练自动恢复**
 
