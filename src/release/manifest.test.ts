@@ -821,6 +821,17 @@ test('release manifest accepts a closed image/index/release identity', () => {
   );
 });
 
+test('release manifest accepts an attempt-specific workflow run URL', () => {
+  const manifest = validManifest() as Record<string, any>;
+  manifest.build.workflowRunUrl =
+    'https://github.com/kkxiaoa/k8s-yaml-assistant/actions/runs/123/attempts/4';
+
+  assert.equal(
+    decodeReleaseManifest(manifest).build.workflowRunUrl,
+    manifest.build.workflowRunUrl,
+  );
+});
+
 test('release manifest rejects image, index artifact and rollback drift', () => {
   const mutations: Array<(value: Record<string, any>) => void> = [
     (value) => {
@@ -847,6 +858,10 @@ test('release manifest rejects image, index artifact and rollback drift', () => 
     },
     (value) => {
       value.attestations.provider = 'none';
+    },
+    (value) => {
+      value.build.workflowRunUrl =
+        'https://github.com/kkxiaoa/k8s-yaml-assistant/actions/runs/123/attempts/0';
     },
     (value) => {
       value.deployment.rollback = {
