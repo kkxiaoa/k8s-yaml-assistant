@@ -103,7 +103,7 @@ _RFC3339_UTC = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
     r"[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$"
 )
-_RUNTIME_IMAGE_DIGEST = re.compile(r"(sha256:[a-f0-9]{64})$")
+_CONTAINERD_IMAGE_ID = re.compile(r"^containerd://sha256:[a-f0-9]{64}$")
 
 
 @dataclass(frozen=True)
@@ -1157,14 +1157,10 @@ def _read_deployment(
     return value
 
 
-def _deployment_digest(
-    deployment: dict[str, object],
+def _container_digest(
+    containers: object,
     failure_code: str,
 ) -> str:
-    spec = _nested_object(deployment, "spec", failure_code)
-    template = _nested_object(spec, "template", failure_code)
-    template_spec = _nested_object(template, "spec", failure_code)
-    containers = template_spec.get("containers")
     if type(containers) is not list or len(containers) != 1:
         raise AdapterFailure(failure_code)
     container = containers[0]
@@ -1182,6 +1178,16 @@ def _deployment_digest(
     if not _IMAGE_DIGEST.fullmatch(digest):
         raise AdapterFailure(failure_code)
     return digest
+
+
+def _deployment_digest(
+    deployment: dict[str, object],
+    failure_code: str,
+) -> str:
+    spec = _nested_object(deployment, "spec", failure_code)
+    template = _nested_object(spec, "template", failure_code)
+    template_spec = _nested_object(template, "spec", failure_code)
+    return _container_digest(template_spec.get("containers"), failure_code)
 
 
 def _verify_ready_state(
@@ -1242,7 +1248,11 @@ def _verify_ready_state(
     items = pods["items"]
     if len(items) != 1 or type(items[0]) is not dict:
         raise AdapterFailure(mismatch_code)
-    pod_status = _nested_object(items[0], "status", mismatch_code)
+    pod = items[0]
+    pod_spec = _nested_object(pod, "spec", mismatch_code)
+    if _container_digest(pod_spec.get("containers"), mismatch_code) != expected_digest:
+        raise AdapterFailure(mismatch_code)
+    pod_status = _nested_object(pod, "status", mismatch_code)
     statuses = pod_status.get("containerStatuses")
     if type(statuses) is not list or len(statuses) != 1:
         raise AdapterFailure(mismatch_code)
@@ -1256,10 +1266,7 @@ def _verify_ready_state(
     ):
         raise AdapterFailure(mismatch_code)
     image_id = container_status["imageID"]
-    if not image_id.startswith("containerd://"):
-        raise AdapterFailure(mismatch_code)
-    match = _RUNTIME_IMAGE_DIGEST.fullmatch(image_id.removeprefix("containerd://"))
-    if match is None or match.group(1) != expected_digest:
+    if not _CONTAINERD_IMAGE_ID.fullmatch(image_id):
         raise AdapterFailure(mismatch_code)
 
 
