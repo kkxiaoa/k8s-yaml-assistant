@@ -1,7 +1,7 @@
 # AI 应用开发能力训练实现方案
 
 > 状态：当前执行依据。
-> 最近核对：2026-07-26。
+> 最近核对：2026-07-28。
 > 用途：维护当前能力状态、质量门禁和唯一执行顺序。具体数据契约由已确认的 design/spec 定义，不在本文重复维护。
 
 ## 1. 项目目标
@@ -45,7 +45,18 @@
 
 ## 3. 当前事实快照
 
-以下数字只是 2026-07-19 的工作区快照，不是永久规格。若与命令输出冲突，以命令输出为准。
+### 3.0 当前执行状态
+
+以下状态是当前主线和停止点的唯一摘要；运行证据与完整步骤保留在直接引用的实施计划中，不在其他入口文档复制。
+
+- 当前主线是 Production Deployment（生产部署），质量评估主线保持暂停。
+- 四份 2026-07-12 纠偏计划、Phase B（阶段 B）工程清理和 Case Governance（评估用例治理）已经完成结构实现与审核；尚未执行新版本完整模型评估或晋升 baseline（基线）。
+- `v0.1.0` 已携带 8,410 条正式索引和六项发布证据完成不可变发布，并通过运行 `30265452918` Attempt 5（第 5 次尝试）部署到私有 K3s（轻量 Kubernetes）；固定单副本 Deployment（工作负载）为 `1/1` 可用，生产 runner（运行器）保持运行中和开机自启。
+- 私有验收发现 production observation root（生产观测根目录）权限过宽，运行时以 `root_unsafe` 安全关闭。卷内 `0700` 私有子目录修复已随 `v0.1.1` 源提交 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d` 合入；对应 Draft Release（草稿发布版本）尚无附件，证据运行 `30286776498` 被非标准文案门禁误阻断。
+- 当前唯一下一路径：审核并合入发布校验边界修复，恢复同一 `v0.1.1` 草稿，生成六项证据，人工 Publish（正式发布），重新部署，再继续真实观测生命周期、有限模型冒烟、恢复和节点重启验收。
+- 80/443、公开入口和匿名模型能力继续关闭；同区域镜像分发在下一次依赖冷拉取前仍需解决。完成私有验收后才恢复 Phase B（阶段 B）的正式质量重建。
+
+以下语料和评估数字是 2026-07-19 的工作区快照，索引交付状态更新于 2026-07-28；它们都不是永久规格，若与命令输出冲突，以命令输出为准。
 
 ### 3.1 Corpus
 
@@ -65,7 +76,7 @@ npm run corpus:stats
 - 尚未注册真实数据 provider：`docs`、`example`。
 - `data/schemas/curated.json` 显式包含 2 个真实集群 CRD（自定义资源定义）：`gateway.networking.k8s.io/v1 HTTPRoute` 和 `cert-manager.io/v1 Certificate`。
 - corpus identityVersion（语料身份版本）为 `2`，manifest hash（清单哈希）为 `82621edc73530dffc86e21fe6488a332e98f7d2e1efba3d0d995e7b66fb880c4`。
-- 现有本地 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求 v5 索引格式和 knowledge identity v2（知识身份版本 2），因此当前以 `format_mismatch` 失效。默认 `voyage-3` 的 v5 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`；8,410 条正式索引已经由独立 GitHub Actions（GitHub 自动化流水线）生成、完整回读校验并签名，尚未复制回本地目录，也尚未烘焙进候选应用镜像。
+- 现有本地 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求 v5 索引格式和 knowledge identity v2（知识身份版本 2），因此当前以 `format_mismatch` 失效。默认 `voyage-3` 的 v5 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`；8,410 条正式索引已经由独立 GitHub Actions（GitHub 自动化流水线）生成、完整回读校验并签名，且已烘焙进 `v0.1.0` 应用镜像并部署；本地目录仍未重建。
 
 ### 3.2 Eval 数据
 
@@ -315,7 +326,7 @@ Stage 是能力分类，不代表执行时序。
 
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引、private/portfolio（私有 / 作品集展示）双模式和安全 observation（观测）边界。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
-3. Phase 0-2（阶段 0-2）已经完成实现和审核；在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，当前索引契约为 knowledge identity v2（知识身份版本 2）与 index format v5（索引格式版本 5），并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。具有 8,410 条正式索引和六项发布证据的 `v0.1.0` 已 Publish（正式发布）并创建不可变 Git tag（Git 标签）。特权 deployment adapter（部署适配器）Task 1-6（任务 1-6）已经审核，Task 7 Step 1-4（任务 7 步骤 1-4）已完成草稿重定向、人工发布、首次私有部署和回滚草稿无部署验证。Step 5（步骤 5）的只读验收确认健康接口、8,410 条索引身份、无模型检查路径、运行时安全与资源边界符合预期，同时发现 production observation（生产观测）因 PVC（持久卷声明）根目录权限过宽而以 `root_unsafe` 安全关闭。卷内 `0700` 私有子目录修复和容器反例已经在本地通过，当前等待受控 Pull Request（合并请求）、新版本发布与重新部署。固定单副本 Deployment（工作负载）仍为 `1/1` 可用，镜像固定到发布摘要，80/443 和公开入口仍未开放；生产修复生效后再继续真实观测生命周期、模型冒烟、恢复与节点重启验收。
+3. Phase 0-2（阶段 0-2）、特权 deployment adapter（部署适配器）Task 1-6（任务 1-6）和首次私有部署已经完成实现与审核；在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。当前精确进度、阻断项和下一操作只维护在 3.0，不在本节重复。
 4. 私有部署和受限入口验证通过后，在公开发布前恢复 Phase B（阶段 B）正式质量重建；新 baseline（基线）审核通过或形成显式风险接受记录后，才进入公开发布。
 5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 

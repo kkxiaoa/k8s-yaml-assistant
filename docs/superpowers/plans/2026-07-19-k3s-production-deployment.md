@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-2（阶段 0-2）、Task 12-13（任务 12-13）和 Task 14 Step 1-4（任务 14 步骤 1-4）的实现与审核已完成。具有 8,410 条正式索引和六项发布证据的 `v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）；固定单副本 Deployment（工作负载）当前为 `1/1` 可用。Task 14 Step 5（任务 14 步骤 5）发现的 production observation root（生产观测根目录）权限阻断已有本地通过的最小修复，当前等待受控 Pull Request（合并请求）、新版本发布与重新部署；真实观测生命周期和模型冒烟尚未完成，公网入口仍未创建。
+> 状态：执行中。当前跨项目进度、阻断项和唯一下一路径只维护在 `docs/AI应用开发能力训练实现方案.md` 的“3.0 当前执行状态”；本文维护部署实施契约、停止点和历史证据，不重复维护动态摘要。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。
@@ -652,11 +652,11 @@ git diff --check
 
 - [x] **Step 1（步骤 1）：先写发布所有权、索引产物和清单反例**
 
-反例覆盖：
+契约与反例覆盖：
 
 - `package.json`、`package-lock.json` 与 `.release-please-manifest.json` 版本漂移、占位版本 `0.0.0`、非稳定 SemVer（语义化版本）或 tag（标签）不一致时失败；
-- `CHANGELOG.md` 缺状态、用途、`Unreleased`（未发布）或唯一当前版本标题，以及包含占位、绝对路径或密钥赋值时失败；
-- Draft Release（草稿发布版本）不是 draft（草稿）、是 prerelease（预发布）、`tagName/targetCommitish`（标签名 / 目标提交）与 Release Please（发布自动化工具）输出不一致、发布说明缺少真实变更或 `Known limitations`（已知限制）时失败；
+- `CHANGELOG.md` 只绑定经审核文件的 SHA-256（安全哈希算法）身份，不由发布代码解析标题、章节、措辞、顺序或样式；
+- Draft Release（草稿发布版本）不是 draft（草稿）、是 prerelease（预发布）、`tagName/targetCommitish`（标签名 / 目标提交）与 Release Please（发布自动化工具）输出不一致或正文为空时失败；正文内容和样式进入人工审核，不使用启发式文本规则阻断；
 - release manifest（发布清单）缺 source/image/corpus/model/index/index artifact/rollback/proof identity（源码 / 镜像 / 语料 / 模型 / 索引 / 索引产物 / 回滚 / 证明身份），或者 digest/count/hash（内容摘要 / 数量 / 哈希）不一致时失败；
 - Release Please（发布自动化工具）设置 `skip-github-release`、在非当前 Release Pull Request merge（发布合并请求合并）场景设置 `skip-github-pull-request`，或者把草稿、标签、版本和发布说明所有权拆回另一个流水线时失败；
 - 当前 source version / Git tag / GitHub Release / active application draft / associated Pull Request（源版本 / Git 标签 / GitHub 发布版本 / 活动应用草稿 / 关联的合并请求）状态不一致、多于一个稳定 SemVer draft（语义化版本草稿）、活动草稿期间仍准备下一版本，或发布合并提交同时存在草稿时失败；
@@ -674,7 +674,7 @@ Release Please（发布自动化工具）同时负责：
 
 `release-please-config.json` 使用 `draft: true`。GitHub 官方语义是：创建 Draft Release（草稿发布版本）时只有 `tag_name/target_commitish`（标签名 / 目标提交）关联，不创建 Git tag（Git 标签）；维护者点击 Publish（发布）时才创建标签并产生 `release.published`（发布版本已发布）事件。
 
-`manifest.ts` 不再从 `CHANGELOG.md` 摘取正文，也不生成 `release-notes.md`。它只验证源码版本与完整 changelog identity（变更日志身份），再对 Release Please（发布自动化工具）已经写入 Draft Release（草稿发布版本）的正文执行安全校验和 SHA-256（安全哈希算法）绑定。release artifacts workflow（发布证据流水线）不能修改该正文。
+`manifest.ts` 不再从 `CHANGELOG.md` 摘取正文，也不生成 `release-notes.md`。它只验证源码版本并绑定完整 changelog identity（变更日志身份），再对 Release Please（发布自动化工具）已经写入 Draft Release（草稿发布版本）的非空正文执行 SHA-256（安全哈希算法）绑定。release artifacts workflow（发布证据流水线）不能修改该正文。
 
 每次 `main` push（主分支推送）先由独立 state inspection job（状态检查任务）读取源码版本、GitHub Release（GitHub 发布版本）、实际 Git tag（Git 标签）和当前提交关联的 Pull Request（合并请求），再决定是否调用 Release Please（发布自动化工具）：
 
@@ -687,7 +687,7 @@ Release Please（发布自动化工具）同时负责：
 
 首轮真实运行确认两个首发边界：没有历史 Release（发布版本）时，Node release type（Node 发布类型）默认生成 `1.0.0`；使用 merge commit（合并提交）合并同一个 `feat:` 提交时，原提交和包含相同正文的合并提交会分别进入发布说明。仓库已改为只允许 Squash merge（压缩合并），默认使用 Pull Request title（合并请求标题）且提交正文留空，后续 `main` 对每个合并请求只保留一个 Conventional Commit（约定式提交）。
 
-当前 `.release-please-manifest.json` 仍为 `0.0.0` 时，`release-please-config.json` 必须使用一次性 `release-as: 0.1.0` 强制首发版本，并以 `bump-minor-pre-major: true` 固定 `1.0.0` 前的破坏性变更策略。Release Pull Request #3（发布合并请求 #3）更新为 `0.1.0` 后，维护者必须在该分支删除一次性 `release-as`，保留长期版本策略，并补齐 `CHANGELOG.md` 的状态、用途、`Unreleased`（未发布）、单一真实用户变化与 `Known limitations`（已知限制）；其 Pull Request body（合并请求正文）也必须删除重复变化并增加同一已知限制，因为 Release Please（发布自动化工具）会从该正文解析 Draft Release（草稿发布版本）的发布说明。常规 Pull Request gate（合并请求门禁）和正式索引检查通过前不得合并。
+当前 `.release-please-manifest.json` 仍为 `0.0.0` 时，`release-please-config.json` 必须使用一次性 `release-as: 0.1.0` 强制首发版本，并以 `bump-minor-pre-major: true` 固定 `1.0.0` 前的破坏性变更策略。Release Pull Request #3（发布合并请求 #3）更新为 `0.1.0` 后，维护者必须在该分支删除一次性 `release-as`，保留长期版本策略，并补齐 `CHANGELOG.md` 的状态、用途、`Unreleased`（未发布）和单一真实用户变化。首发时人工补充 `Known limitations`（已知限制）及清理重复变化属于一次性内容审核，不构成 Release Please（发布自动化工具）的长期输出契约；常规 Pull Request gate（合并请求门禁）和正式索引检查通过前不得合并。
 
 - [x] **Step 3（步骤 3）：把付费索引构建拆成独立、可复用产物**
 
@@ -757,6 +757,8 @@ git diff --check
 2026-07-26 运行时安全修复本地证据：先以反例固定安全版本与 Pull Request（合并请求）镜像扫描契约，再把 Next.js（Next.js 框架）升级到 `16.2.12`、`sharp`（图像处理库）统一到 `0.35.3`、`js-yaml`（YAML 解析库）升级到 `4.3.0`，并把 `postcss`（CSS 处理库）统一到 `8.5.23`。`npm audit --omit=dev`（npm 生产依赖安全审计）不再包含 `HIGH/CRITICAL`（高危 / 严重），仍有 2 项来自 Monaco Editor（Monaco 编辑器）固定 DOMPurify（HTML 清理库）的 `MODERATE`（中危）报告，当前不属于高危发布阻断但必须保留为遗留风险。本地 214/214 测试、类型检查、Next.js 构建、无索引容器构建和失败关闭烟测通过；固定 Trivy `0.70.0` 对真实运行镜像扫描结果为 0 项 `HIGH/CRITICAL`（高危 / 严重）。
 
 2026-07-27 发布扫描收敛证据：反例契约先识别出发布构建对同一镜像调用两次 Trivy Action（Trivy 流水线动作），随后保留一次完整 JSON（结构化报告）扫描，并用 `trivy convert`（Trivy 报告转换）复用该报告执行高危 / 严重门禁。本机固定 Trivy `0.70.0` 验证中，仅含中危的报告退出 0，含高危、报告缺失和 JSON 损坏均非零退出；完整 214/214 测试、TypeScript（类型检查）、workflow contract（流水线契约）和 `git diff --check` 通过。
+
+2026-07-28 发布阻断边界复盘：`v0.1.1` Draft Release（草稿发布版本）由 Release Please（发布自动化工具）生成只有真实 `Bug Fixes`（问题修复）的正文，发布证据流水线却要求仓库自定义且无稳定生产者的单一 `Known limitations`（已知限制）章节，因此在任何镜像构建、扫描、签名或上传前误阻断。修复删除 `CHANGELOG.md` 和发布说明的章节、占位词、路径、密钥形态及其他启发式文本门禁；`CHANGELOG.md` 只绑定经审核文件哈希，发布说明只要求非空并绑定哈希，发布链继续严格校验 tag/source/digest/signature/artifact identity（标签 / 源码 / 摘要 / 签名 / 制品身份）。Draft Release（草稿发布版本）的 `name/body/isDraft/isPrerelease`（名称 / 正文 / 草稿状态 / 预发布状态）等无直接消费者返回值同步收敛。Release（发布版本）、Deployment（部署）和 Rollback（回滚）历史改用 GitHub API pagination（GitHub 接口分页）读取完整清单，不再把 100 条单页上限当成总量上限；输入仍受现有文件字节和任务超时预算约束。真实 GitHub CLI（GitHub 命令行工具）验证还确认当前版本不能组合 `--slurp` 与内置 `--jq`，因此由 `gh api --paginate --slurp` 完成分页聚合，再交给独立 `jq` 转换。既有 `v0.1.1` 草稿仍指向包含旧校验器的精确源码提交，修复合入后需一次性采用经审核的恢复步骤绕过旧门禁，再重跑该草稿；本次本地修复不编辑草稿、不触发流水线、不发布或部署。
 
 - [ ] **Step 6（步骤 6）：执行首次独立索引和候选发布**
 

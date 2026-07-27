@@ -344,7 +344,7 @@ function latestByTimestamp<T extends { createdAt: string }>(
 }
 
 export function resolveCurrentProductionDigest(value: unknown): string | null {
-  const records = z.array(DeploymentRecordSchema).max(100).parse(value);
+  const records = z.array(DeploymentRecordSchema).parse(value);
   const successful = records.flatMap((record) => {
     if (
       record.deployment.ref !== record.deployment.payload.releaseCommit ||
@@ -436,7 +436,7 @@ export function resolveRollbackCandidateTag(input: unknown): string {
       sourceTag: z.string().regex(DEPLOY_TAG_PATTERN),
       imageDigest: ImageDigestSchema,
       workflowRunId: DecimalIdSchema,
-      releases: z.array(ListedReleaseSchema).max(100),
+      releases: z.array(ListedReleaseSchema),
     })
     .parse(input);
   const tag =
