@@ -1,6 +1,6 @@
 # K3s 特权部署适配器实施计划
 
-> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1（任务 7 步骤 1）已完成草稿重定向、候选镜像重建和六项证据回读，等待 review（审核）；`v0.1.0` 仍未 Publish（正式发布），生产运行器、GitHub deployment（GitHub 部署记录）和应用 Deployment/Pod（工作负载 / 容器组）均未变化。
+> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-2（任务 7 步骤 1-2）已完成，`v0.1.0` 已 Publish（正式发布）。Step 3（步骤 3）的私有部署已安全暴露并定位两类真实问题：首次冷拉取超过 10 分钟，拉取随后在 containerd（容器运行时）中完整结束；再次部署发现适配器错误地把 OCI Image Index（开放容器镜像索引）根摘要与 CRI `imageID`（容器运行时接口镜像标识）要求为同一值。当前没有成功台账或应用 Deployment（工作负载）；身份层修复已通过本地门禁，等待 review（审核）后安装并利用已缓存镜像重试，同区域镜像分发仍作为后续冷拉取方案。
 > 用途：把已审核的 K3s（轻量 Kubernetes）特权 deployment adapter（部署适配器）设计拆成反例优先的仓库实现、Kubernetes bootstrap（Kubernetes 引导配置）、生产 runner（运行器）、发布工作流和私有验收步骤。
 > 对应设计：`docs/superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md`。
 > 执行位置：本计划的 Task 1-5（任务 1-5）服务于生产部署总计划的 Task 13（任务 13）；Task 6-7（任务 6-7）服务于总计划的 Task 14（任务 14）。每个 Task（任务）完成后独立停止审核。
@@ -212,7 +212,7 @@ rollback-v<version>-sha256-<64-hex>-r<workflow-run-id>
 - 固定模板镜像标记缺失或出现多次；
 - 请求不能改变 Namespace/Deployment/container（命名空间 / 工作负载 / 容器）或模板其他字段；
 - server-side apply（服务端应用）出现字段冲突时失败，不使用 `--force-conflicts`；
-- generation（代次）、副本数、可用副本、Ready Pod（就绪容器组）、镜像引用或 runtime imageID（运行时镜像标识）任一不符都不写成功台账；
+- generation（代次）、副本数、可用副本、Ready Pod（就绪容器组）、Deployment/Pod 声明镜像引用（工作负载 / 容器组声明镜像引用）任一不符，或 runtime imageID（运行时镜像标识）不是合法不可变标识时，都不写成功台账；
 - 首次部署失败只删除本轮首次创建的固定 Deployment（工作负载）；
 - 已有版本更新失败时恢复上一成功内容摘要；
 - 自动恢复失败保留 `operation.json` 并停止；
@@ -687,7 +687,7 @@ job（任务）固定：
 - `cancel-in-progress: false`；
 - 无 checkout（检出）、无 `uses:`、无容器、无网络下载；
 - 只把上游 Base64（Base64 编码）输出解码到标准输入并执行无参数 sudo（提权）入口；
-- 只把适配器一行非敏感结果编码为 job output（任务输出），不打印请求、证明或环境。
+- 只把适配器一行非敏感结果编码为 job output（任务输出）；工作流脚本和适配器不主动打印请求、证明或环境。GitHub Actions（GitHub 自动化流水线）会把普通 step env（步骤环境变量）渲染到私有仓库运行日志，因此跨任务请求只允许包含已发布证明和非敏感身份，禁止携带 Secret、kubeconfig、用户 YAML 或模型输入（密钥 / 客户端配置 / 配置文件 / 模型输入）。
 
 前后 GitHub-hosted job（GitHub 托管任务）负责 deployment status（部署状态）。适配器失败、任务离线，或结果为空、多行、超过 4 KiB、不是规范 Base64（Base64 编码）时记录 failure（失败），不重试到其他 runner（运行器），不自动改变服务器。部署请求与结果分别使用 64 KiB 和 4 KiB 边界；请求内部还预留 2 KiB authorization（授权）、28 KiB authorization bundle（授权证明包）和 32 KiB provenance bundle（来源证明包）预算，避免单一证明包挤占另一份必需证据，且不能用结果上限误拒绝合法请求。
 
@@ -763,7 +763,7 @@ Pull Request #9（合并请求 #9）最终提交 `492b33bb85cb3fe8b680c3b2bf00d0
 - `verify-draft`（草稿验证）独立契约通过；SLSA provenance（SLSA 来源证明）、SPDX SBOM（SPDX 软件物料清单）、两类 Sigstore bundle（Sigstore 证明包）和发布清单的内部摘要均与下载文件一致。流水线中的漏洞、证明、签名和附件回读步骤全部成功。
 - 最终回查确认草稿仍为 `draft=true`、`prerelease=false`、`publishedAt=null`，没有实际 `v0.1.0` Git tag（Git 标签），没有运行 `published-release.yml`，没有 `production-private` GitHub deployment（私有生产部署记录）；生产运行器 `huawei-k3s-prod-1` 在线空闲，K3s（轻量 Kubernetes）中没有应用 Deployment/Pod（工作负载 / 容器组）。
 
-- [ ] **Step 2（步骤 2）：人工复核并 Publish `v0.1.0`**
+- [x] **Step 2（步骤 2）：人工复核并 Publish `v0.1.0`**
 
 唯一管理员再次核对：
 
@@ -787,10 +787,21 @@ Publish（正式发布）必须由管理员在 GitHub UI/API（GitHub 网页 / �
 - 只有 Published Release（已发布版本）事件触发；
 - GitHub-hosted job（GitHub 托管任务）验证和签名成功后才调度生产 runner（运行器）；
 - 适配器创建固定单副本 Deployment（工作负载）；
-- Deployment image（工作负载镜像）、Pod imageID（容器组镜像标识）、发布清单和授权内容摘要完全一致；
+- Deployment/Pod spec image（工作负载 / 容器组声明镜像）都严格等于发布清单和授权中的 OCI Image Index root digest（开放容器镜像索引根摘要）；containerd `imageID`（容器运行时镜像标识）是合法不可变 SHA-256（安全哈希算法）标识，但不要求等于根摘要；
 - 台账只有一条成功事件，没有遗留 `operation.json`；
 - GitHub deployment（GitHub 部署记录）为 success（成功）；
-- 生产 runner（运行器）日志不含请求、证明、Secret（密钥）或 kubeconfig（客户端配置）。
+- 生产 runner（运行器）日志不含 Secret、kubeconfig、用户 YAML 或模型输入（密钥 / 客户端配置 / 配置文件 / 模型输入）；GitHub（代码托管平台）渲染的任务传输值只能包含已发布证明和非敏感授权，工作流脚本与适配器不得主动输出它。
+
+2026-07-27 已完成的真实证据和失败边界：
+
+- 唯一管理员复核后 Publish（正式发布）同一 Release ID（发布版本标识）`359948311`；实际不可变标签 `v0.1.0`、源提交 `1cec0b4cc6e57a2b018ec260627bbb651a1dcb3b` 和六项附件保持一致。
+- 首次运行 `30265452918` attempt 1（尝试 1）在 GitHub-hosted validation job（GitHub 托管验证任务）发现真实 BuildKit provenance（BuildKit 来源证明）路径为 `root.request.args`，在生成生产授权前失败；没有调度生产运行器或修改集群。修复已由 Pull Request #12（合并请求 #12）合入 `main`。
+- 同一运行的 attempt 2（尝试 2）完整验证六项证据并签名部署授权，生产适配器创建固定单副本 Deployment（工作负载）；候选镜像压缩层总计 87.08 MiB，但华北节点到 GHCR（GitHub 容器镜像仓库）的实际冷拉取在 600 秒内仍未完成两个最大层。适配器返回 `apply_failed_rolled_back`，删除本轮新建的 Deployment（工作负载），保留 PVC/Secret/bootstrap（持久卷声明 / 密钥 / 引导资源），清除 `operation.json` 且不写成功台账；GitHub deployment（GitHub 部署记录）为 failure（失败）。Deployment（工作负载）删除后，正在删除的 Pod（容器组）没有立即取消 containerd（容器运行时）活动拉取；最慢 45.5 MB 层按稳定约 1.05 MB/分钟预计需要约 43 分钟，证明扩大部署超时不是可接受的生产分发方案。
+- attempt 2（尝试 2）的生产任务日志证明 GitHub Actions（GitHub 自动化流水线）会渲染普通 `REQUEST_BASE64` step env（请求编码步骤环境变量）。该请求不含 Secret、kubeconfig、用户 YAML 或模型输入（密钥 / 客户端配置 / 配置文件 / 模型输入），但包含已发布证明和非敏感授权。GitHub 官方机制不能把已经 `add-mask`（日志遮罩）的值继续作为跨 job output（跨任务输出）；本阶段不为公开证明引入没有保密收益的外部密钥存储，验收项据此收敛为“工作流脚本和适配器不主动输出，传输值保持非敏感”。
+- attempt 2（尝试 2）回退后，containerd（容器运行时）继续并完整取得目标 OCI Image Index（开放容器镜像索引）的 24/24 个内容对象，共 87.1 MiB；根摘要仍为发布授权中的 `sha256:8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4`。CRI（容器运行时接口）同时报告内部镜像 ID 为配置摘要 `sha256:8284fc3bbc31f0f31876864ffeca075c93e233cf77181cd7c689a435578a8a48`，并在 `repoDigests`（仓库摘要）中保留前述根摘要。
+- attempt 3（尝试 3）复用完整本地缓存，六项证据、签名授权和生产调度均成功，但适配器在就绪校验中错误要求上述两个摘要相等，18.6 秒内返回 `apply_failed_rolled_back`；Deployment/Pod（工作负载 / 容器组）再次安全删除，没有成功台账或遗留 `operation.json`。本轮反例证明 OCI 根摘要与 containerd 配置摘要可以不同；修复后仍严格校验 Deployment/Pod 声明镜像绑定授权根摘要，并只要求运行时 `imageID` 为合法不可变标识。
+
+已撤回扩大 Deployment `progressDeadlineSeconds`（工作负载进度期限）、适配器 rollout（滚动发布）和生产任务超时的候选改动。剩余工作：审核并安装身份层修复，利用已缓存镜像重跑 Step 3（步骤 3）；同区域镜像分发方案独立解决未来冷拉取，不再阻塞当前镜像的私有验收。
 
 - [ ] **Step 4（步骤 4）：证明真实回滚草稿生命周期不部署**
 
