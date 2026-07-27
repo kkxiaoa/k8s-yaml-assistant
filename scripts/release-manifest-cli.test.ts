@@ -180,12 +180,13 @@ test('verify-published writes only the deployment authorization identity', () =>
           args: { target: 'runtime' },
           root: {
             configSource: {
-              request: {
-                args: {
-                  'vcs:source':
-                    'https://github.com/kkxiaoa/k8s-yaml-assistant',
-                  'vcs:revision': sourceCommit,
-                },
+              path: 'Dockerfile',
+            },
+            request: {
+              args: {
+                'vcs:source':
+                  'https://github.com/kkxiaoa/k8s-yaml-assistant',
+                'vcs:revision': sourceCommit,
               },
             },
           },
