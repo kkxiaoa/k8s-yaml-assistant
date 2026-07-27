@@ -842,12 +842,10 @@ const BuildKitProvenanceStatementSchema = z.object({
             target: z.literal('runtime'),
           }),
           root: z.object({
-            configSource: z.object({
-              request: z.object({
-                args: z.object({
-                  'vcs:source': z.literal(`https://github.com/${REPOSITORY}`),
-                  'vcs:revision': CommitSchema,
-                }),
+            request: z.object({
+              args: z.object({
+                'vcs:source': z.literal(`https://github.com/${REPOSITORY}`),
+                'vcs:revision': CommitSchema,
               }),
             }),
           }),
@@ -954,7 +952,7 @@ function resolveBuildKitProvenance(
   return {
     sourceCommit:
       statement.predicate.buildDefinition.externalParameters.request.root
-        .configSource.request.args['vcs:revision'],
+        .request.args['vcs:revision'],
     imageDigest: `sha256:${statement.subject[0]!.digest.sha256}`,
   };
 }

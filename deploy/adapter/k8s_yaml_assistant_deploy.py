@@ -617,13 +617,8 @@ def decode_and_validate_provenance(
         "root",
         "provenance_invalid",
     )
-    root_config = _nested_object(
-        root,
-        "configSource",
-        "provenance_invalid",
-    )
     root_request = _nested_object(
-        root_config,
+        root,
         "request",
         "provenance_invalid",
     )
