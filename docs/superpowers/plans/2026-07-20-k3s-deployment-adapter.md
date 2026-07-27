@@ -1,6 +1,6 @@
 # K3s 特权部署适配器实施计划
 
-> 状态：执行中；Task 1-5（任务 1-5）已完成实现和审核，仓库级 runner registration（运行器注册）和真实 systemd（系统服务管理器）隔离验证已经通过，运行器当前在线空闲。Task 6（任务 6）的仓库实现和本地门禁已经完成，等待 review（审核）后再暂存、提交并创建受控 Pull Request（合并请求）；Task 7（任务 7）尚未开始。
+> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Pull Request #9（合并请求 #9）已合入 `main`，合入后只读回查确认没有 Published Release（已发布版本）、生产 runner job（生产运行器任务）、生产 GitHub deployment（GitHub 部署记录）或应用 Deployment/Pod（工作负载 / 容器组）变化；仓库级运行器当前在线空闲。Task 7（任务 7）已修正首发与回滚草稿验证顺序，尚未开始外部执行。
 > 用途：把已审核的 K3s（轻量 Kubernetes）特权 deployment adapter（部署适配器）设计拆成反例优先的仓库实现、Kubernetes bootstrap（Kubernetes 引导配置）、生产 runner（运行器）、发布工作流和私有验收步骤。
 > 对应设计：`docs/superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md`。
 > 执行位置：本计划的 Task 1-5（任务 1-5）服务于生产部署总计划的 Task 13（任务 13）；Task 6-7（任务 6-7）服务于总计划的 Task 14（任务 14）。每个 Task（任务）完成后独立停止审核。
@@ -591,7 +591,7 @@ GitHub API（GitHub 应用程序接口）已回读唯一在线、空闲 runner�
 - 外层请求把 bundle（证明包）写成对象而不是原文字符串；
 - latest successful deployment（最新成功部署）解析接受 pending/failure/inactive（待处理 / 失败 / 非活动）状态、错误环境、错误仓库、非法摘要或多义最新记录；
 - 没有成功记录时不返回 `none`；
-- `CURRENT_PRODUCTION_DIGEST` 仍是 release artifacts workflow（发布证据流水线）的消费者。
+- release artifacts workflow（发布证据流水线）仍读取 `CURRENT_PRODUCTION_DIGEST`、未从最新成功部署记录解析当前生产镜像的实现必须被契约测试拒绝。
 
 - [x] **Step 2（步骤 2）：实现共享严格 authorization contract（授权契约）**
 
@@ -614,6 +614,8 @@ TypeScript（类型系统）只负责 GitHub-hosted job（GitHub 托管任务）
 生产适配器本机台账仍是权威事实源。GitHub deployment（GitHub 部署记录）只服务下一候选发布说明和外部审计；两者不一致时未来发布停下审核，不能让 GitHub 记录覆盖本机台账。
 
 代码合入并确认没有消费者后，删除外部 repository variable（仓库变量）`CURRENT_PRODUCTION_DIGEST` 需要单独授权和 API（应用程序接口）回读；不把无消费者配置长期保留。
+
+2026-07-27 已在 Pull Request #9（合并请求 #9）合入并完成消费者回查后获得单独授权，删除该变量；GitHub API（GitHub 应用程序接口）回读确认仓库变量列表为空。
 
 - [x] **Step 4（步骤 4）：先写 workflow（流水线）反例**
 
@@ -698,7 +700,7 @@ job（任务）固定：
 - 只有管理员可绕过创建限制；
 - 任何主体都不能更新或删除已经创建的标签。
 
-- [ ] **Step 8（步骤 8）：本地和 Pull Request（合并请求）验证**
+- [x] **Step 8（步骤 8）：本地和 Pull Request（合并请求）验证**
 
 ```bash
 npm run adapter:check
@@ -711,34 +713,35 @@ npm run build
 git diff --check
 ```
 
-本地实现已完成上述门禁：Python adapter（Python 适配器）52 项测试、部署授权 68 项测试、发布契约 15 项测试和 workflow contract（流水线契约）10 项测试通过；完整 `npm test`、TypeScript（类型检查）和 Next.js build（Next.js 构建）通过。首次沙箱内构建只因 Turbopack（构建工具）不能绑定本地临时端口而被操作系统拒绝，使用相同源码和命令在允许本地构建进程的环境中复核成功。
+本地实现完成上述门禁：Python adapter（Python 适配器）52 项测试、部署授权 68 项测试、发布契约 15 项测试和 workflow contract（流水线契约）10 项测试通过；完整 `npm test`、TypeScript（类型检查）、Next.js build（Next.js 构建）、无索引容器构建、fail-closed smoke test（失败关闭烟雾测试）和运行时漏洞门禁通过。
 
-当前只完成 Step 8（步骤 8）的本地验证部分；暂存、提交、受控 Pull Request（合并请求）和合入后外部状态回读尚未执行，因此本步骤保持未完成。
+Pull Request #9（合并请求 #9）最终提交 `492b33bb85cb3fe8b680c3b2bf00d0b308e0b263` 的 GitHub Actions（GitHub 自动化流水线）运行 `30259357571` 通过，合并提交为 `1cec0b4cc6e57a2b018ec260627bbb651a1dcb3b`。合入后的 Release lifecycle（发布生命周期）运行 `30259707368` 只执行状态检查；发布准备、证据构建和恢复任务全部跳过。
 
-通过受控 Pull Request（合并请求）后，只合入代码；确认没有 Release（发布版本）事件、生产 runner job（生产运行器任务）、GitHub deployment（GitHub 部署记录）或 K3s（轻量 Kubernetes）变化。
+合入后外部状态回读确认：
 
-**Stop and report（停止并汇报）：** 原始字节协议、授权身份、普通/回滚发布分支、production job（生产任务）权限、部署记录镜像、`CURRENT_PRODUCTION_DIGEST` 清退计划、标签规则和“尚未发布”证据。等待 Task 6 review（任务 6 审核）。
+- `v0.1.0` 仍是未发布草稿，没有实际 Git tag（Git 标签），且仍绑定旧提交 `d36128253e25243a9a17e291afa08b4e237133af` 和原六项证据；
+- 生产运行器 `huawei-k3s-prod-1` 为在线空闲，没有接收任务；
+- GitHub deployment（GitHub 部署记录）只有既有 `index-build`（索引构建）记录，没有 `production-private`（私有生产）记录；
+- `k8s-yaml-assistant-prod` Namespace（命名空间）没有应用 Deployment/Pod（工作负载 / 容器组）；
+- 无消费者的 `CURRENT_PRODUCTION_DIGEST` 仓库变量已按单独授权删除并完成 API（应用程序接口）回读。
+
+**Stop and report（停止并汇报）：** Task 6（任务 6）的原始字节协议、授权身份、普通/回滚发布分支、production job（生产任务）权限、部署记录镜像、变量清退、标签规则和“尚未发布”证据已经审核完成。后续外部操作属于 Task 7（任务 7），必须按步骤分别授权。
 
 ## Task 7：验证 draft → publish → private deploy（草稿 → 发布 → 私有部署）和回滚
 
-**Precondition（前置条件）：** Task 6（任务 6）审核通过；草稿负例、Publish（正式发布）、首次部署、有限模型冒烟和各回滚动作分别获得明确授权。
+**Precondition（前置条件）：** Task 6（任务 6）审核通过；当前 `v0.1.0` 草稿仍未发布。草稿修改与证据重建、Publish（正式发布）、首次部署、回滚草稿删除、有限模型冒烟、故障候选、功能回滚和节点重启分别获得当次明确授权。
 
-- [ ] **Step 1（步骤 1）：证明草稿生命周期不部署**
+- [ ] **Step 1（步骤 1）：整体重定向 `v0.1.0` 草稿和六项证据**
 
-使用一个受控 rollback candidate（回滚候选）：
+当前草稿绑定旧提交 `d36128253e25243a9a17e291afa08b4e237133af`；它不包含 Task 6（任务 6）的发布触发工作流，因此不能直接 Publish（正式发布）。经单独授权后：
 
-1. 创建草稿；
-2. 编辑非身份正文；
-3. 删除草稿。
+1. 回读并保存当前草稿的 Release ID（发布版本标识）、目标提交、正文和六项附件摘要，作为本次变更的恢复依据；
+2. 以已审核合并提交 `1cec0b4cc6e57a2b018ec260627bbb651a1dcb3b` 为唯一新 source commit（源提交），更新草稿目标和发布说明；发布说明必须覆盖原 `0.1.0` 内容以及草稿形成后已经审核合入的安全和部署生命周期变更；
+3. 手工运行 `Release lifecycle`（发布生命周期）恢复入口；该入口从已经重定向的草稿解析 source commit（源提交），复用既有 8,410 条已签名索引，重新构建候选镜像并用 `--clobber` 替换六项证据；
+4. 完整回读草稿、镜像内容摘要、索引身份、release notes hash（发布说明哈希）、发布清单、两类 attestation（证明）和六项附件摘要，确认没有残留旧源码证据；
+5. 确认草稿修改和证据恢复没有运行 `published-release.yml` 或 `published-release-deploy.yml`、没有调度生产运行器、没有新增 `production-private` GitHub deployment（私有生产部署记录），且 K3s（轻量 Kubernetes）仍没有应用 Deployment/Pod（工作负载 / 容器组）。
 
-每一步都确认：
-
-- `published-release.yml` 和 `published-release-deploy.yml` 均没有运行；
-- production runner（生产运行器）没有接收 job（任务）；
-- GitHub deployment（GitHub 部署记录）没有新增；
-- K3s（轻量 Kubernetes）没有应用 Deployment/Pod（工作负载 / 容器组）。
-
-删除草稿属于外部破坏性动作，执行前再次确认精确 Release ID（发布版本标识）和标签。
+该步骤不调用 Voyage embedding/rerank（Voyage 向量嵌入 / 重排），不重建索引，不 Publish（正式发布）。任一身份或证据校验失败时保持草稿状态并停止；不得发布部分更新的草稿。
 
 - [ ] **Step 2（步骤 2）：人工复核并 Publish `v0.1.0`**
 
@@ -755,7 +758,7 @@ git diff --check
 
 Publish（正式发布）必须由管理员在 GitHub UI/API（GitHub 网页 / 应用程序接口）明确执行；工作流不得代点。
 
-当前 `v0.1.0` Draft Release（草稿发布版本）仍指向不含上述触发工作流的旧提交。Task 6（任务 6）合入后，Task 7（任务 7）必须先把草稿、发布说明和六项证据一起重定向到包含触发工作流的精确审核提交并完成回读验证，再请求 Publish（正式发布）授权；不得只修改 `targetCommitish` 而保留旧证据。
+只有 Step 1（步骤 1）的整体回读完成后才能请求本步骤授权；不得只修改 `targetCommitish` 或只替换部分附件。
 
 - [ ] **Step 3（步骤 3）：验证首次 direct deploy（直接部署）**
 
@@ -769,7 +772,24 @@ Publish（正式发布）必须由管理员在 GitHub UI/API（GitHub 网页 / �
 - GitHub deployment（GitHub 部署记录）为 success（成功）；
 - 生产 runner（运行器）日志不含请求、证明、Secret（密钥）或 kubeconfig（客户端配置）。
 
-- [ ] **Step 4（步骤 4）：通过固定来源隧道完成私有验收**
+- [ ] **Step 4（步骤 4）：证明真实回滚草稿生命周期不部署**
+
+首次发布和部署成功后，`v0.1.0` 才是 `rollback-candidate.yml` 可验证的真实已发布来源。经创建和删除分别授权后：
+
+1. 只输入 `v0.1.0`，运行 `rollback-candidate.yml` 创建绑定真实已发布镜像内容摘要的 Draft Release（草稿发布版本）；
+2. 编辑不参与身份的草稿正文；
+3. 回读精确 Release ID（发布版本标识）和标签后删除该草稿。
+
+创建、编辑和删除后分别确认：
+
+- `published-release.yml` 和 `published-release-deploy.yml` 均没有运行；
+- 生产运行器没有接收任务；
+- 没有新增 `production-private` GitHub deployment（私有生产部署记录）；
+- K3s（轻量 Kubernetes）中的应用 Deployment/Pod（工作负载 / 容器组）没有发生 rollout（滚动更新）。
+
+Draft Release（草稿发布版本）不创建实际 Git tag（Git 标签）。删除草稿属于外部破坏性动作，执行前必须再次确认精确 Release ID（发布版本标识）和标签。不得在首发前伪造已发布来源来提前完成本步骤。
+
+- [ ] **Step 5（步骤 5）：通过固定来源隧道完成私有验收**
 
 80/443 保持不公开，只验证：
 
@@ -784,7 +804,7 @@ Publish（正式发布）必须由管理员在 GitHub UI/API（GitHub 网页 / �
 
 Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准的非敏感输入、次数和费用；不执行正式评估或索引重建。
 
-- [ ] **Step 5（步骤 5）：演练自动恢复**
+- [ ] **Step 6（步骤 6）：演练自动恢复**
 
 只有存在真实、可审核且不会沉淀玩具行为的故障候选时才执行生产演练。候选必须拥有完整发布证据和明确清理路径；不能为制造失败向主线落盘硬编码故障。
 
@@ -794,7 +814,7 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 - 把真实自动恢复演练标记为明确延期风险；
 - 不用随意破坏探针、镜像或生产 Secret（密钥）冒充验收。
 
-- [ ] **Step 6（步骤 6）：演练人工确认回滚**
+- [ ] **Step 7（步骤 7）：演练人工确认回滚**
 
 只有本机成功台账中至少存在两个不同内容摘要时才有真实功能回滚目标。满足前置条件后：
 
@@ -806,7 +826,9 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 
 首发时只有一个成功内容摘要，不创建伪造第二版本；该演练等待第二个真实版本部署后完成。
 
-- [ ] **Step 7（步骤 7）：节点重启恢复**
+在 Publish（正式发布）任何 `rollback-*` Release（回滚发布版本）前，必须另行授权并把现有 `v*` 标签保护等价扩展到 `refs/tags/rollback-*`：管理员是唯一创建限制绕过者，已经创建的标签禁止所有主体更新或删除。只创建和删除 Draft Release（草稿发布版本）的 Step 4（步骤 4）不依赖实际标签，因此不以提前放宽规则冒充前置条件。
+
+- [ ] **Step 8（步骤 8）：节点重启恢复**
 
 在单独维护窗口和备份核对后验证：
 
@@ -816,7 +838,7 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 - GitHub/GHCR（GitHub / GitHub 容器镜像仓库）短暂不可用不影响已运行 Pod（容器组）；
 - 没有因服务重启重新构建索引或重复部署。
 
-- [ ] **Step 8（步骤 8）：更新事实状态**
+- [ ] **Step 9（步骤 9）：更新事实状态**
 
 只有上述已获授权的步骤完成并审核后，更新：
 
