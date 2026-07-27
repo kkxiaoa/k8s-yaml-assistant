@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { loadAll } from 'js-yaml';
@@ -1137,15 +1136,14 @@ function validateNoCredentialMaterial(source: string): void {
   );
 }
 
-function repositoryFiles(): string[] {
-  return execFileSync(
-    'git',
-    ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-    { cwd: root },
-  )
-    .toString('utf8')
-    .split('\0')
-    .filter((path) => path.length > 0);
+function filesUnder(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return filesUnder(path);
+      return entry.isFile() ? [path] : [];
+    })
+    .sort();
 }
 
 test('the checked-in K3s change package satisfies the deployment contract', () => {
@@ -1194,11 +1192,11 @@ test('the deployment adapter privilege boundary is fixed and credential-free', (
   const trustedRoot = readFileSync(trustedRootPath);
   validateTrustedRoot(trustedRoot);
 
-  const files = repositoryFiles();
-  const matchingTrustedRoots = files.filter((path) => {
-    if (path === 'deploy/adapter/sigstore-trusted-root.json') return true;
+  const deploymentFiles = filesUnder(join(root, 'deploy'));
+  const matchingTrustedRoots = deploymentFiles.filter((path) => {
+    if (path === trustedRootPath) return true;
     if (!path.endsWith('.json')) return false;
-    const bytes = readFileSync(join(root, path));
+    const bytes = readFileSync(path);
     return (
       createHash('sha256').update(bytes).digest('hex') ===
       trustedRootSha256
@@ -1206,7 +1204,7 @@ test('the deployment adapter privilege boundary is fixed and credential-free', (
   });
   assert.deepEqual(
     matchingTrustedRoots,
-    ['deploy/adapter/sigstore-trusted-root.json'],
+    [trustedRootPath],
   );
 
   const adapter = readFileSync(adapterPath, 'utf8');
@@ -1226,13 +1224,13 @@ test('the deployment adapter privilege boundary is fixed and credential-free', (
   );
 
   const explicitlyValidated = new Set([
-    'deploy/adapter/k8s_yaml_assistant_deploy.py',
-    'deploy/adapter/k8s-yaml-assistant-deploy.sudoers',
-    'deploy/adapter/actions-runner-hardening.conf',
-    'deploy/adapter/k8s-yaml-assistant-deployer.tmpfiles.conf',
-    'deploy/adapter/sigstore-trusted-root.json',
+    adapterPath,
+    sudoersPath,
+    runnerHardeningPath,
+    runnerTmpfilesPath,
+    trustedRootPath,
   ]);
-  for (const path of files) {
+  for (const path of deploymentFiles) {
     if (
       explicitlyValidated.has(path) ||
       path.endsWith('.test.ts') ||
@@ -1241,7 +1239,7 @@ test('the deployment adapter privilege boundary is fixed and credential-free', (
     ) {
       continue;
     }
-    const bytes = readFileSync(join(root, path));
+    const bytes = readFileSync(path);
     if (bytes.includes(0)) continue;
     validateNoCredentialMaterial(bytes.toString('utf8'));
   }
@@ -1562,13 +1560,9 @@ test('the checked-in Kubernetes resources satisfy the private bootstrap contract
     ...bootstrapManifestPaths,
     deploymentTemplatePath,
   ]
-    .map((path) => path.slice(root.length + 1))
     .sort();
-  const actualManifestFiles = repositoryFiles()
-    .filter(
-      (path) =>
-        path.startsWith('deploy/k8s/') && /\.ya?ml$/u.test(path),
-    )
+  const actualManifestFiles = filesUnder(kubernetesDir)
+    .filter((path) => /\.ya?ml$/u.test(path))
     .sort();
   assert.deepEqual(actualManifestFiles, expectedManifestFiles);
 
