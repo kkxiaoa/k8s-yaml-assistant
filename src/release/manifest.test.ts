@@ -19,6 +19,7 @@ import {
   resolveReleasePreparation,
   resolveReleaseIdentity,
   resolveReleaseSourceState,
+  verifyPublishedApplicationRelease,
   verifyDraftRelease,
 } from './manifest';
 
@@ -241,6 +242,107 @@ function validManifest(): Record<string, unknown> {
         reason: 'not_deployed',
       },
     },
+  };
+}
+
+function publishedEvidence(): {
+  release: Record<string, unknown>;
+  artifacts: Record<string, Uint8Array>;
+} {
+  const predicate = {
+    buildDefinition: {
+      buildType: buildKitSlsaV1BuildType,
+      externalParameters: {
+        configSource: {
+          path: 'Dockerfile',
+        },
+        request: {
+          args: {
+            target: 'runtime',
+          },
+          root: {
+            configSource: {
+              request: {
+                args: {
+                  'vcs:source':
+                    'https://github.com/kkxiaoa/k8s-yaml-assistant',
+                  'vcs:revision': sourceCommit,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  const provenance = Buffer.from(`${JSON.stringify(predicate)}\n`);
+  const provenanceBundle = Buffer.from(
+    `${JSON.stringify({
+      mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+      dsseEnvelope: {
+        payloadType: 'application/vnd.in-toto+json',
+        payload: Buffer.from(
+          JSON.stringify({
+            _type: 'https://in-toto.io/Statement/v0.1',
+            subject: [
+              {
+                name: 'ghcr.io/kkxiaoa/k8s-yaml-assistant',
+                digest: {
+                  sha256: imageDigest.slice('sha256:'.length),
+                },
+              },
+            ],
+            predicateType: 'https://slsa.dev/provenance/v1',
+            predicate,
+          }),
+        ).toString('base64'),
+      },
+      verificationMaterial: {},
+    })}\n`,
+  );
+  const sbom = Buffer.from(
+    `${JSON.stringify({
+      spdxVersion: 'SPDX-2.3',
+      packages: [{ name: 'k8s-yaml-assistant' }],
+    })}\n`,
+  );
+  const sbomBundle = Buffer.from(
+    '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}\n',
+  );
+  const manifest = validManifest();
+  (manifest.sbom as Record<string, unknown>).sha256 = sha(sbom.toString());
+  (manifest.provenance as Record<string, unknown>).sha256 = sha(
+    provenance.toString(),
+  );
+  const attestations = manifest.attestations as Record<string, any>;
+  attestations.sbom.bundleSha256 = sha(sbomBundle.toString());
+  attestations.provenance.bundleSha256 = sha(
+    provenanceBundle.toString(),
+  );
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+  const manifestBundle = Buffer.from(
+    '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}\n',
+  );
+  const artifacts: Record<string, Uint8Array> = {
+    'sbom.spdx.json': sbom,
+    'provenance.slsa.json': provenance,
+    'release-manifest.json': manifestBytes,
+    'sbom-attestation.sigstore.json': sbomBundle,
+    'provenance-attestation.sigstore.json': provenanceBundle,
+    'release-manifest.sigstore.json': manifestBundle,
+  };
+  return {
+    release: {
+      databaseId: 123,
+      tagName: 'v0.1.0',
+      targetCommitish: sourceCommit,
+      isDraft: false,
+      isPrerelease: false,
+      publishedAt: '2026-07-27T08:00:00Z',
+      body: releaseNotes.trimEnd(),
+      assets: RELEASE_ARTIFACT_FILES.map((name) => ({ name })),
+    },
+    artifacts,
   };
 }
 
@@ -800,5 +902,126 @@ test('draft readback rejects body and asset drift', () => {
         expectedReleaseNotesSha256,
       }),
     );
+  }
+});
+
+test('published application release closes release, artifact and provenance identity', () => {
+  const evidence = publishedEvidence();
+  const identity = verifyPublishedApplicationRelease({
+    release: evidence.release,
+    tagCommit: sourceCommit,
+    artifacts: evidence.artifacts,
+  });
+
+  assert.deepEqual(identity, {
+    releaseId: '123',
+    releaseTag: 'v0.1.0',
+    sourceCommit,
+    publishedAt: '2026-07-27T08:00:00Z',
+    imageName: 'ghcr.io/kkxiaoa/k8s-yaml-assistant',
+    imageDigest,
+    provenanceBundleSha256: sha(
+      Buffer.from(
+        evidence.artifacts['provenance-attestation.sigstore.json']!,
+      ).toString(),
+    ),
+  });
+});
+
+test('published release rejects unpublished, extra and drifted evidence', async (t) => {
+  const mutations: Array<[
+    string,
+    (value: ReturnType<typeof publishedEvidence>) => void,
+  ]> = [
+    ['draft', (value) => (value.release.isDraft = true)],
+    ['prerelease', (value) => (value.release.isPrerelease = true)],
+    [
+      'extra asset',
+      (value) =>
+        (value.release.assets as Array<Record<string, unknown>>).push({
+          name: 'extra.txt',
+        }),
+    ],
+    [
+      'artifact mutation',
+      (value) =>
+        (value.artifacts['sbom.spdx.json'] = Buffer.from('changed\n')),
+    ],
+    [
+      'provenance source drift',
+      (value) => {
+        const bundle = JSON.parse(
+          Buffer.from(
+            value.artifacts['provenance-attestation.sigstore.json']!,
+          ).toString(),
+        ) as Record<string, any>;
+        const statement = JSON.parse(
+          Buffer.from(bundle.dsseEnvelope.payload, 'base64').toString(),
+        ) as Record<string, any>;
+        statement.predicate.buildDefinition.externalParameters.request.root
+          .configSource.request.args['vcs:revision'] = 'd'.repeat(40);
+        bundle.dsseEnvelope.payload = Buffer.from(
+          JSON.stringify(statement),
+        ).toString('base64');
+        value.artifacts['provenance-attestation.sigstore.json'] = Buffer.from(
+          `${JSON.stringify(bundle)}\n`,
+        );
+        const manifest = JSON.parse(
+          Buffer.from(
+            value.artifacts['release-manifest.json']!,
+          ).toString(),
+        ) as Record<string, any>;
+        manifest.attestations.provenance.bundleSha256 = sha(
+          Buffer.from(
+            value.artifacts['provenance-attestation.sigstore.json']!,
+          ).toString(),
+        );
+        value.artifacts['release-manifest.json'] = Buffer.from(
+          `${JSON.stringify(manifest, null, 2)}\n`,
+        );
+      },
+    ],
+    [
+      'undeployable provenance bundle',
+      (value) => {
+        const bundle = JSON.parse(
+          Buffer.from(
+            value.artifacts['provenance-attestation.sigstore.json']!,
+          ).toString(),
+        ) as Record<string, unknown>;
+        bundle.padding = 'p'.repeat(32 * 1024);
+        value.artifacts['provenance-attestation.sigstore.json'] = Buffer.from(
+          `${JSON.stringify(bundle)}\n`,
+        );
+        const manifest = JSON.parse(
+          Buffer.from(
+            value.artifacts['release-manifest.json']!,
+          ).toString(),
+        ) as Record<string, any>;
+        manifest.attestations.provenance.bundleSha256 = sha(
+          Buffer.from(
+            value.artifacts['provenance-attestation.sigstore.json']!,
+          ).toString(),
+        );
+        value.artifacts['release-manifest.json'] = Buffer.from(
+          `${JSON.stringify(manifest, null, 2)}\n`,
+        );
+      },
+    ],
+  ];
+
+  for (const [name, mutate] of mutations) {
+    await t.test(name, () => {
+      const evidence = publishedEvidence();
+      mutate(evidence);
+      assert.throws(() =>
+        verifyPublishedApplicationRelease({
+          release: evidence.release,
+          tagCommit:
+            name === 'draft' ? 'd'.repeat(40) : sourceCommit,
+          artifacts: evidence.artifacts,
+        }),
+      );
+    });
   }
 });

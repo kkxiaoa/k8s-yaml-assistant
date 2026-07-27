@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -17,14 +18,17 @@ import {
 } from '../src/retrieval/index-store';
 import {
   RELEASE_INDEX_EMBEDDING_MODEL,
+  RELEASE_ARTIFACT_FILES,
   RELEASE_MANIFEST_SCHEMA_VERSION,
   assertBuildKitSlsaV1Provenance,
+  assertReleaseArtifactNames,
   decodeReleaseManifest,
   deriveIndexArtifactIdentity,
   resolveDraftReleaseIdentity,
   resolveReleasePreparation,
   resolveReleaseSourceState,
   verifyDraftRelease,
+  verifyPublishedApplicationRelease,
 } from '../src/release/manifest';
 
 type Options = Record<string, string>;
@@ -477,6 +481,27 @@ function verifyDraft(options: Options): void {
   );
 }
 
+function verifyPublished(options: Options): void {
+  const assetsDir = resolve(options['assets-dir']!);
+  const actualNames = readdirSync(assetsDir);
+  assertReleaseArtifactNames(actualNames);
+  const artifacts = Object.fromEntries(
+    RELEASE_ARTIFACT_FILES.map((name) => [
+      name,
+      readFileSync(resolve(assetsDir, name)),
+    ]),
+  );
+  const identity = verifyPublishedApplicationRelease({
+    release: readJson(options['release-json']!, jsonLimits.release),
+    tagCommit: options['tag-commit']!,
+    artifacts,
+  });
+  writeText(
+    resolve(options['identity-out']!),
+    `${JSON.stringify(identity, null, 2)}\n`,
+  );
+}
+
 function main(): void {
   const [command, ...args] = process.argv.slice(2);
   if (command === 'check' && args.length === 0) {
@@ -542,8 +567,19 @@ function main(): void {
     );
     return;
   }
+  if (command === 'verify-published') {
+    verifyPublished(
+      parseOptions(args, [
+        'release-json',
+        'assets-dir',
+        'tag-commit',
+        'identity-out',
+      ]),
+    );
+    return;
+  }
   throw new TypeError(
-    'usage: release-manifest <check|gate|prepare|index-identity|verify-index|finalize|verify-draft> [options]',
+    'usage: release-manifest <check|gate|prepare|index-identity|verify-index|finalize|verify-draft|verify-published> [options]',
   );
 }
 

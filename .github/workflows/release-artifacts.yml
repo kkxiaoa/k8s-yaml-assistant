@@ -31,12 +31,13 @@ jobs:
     permissions:
       # GitHub restricts draft release reads to identities with push access.
       contents: write
+      deployments: read
       packages: read
     outputs:
       index_digest: ${{ steps.index_artifact.outputs.digest }}
       embedding_model: ${{ steps.index.outputs.embedding_model }}
       release_notes_sha256: ${{ steps.release.outputs.release_notes_sha256 }}
-      current_production_digest: ${{ steps.release.outputs.current_production_digest }}
+      current_production_digest: ${{ steps.production.outputs.current_production_digest }}
     steps:
       - name: Checkout reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,6 +73,36 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Resolve current production deployment
+        id: production
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p candidate-state/deployment-statuses
+          gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/deployments?environment=production-private&per_page=100" \
+            > candidate-state/deployments.json
+          node -e '
+            const deployments = require("./candidate-state/deployments.json");
+            if (!Array.isArray(deployments) || deployments.length >= 100) {
+              throw new TypeError("deployment response must be a bounded array");
+            }
+            for (const deployment of deployments) {
+              if (!Number.isSafeInteger(deployment.id) || deployment.id <= 0) {
+                throw new TypeError("deployment id must be a positive safe integer");
+              }
+              console.log(deployment.id);
+            }
+          ' | while IFS= read -r DEPLOYMENT_ID; do
+            gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses?per_page=100" \
+              > "candidate-state/deployment-statuses/$DEPLOYMENT_ID.json"
+          done
+          npm run deployment:authorize -- current-production \
+            --deployments-json candidate-state/deployments.json \
+            --statuses-dir candidate-state/deployment-statuses \
+            --github-output "$GITHUB_OUTPUT"
+
       - name: Check reviewed release identity
         run: npm run release:manifest -- check
 
@@ -82,13 +113,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_VERSION: ${{ inputs.version }}
-          CURRENT_PRODUCTION_DIGEST: ${{ vars.CURRENT_PRODUCTION_DIGEST }}
         run: |
-          if [[ "$CURRENT_PRODUCTION_DIGEST" != "none" ]] &&
-             [[ ! "$CURRENT_PRODUCTION_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-            echo "CURRENT_PRODUCTION_DIGEST must be none or an image digest" >&2
-            exit 1
-          fi
           test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
           mkdir -p candidate-state release-artifacts
           gh release view "$RELEASE_TAG" \
@@ -98,7 +123,6 @@ jobs:
             --release-json candidate-state/draft-release.json \
             --source-sha "$SOURCE_SHA" \
             --github-output "$GITHUB_OUTPUT"
-          echo "current_production_digest=$CURRENT_PRODUCTION_DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Resolve required index identity
         id: index

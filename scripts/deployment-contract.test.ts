@@ -1,15 +1,458 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { loadAll } from 'js-yaml';
 import { z } from 'zod';
+import {
+  DEEPSEEK_ANSWER_MODEL,
+  VOYAGE_RERANK_MODEL,
+} from '../src/server/runtime-config';
+import { RELEASE_INDEX_EMBEDDING_MODEL } from '../src/release/manifest';
 
 const root = process.cwd();
 const k3sDir = join(root, 'deploy', 'k3s');
+const adapterDir = join(root, 'deploy', 'adapter');
+const kubernetesDir = join(root, 'deploy', 'k8s');
+const bootstrapDir = join(kubernetesDir, 'bootstrap');
+const applicationDir = join(kubernetesDir, 'app');
 const readmePath = join(k3sDir, 'README.md');
 const configPath = join(k3sDir, 'config.yaml');
 const admissionConfigPath = join(k3sDir, 'admission-config.yaml');
+const kubernetesReadmePath = join(kubernetesDir, 'README.md');
+const deploymentTemplatePath = join(
+  applicationDir,
+  'deployment-template.yaml',
+);
+const productionNamespace = 'k8s-yaml-assistant-prod';
+const applicationName = 'k8s-yaml-assistant';
+const observationClaimName = 'k8s-yaml-assistant-observation';
+const imageMarker = '__K8S_YAML_ASSISTANT_IMAGE__';
+const applicationImage = 'ghcr.io/kkxiaoa/k8s-yaml-assistant';
+const deepSeekSecretName = 'deepseek-runtime';
+const voyageSecretName = 'voyage-runtime';
+const imagePullSecretName = 'ghcr-pull';
+const bootstrapManifestPaths = [
+  'namespace.yaml',
+  'service-account.yaml',
+  'config-map.yaml',
+  'service.yaml',
+  'observation-pvc.yaml',
+  'network-policy.yaml',
+].map((name) => join(bootstrapDir, name));
+const expectedRuntimeConfig = {
+  DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
+  DEEPSEEK_ANSWER_MODEL,
+  VOYAGE_EMBEDDING_URL: 'https://api.voyageai.com/v1/embeddings',
+  VOYAGE_RERANK_URL: 'https://api.voyageai.com/v1/rerank',
+  VOYAGE_EMBEDDING_MODEL: RELEASE_INDEX_EMBEDDING_MODEL,
+  VOYAGE_RERANK_MODEL,
+  INDEX_DIR: '/app/data/index',
+  ENABLE_QUERY_EXPANSION: 'true',
+  ACCESS_MODE: 'private',
+  NODE_ENV: 'production',
+  PORT: '3000',
+  HOSTNAME: '0.0.0.0',
+  SERVING_OBSERVATION_MODE: 'local',
+  SERVING_OBSERVATION_SAMPLE_RATE: '1',
+  SERVING_OBSERVATION_MAX_FILE_BYTES: '16777216',
+  SERVING_OBSERVATION_MAX_TOTAL_BYTES: '268435456',
+  SERVING_OBSERVATION_RETENTION_DAYS: '7',
+  SERVING_OBSERVATION_MAX_INPUT_BYTES: '131072',
+  SERVING_OBSERVATION_MAX_TEXT_BYTES: '8192',
+} as const;
+const applicationMetadata = {
+  name: applicationName,
+  namespace: productionNamespace,
+} as const;
+const expectedNamespaceResource = {
+  apiVersion: 'v1',
+  kind: 'Namespace',
+  metadata: {
+    name: productionNamespace,
+    labels: {
+      'pod-security.kubernetes.io/enforce': 'restricted',
+      'pod-security.kubernetes.io/enforce-version': 'v1.36',
+      'pod-security.kubernetes.io/audit': 'restricted',
+      'pod-security.kubernetes.io/audit-version': 'v1.36',
+      'pod-security.kubernetes.io/warn': 'restricted',
+      'pod-security.kubernetes.io/warn-version': 'v1.36',
+    },
+  },
+} as const;
+const expectedServiceAccountResource = {
+  apiVersion: 'v1',
+  kind: 'ServiceAccount',
+  metadata: applicationMetadata,
+  automountServiceAccountToken: false,
+} as const;
+const expectedConfigMapResource = {
+  apiVersion: 'v1',
+  kind: 'ConfigMap',
+  metadata: applicationMetadata,
+  data: expectedRuntimeConfig,
+} as const;
+const expectedServiceResource = {
+  apiVersion: 'v1',
+  kind: 'Service',
+  metadata: applicationMetadata,
+  spec: {
+    type: 'ClusterIP',
+    selector: {
+      'app.kubernetes.io/name': applicationName,
+    },
+    ports: [
+      {
+        name: 'http',
+        protocol: 'TCP',
+        port: 80,
+        targetPort: 'http',
+        appProtocol: 'http',
+      },
+    ],
+  },
+} as const;
+const expectedObservationClaimResource = {
+  apiVersion: 'v1',
+  kind: 'PersistentVolumeClaim',
+  metadata: {
+    name: observationClaimName,
+    namespace: productionNamespace,
+  },
+  spec: {
+    accessModes: ['ReadWriteOnce'],
+    volumeMode: 'Filesystem',
+    storageClassName: 'local-path',
+    resources: {
+      requests: {
+        storage: '1Gi',
+      },
+    },
+  },
+} as const;
+const expectedNetworkPolicyResource = {
+  apiVersion: 'networking.k8s.io/v1',
+  kind: 'NetworkPolicy',
+  metadata: applicationMetadata,
+  spec: {
+    podSelector: {
+      matchLabels: {
+        'app.kubernetes.io/name': applicationName,
+      },
+    },
+    policyTypes: ['Ingress', 'Egress'],
+    ingress: [
+      {
+        from: [
+          {
+            namespaceSelector: {
+              matchLabels: {
+                'kubernetes.io/metadata.name': 'kube-system',
+              },
+            },
+            podSelector: {
+              matchLabels: {
+                'app.kubernetes.io/name': 'traefik',
+              },
+            },
+          },
+        ],
+        ports: [
+          {
+            protocol: 'TCP',
+            port: 3000,
+          },
+        ],
+      },
+    ],
+    egress: [
+      {
+        to: [
+          {
+            namespaceSelector: {
+              matchLabels: {
+                'kubernetes.io/metadata.name': 'kube-system',
+              },
+            },
+            podSelector: {
+              matchLabels: {
+                'k8s-app': 'kube-dns',
+              },
+            },
+          },
+        ],
+        ports: [
+          {
+            protocol: 'UDP',
+            port: 53,
+          },
+          {
+            protocol: 'TCP',
+            port: 53,
+          },
+        ],
+      },
+      {
+        to: [
+          {
+            ipBlock: {
+              cidr: '0.0.0.0/0',
+              except: [
+                '10.0.0.0/8',
+                '100.64.0.0/10',
+                '127.0.0.0/8',
+                '169.254.0.0/16',
+                '172.16.0.0/12',
+                '192.168.0.0/16',
+              ],
+            },
+          },
+        ],
+        ports: [
+          {
+            protocol: 'TCP',
+            port: 443,
+          },
+        ],
+      },
+    ],
+  },
+} as const;
+const expectedBootstrapResources = [
+  expectedNamespaceResource,
+  expectedServiceAccountResource,
+  expectedConfigMapResource,
+  expectedServiceResource,
+  expectedObservationClaimResource,
+  expectedNetworkPolicyResource,
+] as const;
+const expectedDeploymentResource = {
+  apiVersion: 'apps/v1',
+  kind: 'Deployment',
+  metadata: applicationMetadata,
+  spec: {
+    replicas: 1,
+    revisionHistoryLimit: 3,
+    minReadySeconds: 10,
+    progressDeadlineSeconds: 600,
+    strategy: {
+      type: 'RollingUpdate',
+      rollingUpdate: {
+        maxSurge: 0,
+        maxUnavailable: 1,
+      },
+    },
+    selector: {
+      matchLabels: {
+        'app.kubernetes.io/name': applicationName,
+      },
+    },
+    template: {
+      metadata: {
+        labels: {
+          'app.kubernetes.io/name': applicationName,
+        },
+      },
+      spec: {
+        serviceAccountName: applicationName,
+        automountServiceAccountToken: false,
+        enableServiceLinks: false,
+        terminationGracePeriodSeconds: 60,
+        imagePullSecrets: [
+          {
+            name: imagePullSecretName,
+          },
+        ],
+        securityContext: {
+          runAsNonRoot: true,
+          runAsUser: 10001,
+          runAsGroup: 10001,
+          fsGroup: 10001,
+          fsGroupChangePolicy: 'OnRootMismatch',
+          seccompProfile: {
+            type: 'RuntimeDefault',
+          },
+        },
+        containers: [
+          {
+            name: 'app',
+            image: imageMarker,
+            imagePullPolicy: 'IfNotPresent',
+            ports: [
+              {
+                name: 'http',
+                containerPort: 3000,
+                protocol: 'TCP',
+              },
+            ],
+            envFrom: [
+              {
+                configMapRef: {
+                  name: applicationName,
+                },
+              },
+            ],
+            env: [
+              {
+                name: 'DEEPSEEK_API_KEY',
+                valueFrom: {
+                  secretKeyRef: {
+                    name: deepSeekSecretName,
+                    key: 'api-key',
+                  },
+                },
+              },
+              {
+                name: 'VOYAGE_API_KEY',
+                valueFrom: {
+                  secretKeyRef: {
+                    name: voyageSecretName,
+                    key: 'api-key',
+                  },
+                },
+              },
+            ],
+            securityContext: {
+              allowPrivilegeEscalation: false,
+              readOnlyRootFilesystem: true,
+              capabilities: {
+                drop: ['ALL'],
+              },
+            },
+            resources: {
+              requests: {
+                cpu: '500m',
+                memory: '768Mi',
+                'ephemeral-storage': '256Mi',
+              },
+              limits: {
+                cpu: '2',
+                memory: '2Gi',
+                'ephemeral-storage': '1Gi',
+              },
+            },
+            startupProbe: {
+              httpGet: {
+                path: '/api/health/ready',
+                port: 'http',
+                scheme: 'HTTP',
+              },
+              periodSeconds: 5,
+              timeoutSeconds: 2,
+              failureThreshold: 60,
+              successThreshold: 1,
+            },
+            readinessProbe: {
+              httpGet: {
+                path: '/api/health/ready',
+                port: 'http',
+                scheme: 'HTTP',
+              },
+              periodSeconds: 10,
+              timeoutSeconds: 2,
+              failureThreshold: 3,
+              successThreshold: 1,
+            },
+            livenessProbe: {
+              httpGet: {
+                path: '/api/health/live',
+                port: 'http',
+                scheme: 'HTTP',
+              },
+              periodSeconds: 30,
+              timeoutSeconds: 2,
+              failureThreshold: 3,
+              successThreshold: 1,
+            },
+            volumeMounts: [
+              {
+                name: 'observations',
+                mountPath: '/app/data/observability',
+              },
+              {
+                name: 'tmp',
+                mountPath: '/tmp',
+              },
+            ],
+          },
+        ],
+        volumes: [
+          {
+            name: 'observations',
+            persistentVolumeClaim: {
+              claimName: observationClaimName,
+            },
+          },
+          {
+            name: 'tmp',
+            emptyDir: {
+              sizeLimit: '64Mi',
+            },
+          },
+        ],
+      },
+    },
+  },
+} as const;
+const adapterPath = join(adapterDir, 'k8s_yaml_assistant_deploy.py');
+const trustedRootPath = join(adapterDir, 'sigstore-trusted-root.json');
+const sudoersPath = join(
+  adapterDir,
+  'k8s-yaml-assistant-deploy.sudoers',
+);
+const runnerHardeningPath = join(
+  adapterDir,
+  'actions-runner-hardening.conf',
+);
+const runnerTmpfilesPath = join(
+  adapterDir,
+  'k8s-yaml-assistant-deployer.tmpfiles.conf',
+);
+
+const trustedRootSha256 =
+  '6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66';
+const trustedRootSize = 6_787;
+const installedTrustedRootPath =
+  '/etc/k8s-yaml-assistant-deployer/sigstore-trusted-root.json';
+const adapterCommand = '/usr/local/sbin/k8s-yaml-assistant-deploy';
+const runnerAccount = 'gha-k8s-yaml-prod';
+
+const expectedSudoersLines = [
+  `Defaults:${runnerAccount} env_reset, !setenv`,
+  `${runnerAccount} ALL=(root) NOPASSWD: ${adapterCommand} ""`,
+] as const;
+
+const expectedRunnerHardeningLines = [
+  '[Service]',
+  `User=${runnerAccount}`,
+  `Group=${runnerAccount}`,
+  'UMask=0077',
+  'ProtectSystem=strict',
+  'ProtectHome=true',
+  'PrivateTmp=true',
+  'PrivateDevices=true',
+  'ProtectKernelTunables=true',
+  'ProtectKernelModules=true',
+  'ProtectControlGroups=true',
+  'ProtectClock=true',
+  'ProtectHostname=true',
+  'LockPersonality=true',
+  'RestrictRealtime=true',
+  'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6',
+  'IPAddressDeny=169.254.0.0/16',
+  'ReadWritePaths=/var/lib/k8s-yaml-assistant-deployer /run/k8s-yaml-assistant-deployer',
+  'TemporaryFileSystem=/opt/actions-runner-k8s-yaml-prod/_work:rw,nosuid,nodev,noexec,size=128M,mode=0700,uid=996,gid=988',
+  'TemporaryFileSystem=/opt/actions-runner-k8s-yaml-prod/_diag:rw,nosuid,nodev,noexec,size=32M,mode=0700,uid=996,gid=988',
+  'NoNewPrivileges=false',
+  'MemoryMax=1G',
+  'CPUQuota=200%',
+  'TasksMax=256',
+] as const;
+
+const expectedRunnerTmpfilesLines = [
+  'd /run/k8s-yaml-assistant-deployer 0700 root root -',
+] as const;
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const HttpsUrlSchema = z.url().refine((value) => {
@@ -322,6 +765,150 @@ function assertNoPlaceholder(value: unknown, path = 'root'): void {
   }
 }
 
+type YamlRecord = Record<string, unknown>;
+
+function yamlRecord(value: unknown, label: string): YamlRecord {
+  assert.ok(
+    value !== null && typeof value === 'object' && !Array.isArray(value),
+    `${label} must be an object`,
+  );
+  return value as YamlRecord;
+}
+
+function yamlArray(value: unknown, label: string): unknown[] {
+  assert.ok(Array.isArray(value), `${label} must be an array`);
+  return value;
+}
+
+function nestedRecord(
+  parent: YamlRecord,
+  key: string,
+  label: string,
+): YamlRecord {
+  return yamlRecord(parent[key], `${label}.${key}`);
+}
+
+function resourceMetadata(resource: YamlRecord, label: string): YamlRecord {
+  return nestedRecord(resource, 'metadata', label);
+}
+
+function readKubernetesResource(path: string): {
+  source: string;
+  resource: YamlRecord;
+} {
+  const source = readFileSync(path, 'utf8');
+  return {
+    source,
+    resource: yamlRecord(parseSingleYaml(source, path), path),
+  };
+}
+
+function validateNamespace(resource: YamlRecord): void {
+  assert.deepEqual(resource, expectedNamespaceResource);
+}
+
+function validateServiceAccount(resource: YamlRecord): void {
+  assert.deepEqual(resource, expectedServiceAccountResource);
+}
+
+function validateConfigMap(resource: YamlRecord): void {
+  assert.deepEqual(resource, expectedConfigMapResource);
+}
+
+function validateService(resource: YamlRecord): void {
+  assert.deepEqual(resource, expectedServiceResource);
+}
+
+function validateObservationClaim(resource: YamlRecord): void {
+  assert.deepEqual(resource, expectedObservationClaimResource);
+}
+
+function validateNetworkPolicy(resource: YamlRecord): void {
+  assert.deepEqual(resource, expectedNetworkPolicyResource);
+}
+
+function validateDeploymentTemplate(
+  source: string,
+  resource: YamlRecord,
+): void {
+  assert.equal(source.split(imageMarker).length - 1, 1);
+  assert.deepEqual(resource, expectedDeploymentResource);
+
+  const rendered = source.replace(
+    imageMarker,
+    `${applicationImage}@sha256:${'a'.repeat(64)}`,
+  );
+  const renderedDeployment = yamlRecord(
+    parseSingleYaml(rendered, 'rendered deployment template'),
+    'rendered deployment template',
+  );
+  const renderedSpec = nestedRecord(
+    renderedDeployment,
+    'spec',
+    'rendered Deployment',
+  );
+  const renderedTemplate = nestedRecord(
+    renderedSpec,
+    'template',
+    'rendered Deployment.spec',
+  );
+  const renderedPodSpec = nestedRecord(
+    renderedTemplate,
+    'spec',
+    'rendered Deployment.template',
+  );
+  const renderedContainer = yamlRecord(
+    yamlArray(
+      renderedPodSpec.containers,
+      'rendered Deployment.containers',
+    )[0],
+    'rendered Deployment.container',
+  );
+  assert.match(
+    String(renderedContainer.image),
+    /^ghcr\.io\/kkxiaoa\/k8s-yaml-assistant@sha256:[a-f0-9]{64}$/u,
+  );
+}
+
+function validateBootstrapResources(resources: readonly YamlRecord[]): void {
+  assert.deepEqual(resources, expectedBootstrapResources);
+}
+
+function validateKubernetesReadme(source: string): void {
+  assert.ok(
+    source.startsWith(
+      '状态：Task 4（任务 4）已完成实施和 review（审核）；Task 5（任务 5）的生产 runner（运行器）已完成安装、注册和真实 systemd hardening（系统服务加固）验证，当前在线空闲并等待 review（审核）。\n' +
+        '用途：定义生产 Kubernetes（容器编排系统）固定非敏感资源、应用模板及其审核和回退边界。\n',
+    ),
+  );
+  for (const required of [
+    '仓库只固定引用且不保存 Secret（密钥）值',
+    '集群没有应用 Deployment/Pod/Ingress（工作负载 / 容器组 / 入口）',
+    'deepseek-runtime',
+    'voyage-runtime',
+    'ghcr-pull',
+    '`api-key`',
+    '`kubernetes.io/dockerconfigjson`',
+    '同一节点故障域',
+    'bootstrap（引导配置）',
+    '应用版本',
+    '入口资源',
+    '标准 NetworkPolicy（网络策略）不能按域名建立可靠 allowlist（允许名单）',
+    '--server-side --dry-run=server',
+    '--field-manager=k8s-yaml-assistant-bootstrap',
+    '上一份已审核的 bootstrap（引导配置）',
+  ]) {
+    assert.ok(source.includes(required), `Kubernetes README missing: ${required}`);
+  }
+  assert.doesNotMatch(source, /\bkubectl\s+delete\b/u);
+  assert.doesNotMatch(source, /--force-conflicts\b/u);
+  assert.doesNotMatch(
+    source,
+    /NetworkPolicy（网络策略）(?:已经|可以|能够|负责).*域名.*allowlist/u,
+  );
+  validateNoCredentialMaterial(source);
+}
+
 function validateChangePackage(value: unknown): ChangePackage {
   const parsed = ChangePackageSchema.parse(value);
   assertNoPlaceholder(parsed);
@@ -453,6 +1040,112 @@ function readActualBundle(): {
   };
 }
 
+function readActualKubernetesBundle(): {
+  bootstrapSources: string[];
+  bootstrapResources: YamlRecord[];
+  deploymentSource: string;
+  deployment: YamlRecord;
+  readme: string;
+} {
+  const bootstrap = bootstrapManifestPaths.map(readKubernetesResource);
+  const deployment = readKubernetesResource(deploymentTemplatePath);
+  return {
+    bootstrapSources: bootstrap.map((item) => item.source),
+    bootstrapResources: bootstrap.map((item) => item.resource),
+    deploymentSource: deployment.source,
+    deployment: deployment.resource,
+    readme: readFileSync(kubernetesReadmePath, 'utf8'),
+  };
+}
+
+function activeConfigLines(source: string): string[] {
+  return source
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+}
+
+function validateTrustedRoot(bytes: Buffer): void {
+  assert.equal(bytes.byteLength, trustedRootSize);
+  assert.equal(
+    createHash('sha256').update(bytes).digest('hex'),
+    trustedRootSha256,
+  );
+  const parsed: unknown = JSON.parse(bytes.toString('utf8'));
+  assert.ok(
+    parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed),
+    'Sigstore trusted root must be an object',
+  );
+  const trustedRoot = parsed as Record<string, unknown>;
+  assert.equal(
+    trustedRoot.mediaType,
+    'application/vnd.dev.sigstore.trustedroot+json;version=0.1',
+  );
+  assert.ok(
+    Array.isArray(trustedRoot.tlogs) && trustedRoot.tlogs.length > 0,
+  );
+  assert.ok(
+    Array.isArray(trustedRoot.certificateAuthorities) &&
+      trustedRoot.certificateAuthorities.length > 0,
+  );
+  assert.ok(
+    Array.isArray(trustedRoot.ctlogs) && trustedRoot.ctlogs.length > 0,
+  );
+  assert.ok(
+    Array.isArray(trustedRoot.timestampAuthorities) &&
+      trustedRoot.timestampAuthorities.length > 0,
+  );
+}
+
+function validateSudoers(source: string): void {
+  assert.deepEqual(activeConfigLines(source), [...expectedSudoersLines]);
+}
+
+function validateRunnerHardening(source: string): void {
+  assert.deepEqual(activeConfigLines(source), [
+    ...expectedRunnerHardeningLines,
+  ]);
+}
+
+function validateRunnerTmpfiles(source: string): void {
+  assert.deepEqual(activeConfigLines(source), [
+    ...expectedRunnerTmpfilesLines,
+  ]);
+}
+
+function validateNoCredentialMaterial(source: string): void {
+  assert.doesNotMatch(
+    source,
+    /-----BEGIN (?:EC |OPENSSH |RSA )?PRIVATE KEY-----/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /\b(?:certificate-authority|client-certificate|client-key)-data\s*:/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /\bACTIONS_RUNNER_INPUT_TOKEN\s*[:=]\s*[^\s$]/u,
+  );
+  assert.doesNotMatch(
+    source,
+    /^[ \t]*(?:DEEPSEEK|VOYAGE)_API_KEY[ \t]*[:=][ \t]*(?!\$\{\{[ \t]*secrets\.)(?!["']?\$\(cat[ \t]+\/run\/secrets\/)\S+/mu,
+  );
+  assert.doesNotMatch(
+    source,
+    /\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b/u,
+  );
+}
+
+function filesUnder(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return filesUnder(path);
+      return entry.isFile() ? [path] : [];
+    })
+    .sort();
+}
+
 test('the checked-in K3s change package satisfies the deployment contract', () => {
   const actual = readActualBundle();
   const changePackage = validateChangePackage(actual.changePackage);
@@ -492,6 +1185,212 @@ test('missing fixed release identity or installer checksum fails', async (t) => 
     const serverToken = backup.serverToken as Record<string, unknown>;
     serverToken.backupSet = 'CHANGE_ME';
     assert.throws(() => validateChangePackage(candidate));
+  });
+});
+
+test('the deployment adapter privilege boundary is fixed and credential-free', () => {
+  const trustedRoot = readFileSync(trustedRootPath);
+  validateTrustedRoot(trustedRoot);
+
+  const deploymentFiles = filesUnder(join(root, 'deploy'));
+  const matchingTrustedRoots = deploymentFiles.filter((path) => {
+    if (path === trustedRootPath) return true;
+    if (!path.endsWith('.json')) return false;
+    const bytes = readFileSync(path);
+    return (
+      createHash('sha256').update(bytes).digest('hex') ===
+      trustedRootSha256
+    );
+  });
+  assert.deepEqual(
+    matchingTrustedRoots,
+    [trustedRootPath],
+  );
+
+  const adapter = readFileSync(adapterPath, 'utf8');
+  assert.equal(
+    adapter.split(installedTrustedRootPath).length - 1,
+    1,
+  );
+
+  const sudoers = readFileSync(sudoersPath, 'utf8');
+  const hardening = readFileSync(runnerHardeningPath, 'utf8');
+  const tmpfiles = readFileSync(runnerTmpfilesPath, 'utf8');
+  validateSudoers(sudoers);
+  validateRunnerHardening(hardening);
+  validateRunnerTmpfiles(tmpfiles);
+  validateNoCredentialMaterial(
+    `${adapter}\n${sudoers}\n${hardening}\n${tmpfiles}`,
+  );
+
+  const explicitlyValidated = new Set([
+    adapterPath,
+    sudoersPath,
+    runnerHardeningPath,
+    runnerTmpfilesPath,
+    trustedRootPath,
+  ]);
+  for (const path of deploymentFiles) {
+    if (
+      explicitlyValidated.has(path) ||
+      path.endsWith('.test.ts') ||
+      path.endsWith('.test.py') ||
+      path.split('/').at(-1)?.startsWith('test_')
+    ) {
+      continue;
+    }
+    const bytes = readFileSync(path);
+    if (bytes.includes(0)) continue;
+    validateNoCredentialMaterial(bytes.toString('utf8'));
+  }
+});
+
+test('unsafe deployment privilege boundary mutations fail', async (t) => {
+  const trustedRoot = readFileSync(trustedRootPath);
+  const sudoers = `${expectedSudoersLines.join('\n')}\n`;
+  const hardening = `${expectedRunnerHardeningLines.join('\n')}\n`;
+  const tmpfiles = `${expectedRunnerTmpfilesLines.join('\n')}\n`;
+
+  await t.test('truncated trusted root', () => {
+    assert.throws(() =>
+      validateTrustedRoot(trustedRoot.subarray(0, -1)),
+    );
+  });
+
+  await t.test('trusted root digest drift', () => {
+    const candidate = Buffer.from(trustedRoot);
+    const index = candidate.length - 2;
+    candidate[index] = candidate[index]! ^ 1;
+    assert.throws(() => validateTrustedRoot(candidate));
+  });
+
+  for (const [name, mutate] of [
+    ['sudo wildcard', (source: string) => source.replace(' ""', ' *')],
+    [
+      'sudo environment preservation',
+      (source: string) => `${source}Defaults:${runnerAccount} env_keep += "PATH"\n`,
+    ],
+    [
+      'alternate root command',
+      (source: string) => `${source}${runnerAccount} ALL=(root) NOPASSWD: /usr/bin/python3\n`,
+    ],
+  ] as const) {
+    await t.test(name, () => {
+      assert.throws(() => validateSudoers(mutate(sudoers)));
+    });
+  }
+
+  for (const [name, mutate] of [
+    [
+      'missing private account',
+      (source: string) => source.replace(`User=${runnerAccount}\n`, ''),
+    ],
+    [
+      'writable installation root',
+      (source: string) =>
+        source.replace(
+          'ReadWritePaths=/var/lib/k8s-yaml-assistant-deployer',
+          'ReadWritePaths=/opt /var/lib/k8s-yaml-assistant-deployer',
+        ),
+    ],
+    [
+      'host work paths shadow bounded tmpfs mounts',
+      (source: string) =>
+        source.replace(
+          'ReadWritePaths=/var/lib/k8s-yaml-assistant-deployer',
+          'ReadWritePaths=/opt/actions-runner-k8s-yaml-prod/_work /opt/actions-runner-k8s-yaml-prod/_diag /var/lib/k8s-yaml-assistant-deployer',
+        ),
+    ],
+    [
+      'missing metadata denial',
+      (source: string) =>
+        source.replace('IPAddressDeny=169.254.0.0/16\n', ''),
+    ],
+    [
+      'runtime directory delegated to the runner account',
+      (source: string) =>
+        `${source}RuntimeDirectory=k8s-yaml-assistant-deployer\n`,
+    ],
+    [
+      'privilege escalation disabled',
+      (source: string) =>
+        source.replace(
+          'NoNewPrivileges=false',
+          'NoNewPrivileges=true',
+        ),
+    ],
+    [
+      'runner joins an administrative group',
+      (source: string) => `${source}SupplementaryGroups=docker k3s\n`,
+    ],
+    [
+      'unbounded memory',
+      (source: string) => source.replace('MemoryMax=1G\n', ''),
+    ],
+    [
+      'unbounded work directory',
+      (source: string) =>
+        source.replace(
+          'size=128M,mode=0700',
+          'mode=0700',
+        ),
+    ],
+    [
+      'runner tmpfs ownership is omitted',
+      (source: string) => source.replace(',uid=996,gid=988', ''),
+    ],
+  ] as const) {
+    await t.test(name, () => {
+      assert.throws(() => validateRunnerHardening(mutate(hardening)));
+    });
+  }
+
+  for (const [name, mutate] of [
+    [
+      'runtime directory owned by the runner',
+      (source: string) =>
+        source.replace('root root', `${runnerAccount} ${runnerAccount}`),
+    ],
+    [
+      'runtime directory mode is broadened',
+      (source: string) => source.replace('0700', '0755'),
+    ],
+    [
+      'runtime directory scope is broadened',
+      (source: string) =>
+        source.replace(
+          '/run/k8s-yaml-assistant-deployer',
+          '/run',
+        ),
+    ],
+  ] as const) {
+    await t.test(name, () => {
+      assert.throws(() => validateRunnerTmpfiles(mutate(tmpfiles)));
+    });
+  }
+
+  await t.test('embedded kubeconfig', () => {
+    assert.throws(() =>
+      validateNoCredentialMaterial(
+        'client-key-data: cHJpdmF0ZS1rZXk=',
+      ),
+    );
+  });
+
+  await t.test('embedded runner token', () => {
+    assert.throws(() =>
+      validateNoCredentialMaterial(
+        'ACTIONS_RUNNER_INPUT_TOKEN=credential-value',
+      ),
+    );
+  });
+
+  await t.test('embedded access token', () => {
+    assert.throws(() =>
+      validateNoCredentialMaterial(
+        'TOKEN=ghp_0123456789abcdefghijklmnop',
+      ),
+    );
   });
 });
 
@@ -648,5 +1547,272 @@ test('implemented recovery evidence must remain separated and administrator-read
     const serverToken = backup.serverToken as Record<string, unknown>;
     serverToken.objectKey = database.objectKey;
     assert.throws(() => validateChangePackage(candidate));
+  });
+});
+
+test('the checked-in Kubernetes resources satisfy the private bootstrap contract', () => {
+  const actual = readActualKubernetesBundle();
+  validateBootstrapResources(actual.bootstrapResources);
+  validateDeploymentTemplate(actual.deploymentSource, actual.deployment);
+  validateKubernetesReadme(actual.readme);
+
+  const expectedManifestFiles = [
+    ...bootstrapManifestPaths,
+    deploymentTemplatePath,
+  ]
+    .sort();
+  const actualManifestFiles = filesUnder(kubernetesDir)
+    .filter((path) => /\.ya?ml$/u.test(path))
+    .sort();
+  assert.deepEqual(actualManifestFiles, expectedManifestFiles);
+
+  const allManifestSource = [
+    ...actual.bootstrapSources,
+    actual.deploymentSource,
+  ].join('\n');
+  assert.doesNotMatch(allManifestSource, /\bnamespace:\s*default\b/u);
+  assert.doesNotMatch(
+    allManifestSource,
+    /^kind:\s*(?:Secret|Role|RoleBinding|ClusterRole|ClusterRoleBinding|Ingress)\s*$/mu,
+  );
+  validateNoCredentialMaterial(allManifestSource);
+});
+
+test('unsafe Kubernetes bootstrap mutations fail', async (t) => {
+  const actual = readActualKubernetesBundle();
+
+  await t.test('namespace loses restricted enforcement', () => {
+    const candidate = structuredClone(actual.bootstrapResources[0]!);
+    const labels = nestedRecord(
+      resourceMetadata(candidate, 'Namespace'),
+      'labels',
+      'Namespace.metadata',
+    );
+    delete labels['pod-security.kubernetes.io/enforce'];
+    assert.throws(() => validateNamespace(candidate));
+  });
+
+  await t.test('resource falls back to the default namespace', () => {
+    const candidate = structuredClone(actual.bootstrapResources);
+    resourceMetadata(candidate[1]!, 'ServiceAccount').namespace = 'default';
+    assert.throws(() => validateBootstrapResources(candidate));
+  });
+
+  await t.test('service account mounts its API token', () => {
+    const candidate = structuredClone(actual.bootstrapResources[1]!);
+    candidate.automountServiceAccountToken = true;
+    assert.throws(() => validateServiceAccount(candidate));
+  });
+
+  await t.test('bootstrap adds an RBAC binding', () => {
+    const candidate = structuredClone(actual.bootstrapResources);
+    candidate.push({
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'RoleBinding',
+      metadata: {
+        name: applicationName,
+        namespace: productionNamespace,
+      },
+    });
+    assert.throws(() => validateBootstrapResources(candidate));
+  });
+
+  await t.test('service becomes a NodePort', () => {
+    const candidate = structuredClone(actual.bootstrapResources[3]!);
+    nestedRecord(candidate, 'spec', 'Service').type = 'NodePort';
+    assert.throws(() => validateService(candidate));
+  });
+
+  await t.test('observation claim is broadened', () => {
+    const candidate = structuredClone(actual.bootstrapResources[4]!);
+    const spec = nestedRecord(
+      candidate,
+      'spec',
+      'PersistentVolumeClaim',
+    );
+    const resources = nestedRecord(
+      spec,
+      'resources',
+      'PersistentVolumeClaim.spec',
+    );
+    nestedRecord(
+      resources,
+      'requests',
+      'PersistentVolumeClaim.spec.resources',
+    ).storage = '10Gi';
+    assert.throws(() => validateObservationClaim(candidate));
+  });
+
+  await t.test('network policy drops DNS egress', () => {
+    const candidate = structuredClone(actual.bootstrapResources[5]!);
+    nestedRecord(candidate, 'spec', 'NetworkPolicy').egress = [
+      {
+        ports: [{ protocol: 'TCP', port: 443 }],
+      },
+    ];
+    assert.throws(() => validateNetworkPolicy(candidate));
+  });
+
+  await t.test('network policy drops HTTPS egress', () => {
+    const candidate = structuredClone(actual.bootstrapResources[5]!);
+    const spec = nestedRecord(candidate, 'spec', 'NetworkPolicy');
+    spec.egress = yamlArray(
+      spec.egress,
+      'NetworkPolicy.spec.egress',
+    ).slice(0, 1);
+    assert.throws(() => validateNetworkPolicy(candidate));
+  });
+
+  await t.test('config map contains a model credential', () => {
+    const candidate = structuredClone(actual.bootstrapResources[2]!);
+    nestedRecord(candidate, 'data', 'ConfigMap').VOYAGE_API_KEY =
+      'credential-material';
+    assert.throws(() => validateConfigMap(candidate));
+  });
+
+  await t.test('config map enables portfolio access', () => {
+    const candidate = structuredClone(actual.bootstrapResources[2]!);
+    nestedRecord(candidate, 'data', 'ConfigMap').ACCESS_MODE = 'portfolio';
+    assert.throws(() => validateConfigMap(candidate));
+  });
+
+  await t.test('config map omits observation retention', () => {
+    const candidate = structuredClone(actual.bootstrapResources[2]!);
+    delete nestedRecord(candidate, 'data', 'ConfigMap')
+      .SERVING_OBSERVATION_RETENTION_DAYS;
+    assert.throws(() => validateConfigMap(candidate));
+  });
+});
+
+test('unsafe Kubernetes deployment template mutations fail', async (t) => {
+  const actual = readActualKubernetesBundle();
+
+  function deploymentParts(candidate: YamlRecord): {
+    spec: YamlRecord;
+    podSpec: YamlRecord;
+    container: YamlRecord;
+  } {
+    const spec = nestedRecord(candidate, 'spec', 'Deployment');
+    const template = nestedRecord(spec, 'template', 'Deployment.spec');
+    const podSpec = nestedRecord(
+      template,
+      'spec',
+      'Deployment.template',
+    );
+    const container = yamlRecord(
+      yamlArray(
+        podSpec.containers,
+        'Deployment.template.spec.containers',
+      )[0],
+      'Deployment.container',
+    );
+    return { spec, podSpec, container };
+  }
+
+  for (const [name, mutate] of [
+    [
+      'multiple replicas',
+      ({ spec }: ReturnType<typeof deploymentParts>) => {
+        spec.replicas = 2;
+      },
+    ],
+    [
+      'surge update',
+      ({ spec }: ReturnType<typeof deploymentParts>) => {
+        nestedRecord(spec, 'strategy', 'Deployment.spec').rollingUpdate = {
+          maxSurge: 1,
+          maxUnavailable: 0,
+        };
+      },
+    ],
+    [
+      'mutable image tag',
+      ({ container }: ReturnType<typeof deploymentParts>) => {
+        container.image = `${applicationImage}:latest`;
+      },
+    ],
+    [
+      'writable root filesystem',
+      ({ container }: ReturnType<typeof deploymentParts>) => {
+        nestedRecord(
+          container,
+          'securityContext',
+          'Deployment.container',
+        ).readOnlyRootFilesystem = false;
+      },
+    ],
+    [
+      'missing liveness probe',
+      ({ container }: ReturnType<typeof deploymentParts>) => {
+        delete container.livenessProbe;
+      },
+    ],
+    [
+      'unbounded temporary volume',
+      ({ podSpec }: ReturnType<typeof deploymentParts>) => {
+        const volumes = yamlArray(
+          podSpec.volumes,
+          'Deployment.template.spec.volumes',
+        );
+        yamlRecord(volumes[1], 'Deployment.tmpVolume').emptyDir = {};
+      },
+    ],
+    [
+      'index mounted from a writable volume',
+      ({ container }: ReturnType<typeof deploymentParts>) => {
+        const mounts = yamlArray(
+          container.volumeMounts,
+          'Deployment.container.volumeMounts',
+        );
+        mounts.push({
+          name: 'observations',
+          mountPath: '/app/data/index',
+        });
+      },
+    ],
+    [
+      'second observation writer',
+      ({ podSpec }: ReturnType<typeof deploymentParts>) => {
+        const containers = yamlArray(
+          podSpec.containers,
+          'Deployment.template.spec.containers',
+        );
+        containers.push({
+          name: 'sidecar',
+          image: imageMarker,
+          volumeMounts: [
+            {
+              name: 'observations',
+              mountPath: '/app/data/observability',
+            },
+          ],
+        });
+      },
+    ],
+  ] as const) {
+    await t.test(name, () => {
+      const candidate = structuredClone(actual.deployment);
+      mutate(deploymentParts(candidate));
+      assert.throws(() =>
+        validateDeploymentTemplate(actual.deploymentSource, candidate),
+      );
+    });
+  }
+
+  await t.test('duplicate image marker', () => {
+    assert.throws(() =>
+      validateDeploymentTemplate(
+        `${actual.deploymentSource}\n${imageMarker}\n`,
+        actual.deployment,
+      ),
+    );
+  });
+
+  await t.test('documentation claims domain allowlisting', () => {
+    const candidate = actual.readme.replace(
+      '标准 NetworkPolicy（网络策略）不能按域名建立可靠 allowlist（允许名单）',
+      '标准 NetworkPolicy（网络策略）已经实现域名 allowlist（允许名单）',
+    );
+    assert.throws(() => validateKubernetesReadme(candidate));
   });
 });

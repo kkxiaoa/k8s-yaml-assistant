@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { TextDecoder } from 'node:util';
 import { z } from 'zod';
 import {
   KNOWLEDGE_IDENTITY_VERSION,
@@ -17,11 +18,19 @@ export const RELEASE_ARTIFACT_FILES = [
   'provenance-attestation.sigstore.json',
   'release-manifest.sigstore.json',
 ] as const;
+type ReleaseArtifactFile = (typeof RELEASE_ARTIFACT_FILES)[number];
+type ReleaseArtifacts = Readonly<
+  Record<ReleaseArtifactFile, Uint8Array>
+>;
 export const RELEASE_MANIFEST_SCHEMA_VERSION = 2 as const;
 export const RELEASE_INDEX_EMBEDDING_MODEL = 'voyage-3' as const;
+export const DEPLOYMENT_REQUEST_MAX_BYTES = 64 * 1024;
+export const DEPLOYMENT_AUTHORIZATION_MAX_EMBEDDED_BYTES = 2 * 1024;
+export const DEPLOYMENT_AUTHORIZATION_BUNDLE_MAX_EMBEDDED_BYTES = 28 * 1024;
+export const DEPLOYMENT_PROVENANCE_BUNDLE_MAX_EMBEDDED_BYTES = 32 * 1024;
 
-const REPOSITORY = 'kkxiaoa/k8s-yaml-assistant';
-const IMAGE_NAME = `ghcr.io/${REPOSITORY}`;
+export const REPOSITORY = 'kkxiaoa/k8s-yaml-assistant';
+export const IMAGE_NAME = `ghcr.io/${REPOSITORY}`;
 export const INDEX_ARTIFACT_IMAGE = `${IMAGE_NAME}-index`;
 const RELEASE_ARTIFACTS_WORKFLOW =
   '.github/workflows/release-artifacts.yml';
@@ -32,7 +41,8 @@ const INDEX_WORKFLOW_REF = `${REPOSITORY}/${INDEX_WORKFLOW}@refs/heads/main`;
 const COSIGN_CERTIFICATE_IDENTITY =
   `https://github.com/${RELEASE_ARTIFACTS_WORKFLOW_REF}`;
 const INDEX_CERTIFICATE_IDENTITY = `https://github.com/${INDEX_WORKFLOW_REF}`;
-const GITHUB_OIDC_ISSUER = 'https://token.actions.githubusercontent.com';
+const GITHUB_OIDC_ISSUER =
+  'https://token.actions.githubusercontent.com';
 const RELEASE_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const RELEASE_TAG_PATTERN =
@@ -62,6 +72,19 @@ const NonEmptyStringSchema = z
   .refine((value) => value.trim() === value, {
     message: 'must be trimmed',
   });
+
+export function assertReleaseArtifactNames(names: readonly string[]): void {
+  const actual = [...names].sort();
+  const expected = [...RELEASE_ARTIFACT_FILES].sort();
+  if (
+    actual.length !== expected.length ||
+    actual.some((name, index) => name !== expected[index])
+  ) {
+    throw new TypeError(
+      'release evidence must contain exactly six artifacts',
+    );
+  }
+}
 
 const PackageJsonSchema = z.object({
   name: z.literal('k8s-yaml-assistant'),
@@ -128,7 +151,7 @@ interface MarkdownSection {
   endLine: number;
 }
 
-function sha256(value: string): string {
+function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
@@ -769,20 +792,273 @@ export function verifyDraftRelease(
     throw new TypeError('draft release notes changed after candidate review');
   }
 
-  const assetNames = release.assets.map((asset) => asset.name);
-  const expectedAssets = [...RELEASE_ARTIFACT_FILES];
-  if (
-    new Set(assetNames).size !== assetNames.length ||
-    assetNames.length !== expectedAssets.length ||
-    [...assetNames].sort().join('\n') !== expectedAssets.sort().join('\n')
-  ) {
-    throw new TypeError('draft release must contain exactly six evidence files');
-  }
+  assertReleaseArtifactNames(release.assets.map((asset) => asset.name));
 
   return {
     ...identity,
     isDraft: true,
     isPrerelease: false,
     assets: RELEASE_ARTIFACT_FILES.map((name) => ({ name })),
+  };
+}
+
+const PublishedReleaseSchema = z.strictObject({
+  databaseId: z.number().int().positive().safe(),
+  tagName: z.string().regex(RELEASE_TAG_PATTERN),
+  targetCommitish: CommitSchema,
+  isDraft: z.literal(false),
+  isPrerelease: z.literal(false),
+  publishedAt: z.iso.datetime({ offset: false }),
+  body: z.string(),
+  assets: z.array(
+    z.strictObject({
+      name: z.string().min(1),
+    }),
+  ),
+});
+
+const BuildKitProvenanceStatementSchema = z.object({
+  _type: z.literal('https://in-toto.io/Statement/v0.1'),
+  subject: z
+    .array(
+      z.object({
+        name: z.literal(IMAGE_NAME),
+        digest: z.object({
+          sha256: Sha256Schema,
+        }),
+      }),
+    )
+    .length(1),
+  predicateType: z.literal(SLSA_PREDICATE),
+  predicate: z.object({
+    buildDefinition: z.object({
+      buildType: z.literal(BUILDKIT_SLSA_V1_BUILD_TYPE),
+      externalParameters: z.object({
+        configSource: z.object({
+          path: z.literal('Dockerfile'),
+        }),
+        request: z.object({
+          args: z.object({
+            target: z.literal('runtime'),
+          }),
+          root: z.object({
+            configSource: z.object({
+              request: z.object({
+                args: z.object({
+                  'vcs:source': z.literal(`https://github.com/${REPOSITORY}`),
+                  'vcs:revision': CommitSchema,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+
+const ProvenanceBundleSchema = z.object({
+  mediaType: z.literal(
+    'application/vnd.dev.sigstore.bundle.v0.3+json',
+  ),
+  dsseEnvelope: z.object({
+    payloadType: z.literal('application/vnd.in-toto+json'),
+    payload: z.string().min(1),
+  }),
+});
+
+const publishedArtifactLimits: Readonly<
+  Record<ReleaseArtifactFile, number>
+> = {
+  'sbom.spdx.json': 50 * 1024 * 1024,
+  'provenance.slsa.json': 2 * 1024 * 1024,
+  'release-manifest.json': 2 * 1024 * 1024,
+  'sbom-attestation.sigstore.json': 60 * 1024 * 1024,
+  'provenance-attestation.sigstore.json':
+    DEPLOYMENT_PROVENANCE_BUNDLE_MAX_EMBEDDED_BYTES,
+  'release-manifest.sigstore.json': 2 * 1024 * 1024,
+};
+
+function decodeUtf8Json(
+  value: Uint8Array,
+  label: string,
+  maxEmbeddedBytes?: number,
+): unknown {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(value);
+  } catch {
+    throw new TypeError(`${label} must contain UTF-8`);
+  }
+  if (
+    maxEmbeddedBytes !== undefined &&
+    Buffer.byteLength(JSON.stringify(text)) > maxEmbeddedBytes
+  ) {
+    throw new TypeError(`${label} exceeds its deployment request budget`);
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new TypeError(`${label} must contain valid JSON`);
+  }
+}
+
+function publishedArtifacts(
+  input: Readonly<Record<string, unknown>>,
+): ReleaseArtifacts {
+  return Object.fromEntries(
+    RELEASE_ARTIFACT_FILES.map((name) => {
+      const artifact = input[name];
+      if (!(artifact instanceof Uint8Array)) {
+        throw new TypeError(`${name} must contain bytes`);
+      }
+      if (
+        artifact.byteLength === 0 ||
+        artifact.byteLength > publishedArtifactLimits[name]
+      ) {
+        throw new TypeError(`${name} exceeds its artifact size boundary`);
+      }
+      return [name, artifact];
+    }),
+  ) as Record<ReleaseArtifactFile, Uint8Array>;
+}
+
+function resolveBuildKitProvenance(
+  bundleBytes: Uint8Array,
+): {
+  sourceCommit: string;
+  imageDigest: string;
+} {
+  const bundle = ProvenanceBundleSchema.parse(
+    decodeUtf8Json(
+      bundleBytes,
+      'provenance bundle',
+      DEPLOYMENT_PROVENANCE_BUNDLE_MAX_EMBEDDED_BYTES,
+    ),
+  );
+  const payload = bundle.dsseEnvelope.payload;
+  if (
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+      payload,
+    )
+  ) {
+    throw new TypeError('provenance statement must use canonical Base64');
+  }
+  const statementBytes = Buffer.from(payload, 'base64');
+  if (statementBytes.toString('base64') !== payload) {
+    throw new TypeError('provenance statement must use canonical Base64');
+  }
+  const statement = BuildKitProvenanceStatementSchema.parse(
+    decodeUtf8Json(statementBytes, 'provenance statement'),
+  );
+  return {
+    sourceCommit:
+      statement.predicate.buildDefinition.externalParameters.request.root
+        .configSource.request.args['vcs:revision'],
+    imageDigest: `sha256:${statement.subject[0]!.digest.sha256}`,
+  };
+}
+
+interface VerifyPublishedApplicationReleaseInput {
+  release: unknown;
+  tagCommit: string;
+  artifacts: Readonly<Record<string, unknown>>;
+}
+
+interface PublishedApplicationReleaseIdentity {
+  releaseId: string;
+  releaseTag: string;
+  sourceCommit: string;
+  publishedAt: string;
+  imageName: typeof IMAGE_NAME;
+  imageDigest: string;
+  provenanceBundleSha256: string;
+}
+
+export function verifyPublishedApplicationRelease(
+  input: VerifyPublishedApplicationReleaseInput,
+): PublishedApplicationReleaseIdentity {
+  const release = PublishedReleaseSchema.parse(input.release);
+  const tagCommit = CommitSchema.parse(input.tagCommit);
+  const artifacts = publishedArtifacts(input.artifacts);
+  assertReleaseArtifactNames(release.assets.map((asset) => asset.name));
+  const manifest = decodeReleaseManifest(
+    decodeUtf8Json(
+      artifacts['release-manifest.json'],
+      'release manifest',
+    ),
+  );
+  if (
+    release.tagName !== manifest.release.tag ||
+    release.targetCommitish !== manifest.release.sourceCommit ||
+    tagCommit !== manifest.release.sourceCommit ||
+    releaseNotesSha256(release.body) !==
+      manifest.release.releaseNotesSha256
+  ) {
+    throw new TypeError(
+      'published release tag, commit or notes do not match the manifest',
+    );
+  }
+  const provenanceBundleSha256 = sha256(
+    artifacts['provenance-attestation.sigstore.json'],
+  );
+  const expectedHashes: ReadonlyArray<
+    readonly [
+      ReleaseArtifactFile,
+      string,
+      string,
+    ]
+  > = [
+    [
+      'sbom.spdx.json',
+      manifest.sbom.sha256,
+      sha256(artifacts['sbom.spdx.json']),
+    ],
+    [
+      'provenance.slsa.json',
+      manifest.provenance.sha256,
+      sha256(artifacts['provenance.slsa.json']),
+    ],
+    [
+      'sbom-attestation.sigstore.json',
+      manifest.attestations.sbom.bundleSha256,
+      sha256(artifacts['sbom-attestation.sigstore.json']),
+    ],
+    [
+      'provenance-attestation.sigstore.json',
+      manifest.attestations.provenance.bundleSha256,
+      provenanceBundleSha256,
+    ],
+  ];
+  for (const [name, expected, actual] of expectedHashes) {
+    if (actual !== expected) {
+      throw new TypeError(`${name} does not match the release manifest`);
+    }
+  }
+  assertBuildKitSlsaV1Provenance(
+    decodeUtf8Json(
+      artifacts['provenance.slsa.json'],
+      'SLSA provenance',
+    ),
+  );
+  const provenance = resolveBuildKitProvenance(
+    artifacts['provenance-attestation.sigstore.json'],
+  );
+  if (
+    provenance.sourceCommit !== manifest.release.sourceCommit ||
+    provenance.imageDigest !== manifest.image.digest
+  ) {
+    throw new TypeError(
+      'provenance source or subject does not match the release manifest',
+    );
+  }
+  return {
+    releaseId: String(release.databaseId),
+    releaseTag: release.tagName,
+    sourceCommit: manifest.release.sourceCommit,
+    publishedAt: release.publishedAt,
+    imageName: manifest.image.name,
+    imageDigest: manifest.image.digest,
+    provenanceBundleSha256,
   };
 }
