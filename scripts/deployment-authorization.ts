@@ -219,10 +219,8 @@ function normalizeHistory(
   deploymentsValue: unknown,
   statusesDir: string,
 ): unknown[] {
-  if (!Array.isArray(deploymentsValue) || deploymentsValue.length >= 100) {
-    throw new TypeError(
-      'GitHub deployment history must be a non-truncated array below 100',
-    );
+  if (!Array.isArray(deploymentsValue)) {
+    throw new TypeError('GitHub deployment history must be an array');
   }
   return deploymentsValue.map((candidate, index) => {
     const deployment = object(candidate, `deployment ${index}`);
@@ -232,10 +230,8 @@ function normalizeHistory(
       textLimits.github,
       `deployment ${id} statuses`,
     );
-    if (!Array.isArray(statusesValue) || statusesValue.length >= 100) {
-      throw new TypeError(
-        `deployment ${id} statuses must be a non-truncated array below 100`,
-      );
+    if (!Array.isArray(statusesValue)) {
+      throw new TypeError(`deployment ${id} statuses must be an array`);
     }
     return {
       deployment: {

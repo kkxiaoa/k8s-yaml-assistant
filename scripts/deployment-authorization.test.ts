@@ -256,51 +256,51 @@ test('current-production command strictly joins GitHub deployments and statuses'
   const statusesDir = join(directory, 'statuses');
   const outputPath = join(directory, 'github-output');
   mkdirSync(statusesDir);
+  const deployments = Array.from({ length: 101 }, (_, index) => ({
+    id: index + 10,
+    ref: sourceCommit,
+    sha: sourceCommit,
+    task: 'deploy',
+    environment: 'production-private',
+    repository_url:
+      'https://api.github.com/repos/kkxiaoa/k8s-yaml-assistant',
+    transient_environment: false,
+    production_environment: true,
+    created_at: '2026-07-27T08:00:00Z',
+    payload: {
+      schemaVersion: 1,
+      repository: 'kkxiaoa/k8s-yaml-assistant',
+      environment: 'production-private',
+      action: 'deploy',
+      releaseId: '123',
+      releaseTag: 'v0.1.0',
+      releaseCommit: sourceCommit,
+      sourceCommit,
+      imageDigest,
+      workflowRunId: '456',
+      workflowRunAttempt: '1',
+    },
+  }));
   writeFileSync(
     deploymentsPath,
-    `${JSON.stringify([
-      {
-        id: 10,
-        ref: sourceCommit,
-        sha: sourceCommit,
-        task: 'deploy',
-        environment: 'production-private',
-        repository_url:
-          'https://api.github.com/repos/kkxiaoa/k8s-yaml-assistant',
-        transient_environment: false,
-        production_environment: true,
-        created_at: '2026-07-27T08:00:00Z',
-        payload: {
-          schemaVersion: 1,
-          repository: 'kkxiaoa/k8s-yaml-assistant',
+    `${JSON.stringify(deployments)}\n`,
+  );
+  for (const [index, deployment] of deployments.entries()) {
+    writeFileSync(
+      join(statusesDir, `${deployment.id}.json`),
+      `${JSON.stringify([
+        {
+          id: index + 100,
+          state: 'success',
           environment: 'production-private',
-          action: 'deploy',
-          releaseId: '123',
-          releaseTag: 'v0.1.0',
-          releaseCommit: sourceCommit,
-          sourceCommit,
-          imageDigest,
-          workflowRunId: '456',
-          workflowRunAttempt: '1',
+          repository_url:
+            'https://api.github.com/repos/kkxiaoa/k8s-yaml-assistant',
+          created_at:
+            `2026-07-27T08:10:00.${String(index).padStart(3, '0')}Z`,
         },
-      },
-    ])}\n`,
-  );
-  writeFileSync(
-    join(statusesDir, '10.json'),
-    `${JSON.stringify([
-      {
-        id: 100,
-        state: 'success',
-        environment: 'production-private',
-        repository_url:
-          'https://api.github.com/repos/kkxiaoa/k8s-yaml-assistant',
-        created_at: '2026-07-27T08:10:00Z',
-      },
-    ])}\n`,
-  );
-  const boundedDeployments = readFileSync(deploymentsPath, 'utf8');
-
+      ])}\n`,
+    );
+  }
   try {
     const result = run([
       'current-production',
@@ -315,44 +315,6 @@ test('current-production command strictly joins GitHub deployments and statuses'
     assert.deepEqual([...outputs(outputPath)], [
       ['current_production_digest', imageDigest],
     ]);
-
-    writeFileSync(
-      deploymentsPath,
-      `${JSON.stringify(
-        Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })),
-      )}\n`,
-    );
-    const truncated = run([
-      'current-production',
-      '--deployments-json',
-      deploymentsPath,
-      '--statuses-dir',
-      statusesDir,
-      '--github-output',
-      outputPath,
-    ]);
-    assert.notEqual(truncated.status, 0);
-    assert.match(truncated.stderr, /non-truncated array below 100/u);
-
-    writeFileSync(deploymentsPath, boundedDeployments);
-    writeFileSync(
-      join(statusesDir, '10.json'),
-      `${JSON.stringify(Array.from({ length: 100 }, () => ({})))}\n`,
-    );
-    const truncatedStatuses = run([
-      'current-production',
-      '--deployments-json',
-      deploymentsPath,
-      '--statuses-dir',
-      statusesDir,
-      '--github-output',
-      outputPath,
-    ]);
-    assert.notEqual(truncatedStatuses.status, 0);
-    assert.match(
-      truncatedStatuses.stderr,
-      /statuses must be a non-truncated array below 100/u,
-    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -48,20 +48,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p release-state
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq 'map({
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            jq 'add | map({
               tagName: .tag_name,
               targetCommitish: .target_commitish,
               isDraft: .draft,
               isPrerelease: .prerelease
             })' \
             > release-state/releases.json
-          if [[ "$(jq length release-state/releases.json)" -ge 100 ]]; then
-            echo "release inventory exceeds the bounded inspection page" >&2
-            exit 1
-          fi
-          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
-            --jq 'map({
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls?per_page=100" |
+            jq 'add | map({
               author: .user.login,
               base: .base.ref,
               head: .head.ref,

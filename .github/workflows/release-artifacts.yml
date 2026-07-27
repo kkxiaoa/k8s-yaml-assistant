@@ -79,13 +79,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p candidate-state/deployment-statuses
-          gh api --method GET \
-            "repos/$GITHUB_REPOSITORY/deployments?environment=production-private&per_page=100" \
+          gh api --method GET --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/deployments?environment=production-private&per_page=100" |
+            jq 'add' \
             > candidate-state/deployments.json
           node -e '
             const deployments = require("./candidate-state/deployments.json");
-            if (!Array.isArray(deployments) || deployments.length >= 100) {
-              throw new TypeError("deployment response must be a bounded array");
+            if (!Array.isArray(deployments)) {
+              throw new TypeError("deployment response must be an array");
             }
             for (const deployment of deployments) {
               if (!Number.isSafeInteger(deployment.id) || deployment.id <= 0) {
@@ -94,8 +95,9 @@ jobs:
               console.log(deployment.id);
             }
           ' | while IFS= read -r DEPLOYMENT_ID; do
-            gh api --method GET \
-              "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses?per_page=100" \
+            gh api --method GET --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses?per_page=100" |
+              jq 'add' \
               > "candidate-state/deployment-statuses/$DEPLOYMENT_ID.json"
           done
           npm run deployment:authorize -- current-production \
@@ -117,7 +119,7 @@ jobs:
           test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
           mkdir -p candidate-state release-artifacts
           gh release view "$RELEASE_TAG" \
-            --json name,tagName,targetCommitish,isDraft,isPrerelease,body,assets \
+            --json tagName,targetCommitish,isDraft,isPrerelease,body \
             > candidate-state/draft-release.json
           npm run release:manifest -- prepare \
             --release-json candidate-state/draft-release.json \
@@ -450,7 +452,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           gh release view "$RELEASE_TAG" \
-            --json name,tagName,targetCommitish,isDraft,isPrerelease,body,assets \
+            --json tagName,targetCommitish,isDraft,isPrerelease,body \
             > candidate-state/draft-release-before-upload.json
           npm run release:manifest -- prepare \
             --release-json candidate-state/draft-release-before-upload.json \
@@ -496,7 +498,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           gh release view "$RELEASE_TAG" \
-            --json name,tagName,targetCommitish,isDraft,isPrerelease,body,assets \
+            --json tagName,targetCommitish,isDraft,isPrerelease,body,assets \
             > candidate-state/draft-release-readback.json
           mkdir -p candidate-state/release-readback
           gh release download "$RELEASE_TAG" \

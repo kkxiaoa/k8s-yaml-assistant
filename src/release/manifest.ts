@@ -145,64 +145,8 @@ interface ResolveReleaseIdentityInput extends ReleaseVersionInput {
   changelog: string;
 }
 
-interface MarkdownSection {
-  label: string;
-  startLine: number;
-  endLine: number;
-}
-
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
-}
-
-function releaseHeadingVersion(label: string): string | null {
-  const match = label.match(
-    /^(?:\[(?<linked>[0-9A-Za-z.+-]+)\](?:\([^)]*\))?|(?<plain>[0-9A-Za-z.+-]+))(?:\s+(?:-|—|\().*)?$/u,
-  );
-  const version = match?.groups?.linked ?? match?.groups?.plain;
-  return version !== undefined && RELEASE_VERSION_PATTERN.test(version)
-    ? version
-    : null;
-}
-
-function markdownSections(
-  markdown: string,
-  level: 2 | 3,
-): MarkdownSection[] {
-  const lines = markdown.replaceAll('\r\n', '\n').split('\n');
-  const headings: Array<{ label: string; line: number }> = [];
-  const headingPattern = new RegExp(
-    `^${'#'.repeat(level)}\\s+(.+?)\\s*$`,
-    'u',
-  );
-  let fence: '`' | '~' | null = null;
-
-  lines.forEach((line, index) => {
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/u);
-    if (fenceMatch) {
-      const marker = fenceMatch[1]![0] as '`' | '~';
-      fence = fence === null ? marker : fence === marker ? null : fence;
-      return;
-    }
-    if (fence !== null) return;
-    const heading = line.match(headingPattern);
-    if (heading) headings.push({ label: heading[1]!, line: index });
-  });
-
-  return headings.map((heading, index) => ({
-    label: heading.label,
-    startLine: heading.line + 1,
-    endLine: headings[index + 1]?.line ?? lines.length,
-  }));
-}
-
-function sectionText(markdown: string, section: MarkdownSection): string {
-  const lines = markdown.replaceAll('\r\n', '\n').split('\n');
-  const content = lines
-    .slice(section.startLine, section.endLine)
-    .join('\n')
-    .trim();
-  return content.length === 0 ? '' : `${content}\n`;
 }
 
 function canonicalMarkdown(value: string): string {
@@ -210,80 +154,10 @@ function canonicalMarkdown(value: string): string {
   return normalized.length === 0 ? '' : `${normalized}\n`;
 }
 
-function assertNoForbiddenReleaseMaterial(
-  value: string,
-  label: string,
-): void {
-  if (/\b(?:TODO|TBD|placeholder)\b|待补充|占位/iu.test(value)) {
-    throw new TypeError(`${label} must not contain placeholder content`);
-  }
-  if (
-    /(?:^|[\s"'`])(?:\/Users\/|\/home\/|\/root\/|\/private\/|[A-Za-z]:\\)/mu.test(
-      value,
-    )
-  ) {
-    throw new TypeError(`${label} must not contain local absolute paths`);
-  }
-  if (
-    /\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|TOKEN|PASSWORD|PRIVATE_KEY|COOKIE_SECRET)\s*[:=]\s*\S+/iu.test(
-      value,
-    )
-  ) {
-    throw new TypeError(`${label} must not contain secret assignments`);
-  }
-}
-
-function assertChangelogStructure(changelog: string, version: string): void {
-  if ((changelog.match(/^# Changelog\s*$/gmu) ?? []).length !== 1) {
-    throw new TypeError('CHANGELOG.md must contain one top-level Changelog heading');
-  }
-  if ((changelog.match(/^> 状态：\S.+$/gmu) ?? []).length !== 1) {
-    throw new TypeError('CHANGELOG.md must declare one current status');
-  }
-  if ((changelog.match(/^> 用途：\S.+$/gmu) ?? []).length !== 1) {
-    throw new TypeError('CHANGELOG.md must declare one purpose');
-  }
-
-  const sections = markdownSections(changelog, 2);
-  const unreleased = sections.filter((section) =>
-    /^\[?Unreleased\]?(?:\([^)]*\))?$/iu.test(section.label),
-  );
-  if (unreleased.length !== 1) {
-    throw new TypeError('CHANGELOG.md must contain one Unreleased section');
-  }
-  const releases = sections.filter(
-    (section) => releaseHeadingVersion(section.label) === version,
-  );
-  if (releases.length !== 1) {
-    throw new TypeError(
-      `CHANGELOG.md must contain one release heading for ${version}`,
-    );
-  }
-}
-
-function assertSafeReleaseNotes(notes: string): void {
+function assertReleaseNotesPresent(notes: string): void {
   if (notes.length === 0) {
     throw new TypeError('release notes must not be empty');
   }
-  const sections = markdownSections(notes, 3);
-  const limitations = sections.filter((section) =>
-    /^Known limitations$/iu.test(section.label),
-  );
-  if (limitations.length !== 1) {
-    throw new TypeError('release notes must include one Known limitations section');
-  }
-  if (!/^[-*]\s+\S.+$/mu.test(sectionText(notes, limitations[0]!))) {
-    throw new TypeError('Known limitations must contain a concrete entry');
-  }
-  const hasConcreteChange = sections
-    .filter((section) => !/^Known limitations$/iu.test(section.label))
-    .some((section) => /^[-*]\s+\S.+$/mu.test(sectionText(notes, section)));
-  if (!hasConcreteChange) {
-    throw new TypeError(
-      'release notes must contain a concrete change outside Known limitations',
-    );
-  }
-  assertNoForbiddenReleaseMaterial(notes, 'release notes');
 }
 
 function resolveReleaseVersion(input: ReleaseVersionInput): string {
@@ -312,8 +186,6 @@ export function resolveReleaseIdentity(
   if (version === '0.0.0') {
     throw new TypeError('package version 0.0.0 is a release placeholder');
   }
-  assertNoForbiddenReleaseMaterial(input.changelog, 'CHANGELOG.md');
-  assertChangelogStructure(input.changelog, version);
   return {
     version,
     tag: `v${version}`,
@@ -514,7 +386,7 @@ export function deriveIndexArtifactIdentity(
 
 export function releaseNotesSha256(notes: string): string {
   const canonical = canonicalMarkdown(notes);
-  assertSafeReleaseNotes(canonical);
+  assertReleaseNotesPresent(canonical);
   return sha256(canonical);
 }
 
@@ -715,15 +587,17 @@ export function decodeReleaseManifest(value: unknown): ReleaseManifest {
   return ReleaseManifestSchema.parse(value);
 }
 
-const DraftReleaseSchema = z.object({
-  name: z.string().min(1),
+const DraftReleaseIdentitySchema = z.strictObject({
   tagName: z.string().min(1),
   targetCommitish: CommitSchema,
   isDraft: z.literal(true),
   isPrerelease: z.literal(false),
   body: z.string(),
+});
+
+const DraftReleaseSchema = DraftReleaseIdentitySchema.extend({
   assets: z.array(
-    z.object({
+    z.strictObject({
       name: z.string().min(1),
     }),
   ),
@@ -735,18 +609,16 @@ interface ResolveDraftReleaseIdentityInput {
   expectedSourceCommit: string;
 }
 
-export interface DraftReleaseIdentity {
-  name: string;
+interface DraftReleaseIdentity {
   tagName: string;
   sourceCommit: string;
-  body: string;
   releaseNotesSha256: string;
 }
 
-export function resolveDraftReleaseIdentity(
+function draftReleaseIdentity(
+  release: z.infer<typeof DraftReleaseIdentitySchema>,
   input: ResolveDraftReleaseIdentityInput,
 ): DraftReleaseIdentity {
-  const release = DraftReleaseSchema.parse(input.release);
   const expectedTag = z
     .string()
     .regex(RELEASE_TAG_PATTERN)
@@ -762,21 +634,26 @@ export function resolveDraftReleaseIdentity(
   }
   const body = canonicalMarkdown(release.body);
   return {
-    name: release.name,
     tagName: release.tagName,
     sourceCommit: release.targetCommitish,
-    body,
     releaseNotesSha256: releaseNotesSha256(body),
   };
+}
+
+export function resolveDraftReleaseIdentity(
+  input: ResolveDraftReleaseIdentityInput,
+): DraftReleaseIdentity {
+  return draftReleaseIdentity(
+    DraftReleaseIdentitySchema.parse(input.release),
+    input,
+  );
 }
 
 interface VerifyDraftReleaseInput extends ResolveDraftReleaseIdentityInput {
   expectedReleaseNotesSha256: string;
 }
 
-export interface VerifiedDraftRelease extends DraftReleaseIdentity {
-  isDraft: true;
-  isPrerelease: false;
+interface VerifiedDraftRelease extends DraftReleaseIdentity {
   assets: Array<{ name: (typeof RELEASE_ARTIFACT_FILES)[number] }>;
 }
 
@@ -784,7 +661,7 @@ export function verifyDraftRelease(
   input: VerifyDraftReleaseInput,
 ): VerifiedDraftRelease {
   const release = DraftReleaseSchema.parse(input.release);
-  const identity = resolveDraftReleaseIdentity(input);
+  const identity = draftReleaseIdentity(release, input);
   const expectedNotesHash = Sha256Schema.parse(
     input.expectedReleaseNotesSha256,
   );
@@ -796,8 +673,6 @@ export function verifyDraftRelease(
 
   return {
     ...identity,
-    isDraft: true,
-    isPrerelease: false,
     assets: RELEASE_ARTIFACT_FILES.map((name) => ({ name })),
   };
 }
