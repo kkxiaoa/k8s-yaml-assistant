@@ -1,6 +1,6 @@
 # K3s 特权部署适配器实施计划
 
-> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Pull Request #9（合并请求 #9）已合入 `main`，合入后只读回查确认没有 Published Release（已发布版本）、生产 runner job（生产运行器任务）、生产 GitHub deployment（GitHub 部署记录）或应用 Deployment/Pod（工作负载 / 容器组）变化；仓库级运行器当前在线空闲。Task 7（任务 7）已修正首发与回滚草稿验证顺序，尚未开始外部执行。
+> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1（任务 7 步骤 1）已完成草稿重定向、候选镜像重建和六项证据回读，等待 review（审核）；`v0.1.0` 仍未 Publish（正式发布），生产运行器、GitHub deployment（GitHub 部署记录）和应用 Deployment/Pod（工作负载 / 容器组）均未变化。
 > 用途：把已审核的 K3s（轻量 Kubernetes）特权 deployment adapter（部署适配器）设计拆成反例优先的仓库实现、Kubernetes bootstrap（Kubernetes 引导配置）、生产 runner（运行器）、发布工作流和私有验收步骤。
 > 对应设计：`docs/superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md`。
 > 执行位置：本计划的 Task 1-5（任务 1-5）服务于生产部署总计划的 Task 13（任务 13）；Task 6-7（任务 6-7）服务于总计划的 Task 14（任务 14）。每个 Task（任务）完成后独立停止审核。
@@ -731,7 +731,7 @@ Pull Request #9（合并请求 #9）最终提交 `492b33bb85cb3fe8b680c3b2bf00d0
 
 **Precondition（前置条件）：** Task 6（任务 6）审核通过；当前 `v0.1.0` 草稿仍未发布。草稿修改与证据重建、Publish（正式发布）、首次部署、回滚草稿删除、有限模型冒烟、故障候选、功能回滚和节点重启分别获得当次明确授权。
 
-- [ ] **Step 1（步骤 1）：整体重定向 `v0.1.0` 草稿和六项证据**
+- [x] **Step 1（步骤 1）：整体重定向 `v0.1.0` 草稿和六项证据**
 
 当前草稿绑定旧提交 `d36128253e25243a9a17e291afa08b4e237133af`；它不包含 Task 6（任务 6）的发布触发工作流，因此不能直接 Publish（正式发布）。经单独授权后：
 
@@ -742,6 +742,26 @@ Pull Request #9（合并请求 #9）最终提交 `492b33bb85cb3fe8b680c3b2bf00d0
 5. 确认草稿修改和证据恢复没有运行 `published-release.yml` 或 `published-release-deploy.yml`、没有调度生产运行器、没有新增 `production-private` GitHub deployment（私有生产部署记录），且 K3s（轻量 Kubernetes）仍没有应用 Deployment/Pod（工作负载 / 容器组）。
 
 该步骤不调用 Voyage embedding/rerank（Voyage 向量嵌入 / 重排），不重建索引，不 Publish（正式发布）。任一身份或证据校验失败时保持草稿状态并停止；不得发布部分更新的草稿。
+
+2026-07-27 外部执行结果：
+
+- 执行前回读并保留 Release ID（发布版本标识）`359948311`、旧目标 `d36128253e25243a9a17e291afa08b4e237133af`、正文和六项附件快照。
+- 首次 REST API（REST 应用程序接口）更新未显式发送 `tag_name` 时，GitHub 把同一草稿的标签名改为临时 `untagged-*`；执行立即停止，未触发任何流水线。随后以同一 Release ID（发布版本标识）显式提交 `name`、`tag_name`、`target_commitish`、`body`、`draft=true` 和 `prerelease=false`，恢复 `v0.1.0` 并完成写后回读。以后人工修改草稿身份时必须在同一请求中提交这些字段。
+- 手工恢复运行 `30263136111` 成功解析新目标 `1cec0b4cc6e57a2b018ec260627bbb651a1dcb3b`，验证并复用 8,410 条签名索引，构建、冒烟、扫描、证明并签名候选镜像，最后整体替换六项附件。
+- 最终候选镜像为 `sha256:8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4`；索引产物仍为 `sha256:d45ec4f2b52941919aaaaddca48bf25d2fa8c38dacaf9b6ea4d50a98470207c1`，语料和索引计数均为 8,410，发布说明摘要为 `d7521c862914c3359df6d626e098a5de2c8f111291d0a09f05123eb8a3b2ac29`。
+- 六项附件的写后 SHA-256（安全哈希算法 256 位）回读为：
+
+| 附件 | 执行前 | 执行后 |
+| --- | --- | --- |
+| `sbom.spdx.json` | `0c4cbca00e734c9a5a00b7faf605b17257bf15466f81e11ca02b2bf64c59138f` | `56ff6d26ca1fb3525e1259e026170ff7975d6e32cebb0b6e72e847f8db3547ec` |
+| `provenance.slsa.json` | `f521008a7c451f352333b11bfe66ef65a1eed3df2e2bd723a3ba12a6d9ce6d91` | `db03b3387fdce8a247fdfc9fb4425c6cf65c56461cd4c6576ff79beaa80cef0d` |
+| `release-manifest.json` | `329d9f34448d69f40dc657f32889e40b144155dffd5cd2854998d585d55d7fe0` | `d89c93aae1ff7f6e07c44a5b9dc5fbbeb2a4bd6f401d03af0a270b5bfc24c70e` |
+| `sbom-attestation.sigstore.json` | `d354cd5d6e2098136755b720e13865dc462937f8f88a8d2e28e168eacffe2613` | `2e6b830755f5e91d013b707551171dabc1cd960faa4132348f2b7072237c2cf7` |
+| `provenance-attestation.sigstore.json` | `1585d6570d8603daed4af5d78decbedc33cf3ac7d46119bd544fcfbd7291cc08` | `7976de4a9f54d3dd8642e24d9612b112763ca51c60d5eb33f5372c19688d6763` |
+| `release-manifest.sigstore.json` | `aa6aee05e89a37bdbba6ce66e93af1bbf33e1277f80be88eb9aa16a7ab83350f` | `fec44e15e016e426a7d066111e01a73a984153acf195ceaf4f0b03b15d813eae` |
+
+- `verify-draft`（草稿验证）独立契约通过；SLSA provenance（SLSA 来源证明）、SPDX SBOM（SPDX 软件物料清单）、两类 Sigstore bundle（Sigstore 证明包）和发布清单的内部摘要均与下载文件一致。流水线中的漏洞、证明、签名和附件回读步骤全部成功。
+- 最终回查确认草稿仍为 `draft=true`、`prerelease=false`、`publishedAt=null`，没有实际 `v0.1.0` Git tag（Git 标签），没有运行 `published-release.yml`，没有 `production-private` GitHub deployment（私有生产部署记录）；生产运行器 `huawei-k3s-prod-1` 在线空闲，K3s（轻量 Kubernetes）中没有应用 Deployment/Pod（工作负载 / 容器组）。
 
 - [ ] **Step 2（步骤 2）：人工复核并 Publish `v0.1.0`**
 
