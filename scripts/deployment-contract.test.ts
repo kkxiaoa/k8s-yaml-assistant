@@ -875,15 +875,16 @@ function validateBootstrapResources(resources: readonly YamlRecord[]): void {
 }
 
 function validateKubernetesReadme(source: string): void {
-  assert.ok(
-    source.startsWith(
-      '状态：Task 4（任务 4）已完成实施和 review（审核）；Task 5（任务 5）的生产 runner（运行器）已完成安装、注册和真实 systemd hardening（系统服务加固）验证，当前在线空闲并等待 review（审核）。\n' +
-        '用途：定义生产 Kubernetes（容器编排系统）固定非敏感资源、应用模板及其审核和回退边界。\n',
-    ),
+  const [status, purpose] = source.split(/\r?\n/u);
+  assert.match(status ?? '', /^状态：.+/u);
+  assert.equal(
+    purpose,
+    '用途：定义生产 Kubernetes（容器编排系统）固定非敏感资源、应用模板及其审核和回退边界。',
   );
   for (const required of [
     '仓库只固定引用且不保存 Secret（密钥）值',
-    '集群没有应用 Deployment/Pod/Ingress（工作负载 / 容器组 / 入口）',
+    '固定单副本 Deployment/Pod（工作负载 / 容器组）',
+    '集群仍没有 Ingress（入口），80/443 没有开放',
     'deepseek-runtime',
     'voyage-runtime',
     'ghcr-pull',

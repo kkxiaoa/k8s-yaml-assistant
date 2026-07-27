@@ -62,7 +62,9 @@ const LOCAL_IMAGE = /^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 const IMMUTABLE_IMAGE =
   /^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/;
 const APP_UID_GID = '10001:10001';
-const TMP_SIZE_BYTES = 64 * 1024 * 1024;
+const SMOKE_TMPFS_SIZE_BYTES = 64 * 1024 * 1024;
+const OBSERVATION_VOLUME_PATH = '/app/data/observability';
+const OBSERVATION_DATA_PATH = `${OBSERVATION_VOLUME_PATH}/segments`;
 const CANDIDATE_INDEX_PATHS = new Set([
   'app/data/index/manifest.json',
   'app/data/index/chunks.jsonl',
@@ -558,8 +560,16 @@ function assertContainerIsolation(name: string): void {
   if (!inspect.HostConfig?.ReadonlyRootfs) fail('container root filesystem is writable');
   if (inspect.HostConfig.NetworkMode !== 'none') fail('smoke container must have no network');
   const tmpfs = inspect.HostConfig.Tmpfs?.['/tmp'];
-  if (!tmpfs || !tmpfs.includes(`size=${TMP_SIZE_BYTES}`)) {
+  if (!tmpfs || !tmpfs.includes(`size=${SMOKE_TMPFS_SIZE_BYTES}`)) {
     fail('/tmp must use a bounded 64 MiB tmpfs');
+  }
+  const observationVolume =
+    inspect.HostConfig.Tmpfs?.[OBSERVATION_VOLUME_PATH];
+  if (
+    !observationVolume ||
+    !observationVolume.includes(`size=${SMOKE_TMPFS_SIZE_BYTES}`)
+  ) {
+    fail('observation smoke mount must use a bounded 64 MiB tmpfs');
   }
 
   const identity = nodeInContainer(
@@ -589,6 +599,56 @@ function assertContainerIsolation(name: string): void {
   );
   if (serviceAccount.status !== 0 || serviceAccount.stdout.trim() !== 'false') {
     fail('runtime must start without a ServiceAccount token');
+  }
+}
+
+async function assertObservationRuntime(
+  name: string,
+  expectation: 'ready' | 'not-ready',
+): Promise<void> {
+  const request = nodeInContainer(
+    name,
+    "fetch('http://127.0.0.1:3000/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(response=>console.log(response.status)).catch(()=>process.exit(2))",
+  );
+  const expectedStatus = expectation === 'ready' ? '400' : '503';
+  if (request.status !== 0 || request.stdout.trim() !== expectedStatus) {
+    fail(`unexpected empty Ask response: ${request.stdout || request.stderr}`);
+  }
+
+  const probe = nodeInContainer(
+    name,
+    `const fs=require('node:fs');const stat=path=>{const value=fs.statSync(path);return {mode:value.mode&0o777,uid:value.uid,gid:value.gid}};console.log(JSON.stringify({volume:stat('${OBSERVATION_VOLUME_PATH}'),data:fs.existsSync('${OBSERVATION_DATA_PATH}')?stat('${OBSERVATION_DATA_PATH}'):null,entries:fs.existsSync('${OBSERVATION_DATA_PATH}')?fs.readdirSync('${OBSERVATION_DATA_PATH}'):[]}))`,
+  );
+  if (probe.status !== 0) {
+    fail(`observation runtime probe failed: ${probe.stderr || probe.stdout}`);
+  }
+  const decoded = JSON.parse(probe.stdout) as {
+    volume: { mode: number; uid: number; gid: number };
+    data: { mode: number; uid: number; gid: number } | null;
+    entries: string[];
+  };
+  if (
+    decoded.volume.mode !== 0o777 ||
+    decoded.volume.uid !== 0 ||
+    decoded.volume.gid !== 10001
+  ) {
+    fail('observation smoke mount must reproduce a broad root-owned volume');
+  }
+  if (
+    decoded.data?.mode !== 0o700 ||
+    `${decoded.data.uid}:${decoded.data.gid}` !== APP_UID_GID
+  ) {
+    fail(
+      'observation runtime must create a private app-owned data directory below the volume mount',
+    );
+  }
+  if (decoded.entries.length !== 0) {
+    fail('empty Ask smoke must not create an observation segment');
+  }
+
+  const logs = run('docker', ['logs', name], { allowFailure: true });
+  if (`${logs.stdout}\n${logs.stderr}`.includes('[serving-observation]')) {
+    fail('observation runtime initialization emitted a failure diagnostic');
   }
 }
 
@@ -660,7 +720,9 @@ async function smokeRuntime(
       name,
       '--read-only',
       '--tmpfs',
-      `/tmp:rw,noexec,nosuid,nodev,size=${TMP_SIZE_BYTES}`,
+      `/tmp:rw,noexec,nosuid,nodev,size=${SMOKE_TMPFS_SIZE_BYTES}`,
+      '--tmpfs',
+      `${OBSERVATION_VOLUME_PATH}:rw,noexec,nosuid,nodev,uid=0,gid=10001,mode=0777,size=${SMOKE_TMPFS_SIZE_BYTES}`,
       '--network',
       'none',
       '--env',
@@ -684,11 +746,25 @@ async function smokeRuntime(
       '--env',
       'VOYAGE_API_KEY=container-smoke-non-secret',
       '--env',
+      'DEEPSEEK_API_KEY=container-smoke-non-secret',
+      '--env',
       'INDEX_DIR=/app/data/index',
       '--env',
       'ENABLE_QUERY_EXPANSION=true',
       '--env',
-      'SERVING_OBSERVATION_MODE=off',
+      'SERVING_OBSERVATION_MODE=local',
+      '--env',
+      'SERVING_OBSERVATION_SAMPLE_RATE=1',
+      '--env',
+      'SERVING_OBSERVATION_MAX_FILE_BYTES=16777216',
+      '--env',
+      'SERVING_OBSERVATION_MAX_TOTAL_BYTES=268435456',
+      '--env',
+      'SERVING_OBSERVATION_RETENTION_DAYS=7',
+      '--env',
+      'SERVING_OBSERVATION_MAX_INPUT_BYTES=131072',
+      '--env',
+      'SERVING_OBSERVATION_MAX_TEXT_BYTES=8192',
       image,
     ]);
 
@@ -718,6 +794,7 @@ async function smokeRuntime(
       );
     }
 
+    await assertObservationRuntime(name, expectation);
     assertContainerIsolation(name);
     assertRuntimeContents(name, expectReady);
     console.log(
