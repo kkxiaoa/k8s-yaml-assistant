@@ -4,6 +4,10 @@
 !.env.example
 node_modules
 .next
+*.tsbuildinfo
+__pycache__
+*.pyc
+.ruff_cache
 data/index
 data/index-*
 data/observability

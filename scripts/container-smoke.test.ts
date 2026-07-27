@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
@@ -31,21 +32,25 @@ test('repository container files satisfy the release build contract', () => {
 
 test('dockerignore must exclude local state without excluding tracked schema closure', () => {
   const contract = repositoryContract();
-  const requiredExclusions = [
-    '.env',
-    '.git',
-    'node_modules',
-    '.next',
-    'data/index',
-    'data/observability',
-    'data/eval/runs',
-    'data/eval/traces',
+  const requiredExclusions: Array<[string, string]> = [
+    ['.env', '.env'],
+    ['.git', '.git'],
+    ['.ruff_cache', '.ruff_cache'],
+    ['__pycache__', '__pycache__'],
+    ['*.pyc', 'adapter.pyc'],
+    ['*.tsbuildinfo', 'tsconfig.tsbuildinfo'],
+    ['node_modules', 'node_modules'],
+    ['.next', '.next'],
+    ['data/index', 'data/index'],
+    ['data/observability', 'data/observability'],
+    ['data/eval/runs', 'data/eval/runs'],
+    ['data/eval/traces', 'data/eval/traces'],
   ];
 
-  for (const exclusion of requiredExclusions) {
+  for (const [rule, excludedPath] of requiredExclusions) {
     const mutated = contract.dockerignore
       .split('\n')
-      .filter((line) => line.trim() !== exclusion)
+      .filter((line) => line.trim() !== rule)
       .join('\n');
     assert.throws(
       () =>
@@ -53,7 +58,7 @@ test('dockerignore must exclude local state without excluding tracked schema clo
           ...contract,
           dockerignore: mutated,
         }),
-      new RegExp(exclusion.replaceAll(/[./]/g, '\\$&')),
+      new RegExp(excludedPath.replaceAll(/[./]/g, '\\$&')),
     );
   }
 
@@ -70,6 +75,26 @@ test('dockerignore must exclude local state without excluding tracked schema clo
         }),
       /tracked schema closure/,
     );
+  }
+});
+
+test('gitignore excludes current local tool caches at the repository boundary', () => {
+  for (const path of [
+    '.ruff_cache',
+    'deploy/adapter/__pycache__/',
+    'deploy/adapter/adapter.pyc',
+    'tsconfig.tsbuildinfo',
+  ]) {
+    const result = spawnSync(
+      'git',
+      ['check-ignore', '--no-index', '--verbose', path],
+      {
+        cwd: root,
+        encoding: 'utf8',
+      },
+    );
+    assert.equal(result.status, 0, `${path}: ${result.stderr}`);
+    assert.match(result.stdout.trim(), /^\.gitignore:\d+:/u);
   }
 });
 

@@ -32,6 +32,10 @@ const REQUIRED_STAGES = [
 const REQUIRED_IGNORES = [
   '.env',
   '.git',
+  '.ruff_cache',
+  '__pycache__',
+  'adapter.pyc',
+  'tsconfig.tsbuildinfo',
   'node_modules',
   '.next',
   'data/index',

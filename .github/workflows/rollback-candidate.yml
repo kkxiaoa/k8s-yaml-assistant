@@ -1,0 +1,151 @@
+name: Prepare rollback release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Published application release tag (v<semver>)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rollback-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Verify source release and create rollback draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Reject untrusted rollback dispatch
+        env:
+          EVENT_ACTOR: ${{ github.actor }}
+          EVENT_REF: ${{ github.ref }}
+        run: |
+          test "$EVENT_ACTOR" = "kkxiaoa"
+          test "$EVENT_REF" = "refs/heads/main"
+
+      - name: Checkout rollback verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.2
+
+      - name: Verify published source release
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          if [[ ! "$SOURCE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "source_tag must be a stable application release tag" >&2
+            exit 1
+          fi
+          mkdir -p rollback-state/source-assets
+          gh release view "$SOURCE_TAG" \
+            --json databaseId,tagName,targetCommitish,isDraft,isPrerelease,publishedAt,body,assets \
+            --jq '{databaseId,tagName,targetCommitish,isDraft,isPrerelease,publishedAt,body,assets:[.assets[]|{name:.name}]}' \
+            > rollback-state/source-release.json
+          SOURCE_COMMIT="$(
+            gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/commits/$SOURCE_TAG" \
+              --jq .sha
+          )"
+          if [[ ! "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "source release tag did not resolve to one commit" >&2
+            exit 1
+          fi
+          gh release download "$SOURCE_TAG" \
+            --dir rollback-state/source-assets
+          BUILD_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/release-artifacts.yml@refs/heads/main"
+          OIDC_ISSUER="https://token.actions.githubusercontent.com"
+          cosign verify-blob \
+            --bundle rollback-state/source-assets/release-manifest.sigstore.json \
+            --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            rollback-state/source-assets/release-manifest.json
+          npm run release:manifest -- verify-published \
+            --release-json rollback-state/source-release.json \
+            --assets-dir rollback-state/source-assets \
+            --tag-commit "$SOURCE_COMMIT" \
+            --identity-out rollback-state/source-identity.json
+          IMAGE_DIGEST="$(
+            node -p "require('./rollback-state/source-identity.json').imageDigest"
+          )"
+          echo "image_digest=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+          cosign verify-blob-attestation \
+            --bundle rollback-state/source-assets/provenance-attestation.sigstore.json \
+            --digest "${IMAGE_DIGEST#sha256:}" \
+            --digestAlg sha256 \
+            --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            --type slsaprovenance1
+
+      - name: Resolve unique rollback candidate
+        id: rollback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+          IMAGE_DIGEST: ${{ steps.source.outputs.image_digest }}
+        run: |
+          gh release list --limit 101 --json tagName,isDraft \
+            > rollback-state/releases.json
+          npm run deployment:authorize -- rollback-candidate \
+            --source-tag "$SOURCE_TAG" \
+            --image-digest "$IMAGE_DIGEST" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --releases-json rollback-state/releases.json \
+            --notes-out rollback-state/rollback-notes.md \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Create rollback draft with one provenance bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+          ROLLBACK_TAG: ${{ steps.rollback.outputs.rollback_tag }}
+        run: |
+          gh release create "$ROLLBACK_TAG" \
+            rollback-state/source-assets/provenance-attestation.sigstore.json \
+            --draft \
+            --title "Rollback $SOURCE_TAG" \
+            --notes-file rollback-state/rollback-notes.md \
+            --target "$GITHUB_SHA"
+
+      - name: Verify rollback draft readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROLLBACK_TAG: ${{ steps.rollback.outputs.rollback_tag }}
+        run: |
+          gh release view "$ROLLBACK_TAG" \
+            --json tagName,targetCommitish,isDraft,isPrerelease,assets \
+            --jq '{tagName,targetCommitish,isDraft,isPrerelease,assets:[.assets[]|{name:.name}]}' \
+            > rollback-state/rollback-draft.json
+          mkdir rollback-state/readback
+          gh release download "$ROLLBACK_TAG" \
+            --dir rollback-state/readback
+          npm run deployment:authorize -- verify-rollback-draft \
+            --release-json rollback-state/rollback-draft.json \
+            --tag-commit "$GITHUB_SHA" \
+            --provenance-bundle rollback-state/readback/provenance-attestation.sigstore.json \
+            --source-identity rollback-state/source-identity.json

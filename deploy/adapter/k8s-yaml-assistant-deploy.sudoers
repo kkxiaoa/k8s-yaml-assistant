@@ -1,0 +1,2 @@
+Defaults:gha-k8s-yaml-prod env_reset, !setenv
+gha-k8s-yaml-prod ALL=(root) NOPASSWD: /usr/local/sbin/k8s-yaml-assistant-deploy ""
