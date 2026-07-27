@@ -652,6 +652,17 @@ function validateReleaseArtifactsWorkflow(
     'release:manifest -- finalize',
     '--release-json candidate-state/draft-release.json',
   ]);
+  assert.equal(
+    object(
+      namedStep(
+        build,
+        'Build and sign release manifest',
+        'release artifact build',
+      ).env,
+      'release manifest environment',
+    ).WORKFLOW_RUN_URL,
+    'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}',
+  );
   assert.doesNotMatch(buildText, /\bgh release view\b/u);
   const image = actionStep(build, buildPushAction, 'release artifact build');
   const imageWith = object(image.with, 'release image inputs');
@@ -907,6 +918,17 @@ function validatePublishedReleaseDeployWorkflow(
     'authorization signing must follow both published release branches',
   );
   assert.doesNotMatch(validateText, /\bcmp\b/u);
+  assert.equal(
+    object(
+      namedStep(
+        validate,
+        'Build deployment authorization',
+        'published release validation',
+      ).env,
+      'deployment authorization environment',
+    ).WORKFLOW_RUN_URL,
+    'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}',
+  );
 
   const production = job(value, 'production');
   assert.equal(production.needs, 'validate');
@@ -967,6 +989,17 @@ function validatePublishedReleaseDeployWorkflow(
     'repos/$GITHUB_REPOSITORY/deployments/',
     '/statuses',
   ]);
+  assert.equal(
+    object(
+      namedStep(
+        finalize,
+        'Resolve bounded adapter result',
+        'deployment finalizer',
+      ).env,
+      'deployment result environment',
+    ).WORKFLOW_RUN_URL,
+    'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}',
+  );
   assertContains(source, [
     'needs.production.result',
     'needs.production.outputs.result_base64',
