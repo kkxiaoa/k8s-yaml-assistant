@@ -262,12 +262,13 @@ function publishedEvidence(): {
           },
           root: {
             configSource: {
-              request: {
-                args: {
-                  'vcs:source':
-                    'https://github.com/kkxiaoa/k8s-yaml-assistant',
-                  'vcs:revision': sourceCommit,
-                },
+              path: 'Dockerfile',
+            },
+            request: {
+              args: {
+                'vcs:source':
+                  'https://github.com/kkxiaoa/k8s-yaml-assistant',
+                'vcs:revision': sourceCommit,
               },
             },
           },
@@ -959,7 +960,7 @@ test('published release rejects unpublished, extra and drifted evidence', async 
           Buffer.from(bundle.dsseEnvelope.payload, 'base64').toString(),
         ) as Record<string, any>;
         statement.predicate.buildDefinition.externalParameters.request.root
-          .configSource.request.args['vcs:revision'] = 'd'.repeat(40);
+          .request.args['vcs:revision'] = 'd'.repeat(40);
         bundle.dsseEnvelope.payload = Buffer.from(
           JSON.stringify(statement),
         ).toString('base64');

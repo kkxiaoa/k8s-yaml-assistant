@@ -72,11 +72,12 @@ def provenance_statement(
                         "args": {"target": target},
                         "root": {
                             "configSource": {
-                                "request": {
-                                    "args": {
-                                        "vcs:source": vcs_source,
-                                        "vcs:revision": source_commit,
-                                    }
+                                "path": "Dockerfile",
+                            },
+                            "request": {
+                                "args": {
+                                    "vcs:source": vcs_source,
+                                    "vcs:revision": source_commit,
                                 }
                             }
                         },
