@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-2（阶段 0-2）、Task 12-13（任务 12-13）和 Task 14 Step 1-4（任务 14 步骤 1-4）的实现与审核已完成。具有 8,410 条正式索引和六项发布证据的 `v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）；固定单副本 Deployment（工作负载）当前为 `1/1` 可用。Task 14 Step 5（任务 14 步骤 5）的只读验收发现 production observation root（生产观测根目录）权限阻断，真实观测生命周期和模型冒烟尚未完成；公网入口仍未创建。
+> 状态：执行中；Phase 0-2（阶段 0-2）、Task 12-13（任务 12-13）和 Task 14 Step 1-4（任务 14 步骤 1-4）的实现与审核已完成。具有 8,410 条正式索引和六项发布证据的 `v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）；固定单副本 Deployment（工作负载）当前为 `1/1` 可用。Task 14 Step 5（任务 14 步骤 5）发现的 production observation root（生产观测根目录）权限阻断已有本地通过的最小修复，当前等待受控 Pull Request（合并请求）、新版本发布与重新部署；真实观测生命周期和模型冒烟尚未完成，公网入口仍未创建。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。

@@ -56,7 +56,7 @@ bootstrap（引导配置）只管理不随应用版本变化的固定资源。�
 
 ## 存储边界
 
-`k8s-yaml-assistant-observation` 只挂载到 `/app/data/observability`。应用配置定义 7 天、单文件 16 MiB、总量 256 MiB 的轮转和删除边界；1 GiB PVC（持久卷声明）不是应用可无限使用的配额。2026-07-28 的真实验收发现 local-path PV（本地路径持久卷）的挂载根目录为 `0777 root:10001`，不符合 local sink（本地写入端）的 `0700` 根目录契约，应用因此以 `root_unsafe` 安全关闭观测。修复并重新部署前，不得声称上述轮转、保留和删除边界已经在生产生效。
+`k8s-yaml-assistant-observation` 只挂载到 `/app/data/observability`，应用只把 `/app/data/observability/segments` 作为 local sink（本地写入端）根目录。应用配置定义 7 天、单文件 16 MiB、总量 256 MiB 的轮转和删除边界；1 GiB PVC（持久卷声明）不是应用可无限使用的配额。2026-07-28 的真实验收发现 local-path PV（本地路径持久卷）的挂载根目录为 `0777 root:10001`，不符合 `0700` 根目录契约，旧版本因此以 `root_unsafe` 安全关闭观测。当前最小修复已用同权限容器反例证明应用会以 UID/GID（用户 / 组标识）`10001/10001` 创建 `0700` 私有子目录；新版本重新部署并完成真实生命周期验收前，不得声称轮转、保留和删除边界已经在生产生效。
 
 索引固定在镜像 `/app/data/index` 中，依靠只读根文件系统读取，不挂载 PVC（持久卷声明），Pod（容器组）重启也不会重建索引。`/tmp` 使用上限为 64 MiB 的 emptyDir（临时卷）。不得把索引、原始 YAML、模型回答、Secret（密钥）或未来计量状态写入 observation PVC（观测持久卷声明）。
 

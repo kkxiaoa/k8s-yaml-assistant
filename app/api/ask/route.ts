@@ -54,7 +54,7 @@ function initializeServingObservation(): ServingObservationRuntime {
     if (decoded.config.mode === 'off') return { mode: 'off' };
 
     const sinkResult = createLocalObservationSink({
-      rootDir: resolve(process.cwd(), 'data/observability'),
+      rootDir: resolve(process.cwd(), 'data/observability/segments'),
       maxFileBytes: decoded.config.maxFileBytes,
       maxTotalBytes: decoded.config.maxTotalBytes,
       retentionDays: decoded.config.retentionDays,

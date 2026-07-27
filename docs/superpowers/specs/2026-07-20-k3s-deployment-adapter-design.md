@@ -1,6 +1,6 @@
 # K3s 特权部署适配器设计
 
-> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）和 Task 7 Step 1-4（任务 7 步骤 1-4）已完成实现和审核，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。Step 5（步骤 5）的只读验收发现 production observation root（生产观测根目录）权限阻断，必须先修复并重新部署，才能完成真实观测生命周期和模型冒烟。没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已经清退。
+> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）和 Task 7 Step 1-4（任务 7 步骤 1-4）已完成实现和审核，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。Step 5（步骤 5）发现的 production observation root（生产观测根目录）权限阻断已有本地通过的最小修复，当前等待受控 Pull Request（合并请求）、新版本发布与重新部署，之后才能完成真实观测生命周期和模型冒烟。没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已经清退。
 > 用途：定义华为云单机 K3s（轻量 Kubernetes）中固定应用发布的 deployment adapter（部署适配器）协议、信任边界、权限、并发、回滚和测试门禁。
 > 当前仓库和服务器已有固定适配器、信任根与权限配置，生产集群已有固定 bootstrap/Secret（引导配置 / 密钥）；仓库级 self-hosted runner（自托管运行器）已经注册并通过真实隔离与重启验证。Attempt 1（第 1 次尝试）在生产调度前失败，Attempt 2-4（第 2-4 次尝试）均删除本轮新建的 Deployment（工作负载）并清除操作标记；Attempt 5（第 5 次尝试）成功后固定单副本 Deployment（工作负载）为 `1/1` 可用，成功台账只有一条事件，80/443 仍未公开。
 > 对应总计划：`docs/superpowers/plans/2026-07-19-k3s-production-deployment.md` 的 Task 12（任务 12）。独立实施计划位于 `docs/superpowers/plans/2026-07-20-k3s-deployment-adapter.md`。

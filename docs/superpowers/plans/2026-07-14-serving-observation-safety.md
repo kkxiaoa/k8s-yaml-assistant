@@ -371,7 +371,7 @@ git diff --check
 
 - [x] **Step 2: 实现受控路径和 segment identity**
 
-- root 固定在调用方提供的 observability root 下；local sink（本地写入端）只接受规范化绝对路径，Task 6（任务 6）的生产构造器使用 `resolve(process.cwd(), 'data/observability')`。
+- root 固定在调用方提供的 observability root 下；local sink（本地写入端）只接受规范化绝对路径，Task 6（任务 6）的生产构造器使用 `resolve(process.cwd(), 'data/observability/segments')`，不直接信任部署挂载点的根目录权限。
 - 文件名由 UTC 日期和固定宽度序号生成。
 - 只匹配受管 segment regex。
 - 用 `lstat` 类语义拒绝 symlink root/segment，用 exclusive create 语义创建新 segment，并设置受限目录/文件权限。
