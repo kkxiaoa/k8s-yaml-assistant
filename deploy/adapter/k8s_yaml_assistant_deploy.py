@@ -103,9 +103,6 @@ _RFC3339_UTC = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
     r"[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$"
 )
-_CONTAINERD_IMAGE_ID = re.compile(r"^containerd://sha256:[a-f0-9]{64}$")
-
-
 @dataclass(frozen=True)
 class RuntimePaths:
     cosign_path: str
@@ -1262,11 +1259,7 @@ def _verify_ready_state(
     if (
         container_status.get("name") != CONTAINER
         or container_status.get("ready") is not True
-        or type(container_status.get("imageID")) is not str
     ):
-        raise AdapterFailure(mismatch_code)
-    image_id = container_status["imageID"]
-    if not _CONTAINERD_IMAGE_ID.fullmatch(image_id):
         raise AdapterFailure(mismatch_code)
 
 
