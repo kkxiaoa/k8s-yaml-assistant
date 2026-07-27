@@ -84,7 +84,7 @@ type ServingObservationConfig =
 - schema 还施加不受环境变量放大的 hard cap：`maxInputBytes <= 256 KiB`、`maxTextBytes <= 16 KiB`、`maxFileBytes <= 128 MiB`、`maxTotalBytes <= 1 GiB`、`retentionDays` 为 `1..30` 的整数。
 - 这些值是防止 parser、内存和本地磁盘被配置放大的安全天花板，不是隐藏运行默认值；需要更大边界时应重新 review 存储方案，不仅修改环境变量。
 - 非法配置 fail closed：recorder disabled，Ask 继续，进程只输出一次不含环境变量值和用户数据的错误码。
-- 本地文件根目录固定为项目的 `data/observability/`，本计划不开放任意绝对路径环境变量。
+- 本地文件根目录固定为项目的 `data/observability/segments/`；父目录可以是部署挂载点，但不直接作为写入根目录。本计划不开放任意绝对路径环境变量。
 - `.env.example` 只说明变量名和安全语义，不包含真实凭据或可被误认为生产推荐值的占位配置。
 
 ### 4.2 独立持久化协议

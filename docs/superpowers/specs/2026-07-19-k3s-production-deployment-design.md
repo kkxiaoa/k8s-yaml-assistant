@@ -675,7 +675,7 @@ GitOps（拉取式部署管理）必须由集群主动出站拉取，不因此�
 
 单副本 RollingUpdate（滚动更新）明确接受应用更新窗口：镜像拉取、索引加载和探针就绪期间可能不可用，SSE（服务器发送事件）连接会中断。`maxSurge=0` 不能单独证明进程级无重叠；Phase 3（阶段 3）必须通过终止钩子、writer lifecycle（写入端生命周期）和故障注入证明旧 writer（写入端）关闭后新 writer（写入端）才打开。若该不变量不能在标准 Deployment（工作负载）中可靠成立，必须停止并在 Recreate（重建更新）或真实多写入端 observation backend（观测后端）之间重新 review（审核），不能接受短暂双写。以后要求 `maxUnavailable=0`、多副本或跨节点时必须选择后者。
 
-只有受控的 `data/observability/` 挂载为持久可写目录，`/tmp` 使用有上限的 emptyDir（临时卷），其他应用路径保持只读。Pod securityContext（Pod 安全上下文）使用与 non-root user（非 root 用户）一致的 `fsGroup` 候选值 10001 和 `fsGroupChangePolicy=OnRootMismatch`，Phase 3（阶段 3）必须验证 local-path（本地路径）卷权限；不得添加 privileged init container（特权初始化容器）执行宽泛 `chmod`。未来计量模块需要的持久状态必须等待独立设计，不能复用 observation PVC（观测持久卷声明）。
+只有受控的 `data/observability/` 挂载为持久可写目录，应用固定使用其内部自行创建的 `0700` `segments/` 子目录作为写入根目录；`/tmp` 使用有上限的 emptyDir（临时卷），其他应用路径保持只读。Pod securityContext（Pod 安全上下文）使用与 non-root user（非 root 用户）一致的 `fsGroup` 候选值 10001 和 `fsGroupChangePolicy=OnRootMismatch`，Phase 3（阶段 3）必须验证 local-path（本地路径）卷权限；不得添加 privileged init container（特权初始化容器）执行宽泛 `chmod`。未来计量模块需要的持久状态必须等待独立设计，不能复用 observation PVC（观测持久卷声明）。
 
 ### 8.3 probes（探针）
 
@@ -885,7 +885,7 @@ docs/superpowers/specs/2026-07-14-serving-observation-safety-design.md 是 servi
 | maxTotalBytes | 256 MiB | 与 180 GiB 系统盘隔离出明确应用硬边界 |
 | retentionDays | 7 | 给人工筛选留出短窗口，不把 trace（轨迹）当长期数据仓库 |
 
-安全文件写入独立 local-path PVC（本地路径持久卷），挂载到应用固定的 `data/observability/` 目录；申请容量候选值为 1 GiB，但应用自身仍以 256 MiB 候选总量硬边界执行轮转和清理，因为 K3s local-path provisioner（K3s 本地路径制备器）不一定执行卷容量配额。该 PVC（持久卷声明）只保存受控命名的安全 observation segment（观测分段），不保存 data/index、原始 YAML、回答、Secret（密钥）、计量状态或旧 `serving-traces.jsonl`。索引仍随镜像交付，不因此改用 PVC（持久卷声明）。
+安全文件写入独立 local-path PVC（本地路径持久卷），挂载到应用固定的 `data/observability/` 目录，local sink（本地写入端）只使用应用创建的 `data/observability/segments/` 私有子目录；申请容量候选值为 1 GiB，但应用自身仍以 256 MiB 候选总量硬边界执行轮转和清理，因为 K3s local-path provisioner（K3s 本地路径制备器）不一定执行卷容量配额。该 PVC（持久卷声明）只保存受控命名的安全 observation segment（观测分段），不保存 data/index、原始 YAML、回答、Secret（密钥）、计量状态或旧 `serving-traces.jsonl`。索引仍随镜像交付，不因此改用 PVC（持久卷声明）。
 
 既有 local sink（本地写入端）只允许受控单进程写入。生产应用先以 RollingUpdate（滚动更新）的 `maxSurge=0`、`maxUnavailable=1` 候选策略接受单副本更新期间的短暂不可用，但该配置本身不证明 terminating Pod（终止中的容器组）已经停止写入。Phase 3（阶段 3）必须证明 writer lifecycle（写入端生命周期）无重叠；证明失败就停止，并在 Recreate（重建更新）与经过审核的多写入端 observability backend（可观测后端）之间重新选择。若以后要求无中断更新、多副本或跨节点，必须使用后者，不能扩展本地文件协议冒充分布式日志系统。
 
@@ -1164,7 +1164,7 @@ docker buildx imagetools inspect <ghcr-image>@sha256:<digest>
 - 如果 GitHub organization（GitHub 组织）能力允许，把生产运行器放入只允许当前仓库和 production deploy workflow（生产部署流水线）的 runner group（运行器组）；否则按已接受的个人仓库级边界注册。两种情况都必须核对没有新增公网监听端口；
 - 合并已通过全部门禁的 Release Pull Request（发布合并请求），由 Release Please（发布自动化工具）创建 Draft Release（草稿发布版本）并自动调用 release artifacts workflow（发布证据流水线）；确认发布证据生成结束后只留下草稿、生产运行器没有收到任务且 K3s 无变化。人工核对 release manifest（发布清单）并手工 Publish release（发布版本）后，才由 `release.published`（发布版本已发布）流水线直接创建或更新固定 Deployment（工作负载）；
 - 镜像使用 digest（内容摘要），replicas=1，配置安全上下文、资源、startup/readiness/liveness probes（启动 / 就绪 / 存活探针）；
-- 创建安全 serving observation（在线观测）专用 local-path PVC（本地路径持久卷），只挂载固定 `data/observability/` 目录；显式注入已审核的 local candidate profile（本地候选配置），保持 `maxSurge=0`、`maxUnavailable=1` 的单写入端更新边界；
+- 创建安全 serving observation（在线观测）专用 local-path PVC（本地路径持久卷），只挂载固定 `data/observability/` 目录，应用只在其 `0700` `segments/` 子目录写入；显式注入已审核的 local candidate profile（本地候选配置），保持 `maxSurge=0`、`maxUnavailable=1` 的单写入端更新边界；
 - 显式设置 ACCESS_MODE=private（访问模式为私有），验证缺失或非法值也不会开放匿名路由；本阶段不创建公开模式切换能力；
 - 仅通过 SSH tunnel（SSH 隧道）和 port-forward（端口转发）验证；
 - 安全 serving observation（在线观测）从本阶段开始持续启用；旧 `serving-traces.jsonl` 不读取、不迁移，清理由操作者在列出确切目标并单独确认后执行。
