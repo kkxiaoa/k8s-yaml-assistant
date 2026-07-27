@@ -80,7 +80,7 @@ test('dockerignore must exclude local state without excluding tracked schema clo
 
 test('gitignore excludes current local tool caches at the repository boundary', () => {
   for (const path of [
-    '.ruff_cache',
+    '.ruff_cache/',
     'deploy/adapter/__pycache__/',
     'deploy/adapter/adapter.pyc',
     'tsconfig.tsbuildinfo',
