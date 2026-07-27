@@ -303,6 +303,30 @@ test('GitHub deployment requests carry only the audited non-sensitive payload', 
   );
 });
 
+test('GitHub deployment status preserves an attempt-specific workflow run URL', () => {
+  const workflowRunUrl =
+    'https://github.com/kkxiaoa/k8s-yaml-assistant/actions/runs/456/attempts/3';
+
+  assert.equal(
+    JSON.parse(
+      createGitHubDeploymentStatusRequest({
+        state: 'failure',
+        description: 'Deployment adapter failed.',
+        workflowRunUrl,
+      }),
+    ).log_url,
+    workflowRunUrl,
+  );
+  assert.throws(() =>
+    createGitHubDeploymentStatusRequest({
+      state: 'failure',
+      description: 'Deployment adapter failed.',
+      workflowRunUrl:
+        'https://github.com/kkxiaoa/k8s-yaml-assistant/actions/runs/456/attempts/0',
+    }),
+  );
+});
+
 test('latest successful production deployment resolves one immutable digest', () => {
   assert.equal(resolveCurrentProductionDigest([]), null);
   assert.equal(

@@ -368,7 +368,7 @@ jobs:
           EMBEDDING_MODEL: ${{ needs.verify.outputs.embedding_model }}
           CURRENT_PRODUCTION_DIGEST: ${{ needs.verify.outputs.current_production_digest }}
           EXPECTED_RELEASE_NOTES_SHA256: ${{ needs.verify.outputs.release_notes_sha256 }}
-          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
           npm run release:manifest -- finalize \
             --source-sha "${{ inputs.source_sha }}" \

@@ -173,7 +173,7 @@ jobs:
         env:
           RELEASE_ACTION: ${{ steps.release.outputs.action }}
           TAG_COMMIT: ${{ steps.release.outputs.tag_commit }}
-          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
           if [[ "$RELEASE_ACTION" = "deploy" ]]; then
             PROVENANCE_BUNDLE="deployment-state/application-assets/provenance-attestation.sigstore.json"
@@ -323,7 +323,7 @@ jobs:
           REQUEST_BASE64: ${{ needs.validate.outputs.request_base64 }}
           RESULT_BASE64: ${{ needs.production.outputs.result_base64 }}
           JOB_RESULT: ${{ needs.production.result }}
-          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
           npm run deployment:authorize -- result \
             --request-base64 "$REQUEST_BASE64" \

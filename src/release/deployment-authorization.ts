@@ -374,7 +374,7 @@ export function resolveCurrentProductionDigest(value: unknown): string | null {
 const WorkflowRunUrlSchema = z
   .string()
   .regex(
-    /^https:\/\/github\.com\/kkxiaoa\/k8s-yaml-assistant\/actions\/runs\/[1-9][0-9]{0,31}$/u,
+    /^https:\/\/github\.com\/kkxiaoa\/k8s-yaml-assistant\/actions\/runs\/[1-9][0-9]{0,31}(?:\/attempts\/[1-9][0-9]{0,31})?$/u,
   );
 
 export function createGitHubDeploymentRequest(input: {

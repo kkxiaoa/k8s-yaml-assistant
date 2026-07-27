@@ -1,8 +1,8 @@
 # K3s 特权部署适配器设计
 
-> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-2（任务 7 步骤 1-2）已完成，`v0.1.0` 已 Publish（正式发布）；Step 3（步骤 3）的冷拉取已在安全回退后完整进入 containerd（容器运行时），OCI Image Index（开放容器镜像索引）根摘要与配置摘要已经分层，没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已完成本地收敛，等待 review（审核）。
+> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-3（任务 7 步骤 1-3）已完成，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已经清退；下一步是回滚草稿生命周期和完整私有验收。
 > 用途：定义华为云单机 K3s（轻量 Kubernetes）中固定应用发布的 deployment adapter（部署适配器）协议、信任边界、权限、并发、回滚和测试门禁。
-> 当前仓库和服务器已有固定适配器、信任根与权限配置，生产集群已有固定 bootstrap/Secret（引导配置 / 密钥）；仓库级 self-hosted runner（自托管运行器）已经注册并通过真实隔离与重启验证。涉及集群的三次失败均已删除本轮新建的 Deployment（工作负载）并清除操作标记，没有成功台账；目标镜像已完整缓存，80/443 仍未公开。
+> 当前仓库和服务器已有固定适配器、信任根与权限配置，生产集群已有固定 bootstrap/Secret（引导配置 / 密钥）；仓库级 self-hosted runner（自托管运行器）已经注册并通过真实隔离与重启验证。Attempt 1（第 1 次尝试）在生产调度前失败，Attempt 2-4（第 2-4 次尝试）均删除本轮新建的 Deployment（工作负载）并清除操作标记；Attempt 5（第 5 次尝试）成功后固定单副本 Deployment（工作负载）为 `1/1` 可用，成功台账只有一条事件，80/443 仍未公开。
 > 对应总计划：`docs/superpowers/plans/2026-07-19-k3s-production-deployment.md` 的 Task 12（任务 12）。独立实施计划位于 `docs/superpowers/plans/2026-07-20-k3s-deployment-adapter.md`。
 
 ## 1. 结论
@@ -27,30 +27,31 @@
 
 ## 2. 已核对事实
 
-### 2.1 仓库与候选发布
+### 2.1 仓库与已发布版本
 
 | 核对项 | 当前事实 |
 | --- | --- |
 | 仓库 | 个人私有仓库 `kkxiaoa/k8s-yaml-assistant`，默认分支 `main` |
-| 当前审核源码 | `d36128253e25243a9a17e291afa08b4e237133af` |
-| 应用镜像 | `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:d43a80db5ec4a4e98e1d813c2c99bbb348d2f37fbc154c539bdf1126ea9f18d2` |
+| 已发布应用源码 | `1cec0b4cc6e57a2b018ec260627bbb651a1dcb3b` |
+| 当前适配器源码 | `d40700ac34ca264df863316710b60275fff759bd` |
+| 应用镜像 | `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4` |
 | 平台 | `linux/amd64` |
-| Draft Release（草稿发布版本） | `v0.1.0`，仍为草稿，没有真实 Git tag（Git 标签） |
+| Release（发布版本） | `v0.1.0`，Release ID（发布版本标识）`359948311`，已于 2026-07-27 Publish（正式发布）并创建不可变 Git tag（Git 标签） |
 | 发布证据 | 六项附件存在，发布清单 schema（模式）版本为 2 |
 | 证明提供者 | `sigstore-cosign` |
 | 构建证明身份 | `https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/release-artifacts.yml@refs/heads/main` |
 | OIDC issuer（开放身份连接签发者） | `https://token.actions.githubusercontent.com` |
-| 当前生产内容摘要 | `null`，尚未部署 |
+| 当前生产内容摘要 | `sha256:8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4` |
 
 当前实际附件大小为：
 
 | 文件 | 字节数 | 适配器是否需要 |
 | --- | ---: | --- |
-| `provenance-attestation.sigstore.json` | 23,925 | 是 |
-| `provenance.slsa.json` | 12,399 | 否；同一 predicate（断言）已在证明包的 DSSE envelope（签名信封）中 |
+| `provenance-attestation.sigstore.json` | 23,690 | 是 |
+| `provenance.slsa.json` | 12,400 | 否；同一 predicate（断言）已在证明包的 DSSE envelope（签名信封）中 |
 | `release-manifest.json` | 3,675 | GitHub 托管验证任务需要，适配器不重复接收 |
-| `release-manifest.sigstore.json` | 10,770 | GitHub 托管验证任务需要，适配器不重复接收 |
-| `sbom-attestation.sigstore.json` | 1,480,580 | 否；不把与部署授权无关的大文件交给生产节点 |
+| `release-manifest.sigstore.json` | 10,527 | GitHub 托管验证任务需要，适配器不重复接收 |
+| `sbom-attestation.sigstore.json` | 1,480,482 | 否；不把与部署授权无关的大文件交给生产节点 |
 | `sbom.spdx.json` | 1,102,121 | 否 |
 
 现有来源证明包为 Sigstore bundle v0.3（Sigstore 证明包版本 0.3），包含 `dsseEnvelope` 和 `verificationMaterial`。其受签名内容实际绑定：
@@ -89,7 +90,7 @@ GitHub 的 label（标签）只负责把任务路由到匹配运行器，不是�
 | 应用 Namespace（命名空间） | `k8s-yaml-assistant-prod` 已创建并为 `Active`，Pod Security（容器组安全）固定 `restricted:v1.36` |
 | 固定 bootstrap（引导配置） | ServiceAccount、ConfigMap、ClusterIP Service、PVC 和 NetworkPolicy（服务账户 / 普通配置 / 集群内服务 / 持久卷声明 / 网络策略）已创建 |
 | 运行时 Secret（密钥） | `deepseek-runtime`、`voyage-runtime`、`ghcr-pull` 已按职责创建；值未回读 |
-| 应用 Deployment（工作负载） | 尚未创建 |
+| 应用 Deployment（工作负载） | 固定单副本，镜像为已发布 OCI Image Index root digest（开放容器镜像索引根摘要），当前 `1/1` 可用 |
 | 生产 runner（运行器） | 固定 UID/GID `996/988` 的 Linux 账号、同名组和 GitHub runner service（GitHub 运行器服务）已创建；运行器已注册，服务为 `active/enabled`（运行中 / 开机自启），GitHub 状态为在线空闲 |
 | kubeconfig（客户端配置） | `/etc/rancher/k3s/k3s.yaml`，`root:root 0600` |
 | Python（Python 运行时） | `3.12.3` |
@@ -100,7 +101,7 @@ GitHub 的 label（标签）只负责把任务路由到匹配运行器，不是�
 | 不作为依赖的工具 | GitHub CLI（GitHub 命令行工具）和 Node.js（Node.js 运行时）均未安装 |
 | 适配器固定路径 | 入口、配置目录、状态目录和 root-only（仅 root）运行时目录已按固定权限安装 |
 
-回读没有输出 kubeconfig（客户端配置）内容、Secret（密钥）值或凭据。Task 4（任务 4）只创建固定 bootstrap/Secret（引导配置 / 密钥）；Task 5（任务 5）按固定版本和摘要安装适配器、Cosign（签名工具）与生产 runner（运行器）并完成注册。修正配置已经通过真实 tmpfs（内存文件系统）容量、所有权、写入和服务重启验证，运行器在线空闲。应用 Deployment（工作负载）仍不存在，公网端口未开放。
+回读没有输出 kubeconfig（客户端配置）内容、Secret（密钥）值或凭据。Task 4（任务 4）只创建固定 bootstrap/Secret（引导配置 / 密钥）；Task 5（任务 5）按固定版本和摘要安装适配器、Cosign（签名工具）与生产 runner（运行器）并完成注册。修正配置已经通过真实 tmpfs（内存文件系统）容量、所有权、写入和服务重启验证。Task 7 Step 3（任务 7 步骤 3）的运行 `30265452918/5` 已创建固定 Deployment（工作负载），GitHub deployment（GitHub 部署记录）`5624354635` 为 `success`，应用 `1/1` 可用且 Pod（容器组）零重启；公网端口仍未开放。
 
 ## 3. 目标与非目标
 
