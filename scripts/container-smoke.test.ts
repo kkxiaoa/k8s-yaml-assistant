@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
@@ -79,22 +78,13 @@ test('dockerignore must exclude local state without excluding tracked schema clo
 });
 
 test('gitignore excludes current local tool caches at the repository boundary', () => {
-  for (const path of [
-    '.ruff_cache/',
-    'deploy/adapter/__pycache__/',
-    'deploy/adapter/adapter.pyc',
-    'tsconfig.tsbuildinfo',
-  ]) {
-    const result = spawnSync(
-      'git',
-      ['check-ignore', '--no-index', '--verbose', path],
-      {
-        cwd: root,
-        encoding: 'utf8',
-      },
-    );
-    assert.equal(result.status, 0, `${path}: ${result.stderr}`);
-    assert.match(result.stdout.trim(), /^\.gitignore:\d+:/u);
+  const rules = readFileSync(`${root}/.gitignore`, 'utf8')
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+
+  for (const rule of ['__pycache__/', '*.pyc', '.ruff_cache/', '*.tsbuildinfo']) {
+    assert.ok(rules.includes(rule), `.gitignore missing ${rule}`);
   }
 });
 
