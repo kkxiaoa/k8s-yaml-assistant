@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-1（阶段 0-1）和 Task 5-10（任务 5-10）已审核；Task 11（任务 11）的实现已经通过 Pull Request #2（合并请求 #2）合入 `main`。8,410 条正式索引已经构建、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并为 `aa3baeb047241f0bf3ead262c10b48f26f577a2c`，`v0.1.0` Draft Release（草稿发布版本）已经创建。发布状态和恢复修复已通过 Pull Request #6（合并请求 #6）合入 `main`；手工恢复已验证草稿、索引并构建候选镜像，但因 5 项 `HIGH`（高危）运行时依赖漏洞在签名和附件前失败关闭。当前安全修复分支升级受影响依赖并把 Trivy `HIGH/CRITICAL`（容器高危 / 严重漏洞）扫描前移到 Pull Request（合并请求）门禁；既有草稿仍无附件和实际 Git tag（Git 标签），合入后必须先重定向到精确新提交并更新发布说明，再恢复六项证据。
+> 状态：执行中；Phase 0-2（阶段 0-2）的实现和审核已完成，`v0.1.0` Draft Release（草稿发布版本）具有固定候选镜像、8,410 条正式索引和六项发布证据，但尚未 Publish（正式发布）或创建实际 Git tag（Git 标签）。Task 12（任务 12）的特权 deployment adapter（部署适配器）设计与独立实施计划已通过审核；Task 13（任务 13）已经完成固定 Kubernetes bootstrap/Secret（Kubernetes 引导配置 / 密钥）、适配器安装、仓库级 runner registration（运行器注册）和真实 systemd hardening（系统服务加固）验证。生产 runner（运行器）当前在线空闲并等待 Task 13 review（任务 13 审核）；应用 Deployment（工作负载）和公网入口仍未创建。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。
@@ -788,11 +788,11 @@ git diff --check
 - Create（创建）：`docs/superpowers/plans/2026-07-20-k3s-deployment-adapter.md`
 - Modify（修改）：`docs/README.md`
 
-- [ ] **Step 1（步骤 1）：重新核对真实部署面**
+- [x] **Step 1（步骤 1）：重新核对真实部署面**
 
 只读核对 K3s（轻量 Kubernetes）版本、Namespace/Deployment/container（命名空间 / 工作负载 / 容器）最终名称、GHCR repository（GHCR 仓库）、证明格式、runner scope（运行器范围）、服务器 CPU 架构、可用验证工具和 systemd（系统服务管理器）边界。不能根据本文占位名称编写命令。
 
-- [ ] **Step 2（步骤 2）：定义最小输入协议**
+- [x] **Step 2（步骤 2）：定义最小输入协议**
 
 适配器只接受固定动作和封闭输入：
 
@@ -803,17 +803,17 @@ rollback sha256:<64-hex> <bounded-provenance-bundle>
 
 Phase 4（阶段 4）审核前不实现 `set-access-mode`。目标 registry/repository/namespace/deployment/container（镜像仓库 / 命名空间 / 工作负载 / 容器）全部编译或 root-owned config（root 所有配置）固定；禁止命令、路径、URL（网址）、任意 manifest（清单）和额外 `kubectl` 参数输入。
 
-- [ ] **Step 3（步骤 3）：选择实现与证明验证边界**
+- [x] **Step 3（步骤 3）：选择实现与证明验证边界**
 
 设计必须选择可测试的实现语言、锁/并发协议、超时、幂等、原子状态台账、日志 schema（模式）、systemd/sudoers（系统服务 / 提权规则）和升级方式。签名/证明验证复用固定版本 GitHub CLI（GitHub 命令行工具）或 Cosign（镜像签名工具），不自研密码算法。
 
 必须明确 runner（运行器）不持有完整 kubeconfig（Kubernetes 客户端配置）、模型 Secret（密钥）、SSH 私钥、Docker socket（Docker 套接字）或 registry push token（镜像仓库推送令牌）；root-owned adapter（root 所有适配器）在本机访问 K3s API（K3s 应用程序接口）。
 
-- [ ] **Step 4（步骤 4）：定义先失败后实现的测试矩阵**
+- [x] **Step 4（步骤 4）：定义先失败后实现的测试矩阵**
 
 至少覆盖参数注入、错误 registry/repository（镜像仓库）、非 SHA-256、证明包超限/篡改/identity（身份）不符、subject digest（主体内容摘要）不符、未验收回滚 digest（内容摘要）、并发发布、锁遗留、超时、部分失败、readiness（就绪状态）失败、自动恢复失败、重复执行、日志泄露和 runner offline（运行器离线）。测试必须在隔离 fixture cluster/fake adapter boundary（夹具集群 / 伪适配器边界）运行，不能用生产集群试错。
 
-- [ ] **Step 5（步骤 5）：单独 review（审核）**
+- [x] **Step 5（步骤 5）：单独 review（审核）**
 
 design（设计）先审核，确认后再完成实施 plan（计划）的文件和步骤；不能以本总计划已审核代替适配器 review（审核）。
 
@@ -839,7 +839,7 @@ design（设计）先审核，确认后再完成实施 plan（计划）的文件
 - Modify（修改）：`scripts/deployment-contract.test.ts`
 - Modify（修改）：`scripts/workflow-contract.test.ts`
 
-- [ ] **Step 1（步骤 1）：先写资源和权限反例**
+- [x] **Step 1（步骤 1）：先写资源和权限反例**
 
 解析真实 Kubernetes（容器编排系统）资源并覆盖：
 
@@ -852,7 +852,7 @@ design（设计）先审核，确认后再完成实施 plan（计划）的文件
 - ConfigMap（普通配置）包含 Secret（密钥）、非法 `ACCESS_MODE`、未显式索引/模型/observation（观测）配置时失败；
 - 仓库出现 base64 Secret（Base64 编码密钥）、完整 kubeconfig（客户端配置）或真实 pull token（拉取令牌）时失败。
 
-- [ ] **Step 2（步骤 2）：实现固定非敏感资源和模板**
+- [x] **Step 2（步骤 2）：实现固定非敏感资源和模板**
 
 bootstrap（引导配置）只包含 Namespace（命名空间）、安全标签、ServiceAccount（服务账户）、ConfigMap（普通配置）、ClusterIP Service（集群内服务）、NetworkPolicy（网络策略）和 observation PVC（观测持久卷声明）等固定非版本资源；不提前创建已运行应用版本。
 
@@ -860,17 +860,19 @@ root-owned deployment template（root 所有工作负载模板）固定 replicas
 
 第一轮资源候选沿用已审核设计：CPU requests/limits（处理器请求 / 上限）为 500m/2，memory requests/limits（内存请求 / 上限）为 768 MiB/2 GiB，ephemeral-storage requests/limits（临时存储请求 / 上限）为 256 MiB/1 GiB；`fsGroup=10001`、`fsGroupChangePolicy=OnRootMismatch`。这些只是私有压测候选值，不能在 Task 20（任务 20）实测前写成容量承诺。
 
-- [ ] **Step 3（步骤 3）：安全创建运行时凭据**
+- [x] **Step 3（步骤 3）：安全创建运行时凭据**
 
 从外部密码管理器通过服务器本地受限临时输入创建分职责 Kubernetes Secret（Kubernetes 密钥）和只读 imagePullSecret（镜像拉取密钥）。不使用会把值留在 shell history/process list（命令历史 / 进程列表）的参数，不把生成 YAML（配置文件）、base64（Base64 编码）或 Secret（密钥）值保存到仓库/对话。创建后删除受控临时输入并验证权限；删除前列出精确文件并确认不包含其他数据。
 
-- [ ] **Step 4（步骤 4）：安装适配器与生产 runner（运行器）**
+- [x] **Step 4（步骤 4）：安装适配器与生产 runner（运行器）**
 
 按 Task 12（任务 12）安装 root-owned adapter（root 所有适配器）、独立无登录非 root runner account（运行器账号）、最小 sudoers（提权规则）和 systemd service（系统服务）。runner（运行器）不加入 docker group（Docker 组），不 checkout（检出）源码，不监听公网端口，只出站 443。
 
 GitHub organization（GitHub 组织）能力允许时使用只授权当前仓库/固定 workflow（工作流）的 runner group（运行器组）；个人私有仓库只能 repository-level runner（仓库级运行器）时，记录并接受较低隔离保证，不能用 label（标签）冒充访问控制。
 
-- [ ] **Step 5（步骤 5）：只验证 bootstrap（引导配置），不发布应用**
+2026-07-27 已按独立计划完成固定产物、适配器、Cosign（签名工具）、sudoers（提权规则）、固定 UID/GID（用户 / 组数字标识）运行器账号和仓库级 runner registration（运行器注册）。修正配置已经通过真实有界 tmpfs（内存文件系统）、root-only（仅 root）运行时目录、写入、服务重启和 GitHub 在线空闲验证，本步骤完成。
+
+- [x] **Step 5（步骤 5）：只验证 bootstrap（引导配置），不发布应用**
 
 ```bash
 sudo k3s kubectl apply --server-side --dry-run=server -f <reviewed-bootstrap-dir>

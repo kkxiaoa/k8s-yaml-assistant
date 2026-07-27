@@ -1,0 +1,347 @@
+name: Authorize and apply published release
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Verify published release and authorize deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    outputs:
+      request_base64: ${{ steps.request.outputs.request_base64 }}
+      deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+    steps:
+      - name: Checkout deployment verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.2
+
+      - name: Inspect published release event
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_DRAFT: ${{ github.event.release.draft }}
+          EVENT_PRERELEASE: ${{ github.event.release.prerelease }}
+          EVENT_ACTOR: ${{ github.actor }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          test "$EVENT_NAME" = "release"
+          test "$EVENT_ACTION" = "published"
+          test "$EVENT_DRAFT" = "false"
+          test "$EVENT_PRERELEASE" = "false"
+          test "$EVENT_ACTOR" = "kkxiaoa"
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
+          mkdir -p deployment-state
+          TAG_COMMIT="$(
+            gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" \
+              --jq .sha
+          )"
+          if [[ ! "$TAG_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "release tag did not resolve to one commit" >&2
+            exit 1
+          fi
+          test "$TAG_COMMIT" = "$GITHUB_SHA"
+          npm run deployment:authorize -- inspect-tag \
+            --release-tag "$RELEASE_TAG" \
+            --github-output "$GITHUB_OUTPUT"
+          echo "tag_commit=$TAG_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published application evidence
+        if: steps.release.outputs.action == 'deploy'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          TAG_COMMIT: ${{ steps.release.outputs.tag_commit }}
+        run: |
+          mkdir deployment-state/application-assets
+          gh release view "$RELEASE_TAG" \
+            --json databaseId,tagName,targetCommitish,isDraft,isPrerelease,publishedAt,body,assets \
+            --jq '{databaseId,tagName,targetCommitish,isDraft,isPrerelease,publishedAt,body,assets:[.assets[]|{name:.name}]}' \
+            > deployment-state/published-release.json
+          gh release download "$RELEASE_TAG" \
+            --dir deployment-state/application-assets
+          BUILD_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/release-artifacts.yml@refs/heads/main"
+          OIDC_ISSUER="https://token.actions.githubusercontent.com"
+          cosign verify-blob \
+            --bundle deployment-state/application-assets/release-manifest.sigstore.json \
+            --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            deployment-state/application-assets/release-manifest.json
+          npm run release:manifest -- verify-published \
+            --release-json deployment-state/published-release.json \
+            --assets-dir deployment-state/application-assets \
+            --tag-commit "$TAG_COMMIT" \
+            --identity-out deployment-state/deployment-identity.json
+          IMAGE_DIGEST="$(
+            node -p "require('./deployment-state/deployment-identity.json').imageDigest"
+          )"
+          cosign verify-blob-attestation \
+            --bundle deployment-state/application-assets/provenance-attestation.sigstore.json \
+            --digest "${IMAGE_DIGEST#sha256:}" \
+            --digestAlg sha256 \
+            --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            --type slsaprovenance1
+
+      - name: Verify published rollback evidence
+        if: steps.release.outputs.action == 'rollback'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SOURCE_TAG: ${{ steps.release.outputs.source_tag }}
+          TAG_COMMIT: ${{ steps.release.outputs.tag_commit }}
+        run: |
+          mkdir deployment-state/source-assets deployment-state/rollback-assets
+          gh release view "$RELEASE_TAG" \
+            --json databaseId,tagName,targetCommitish,isDraft,isPrerelease,publishedAt,assets \
+            --jq '{databaseId,tagName,targetCommitish,isDraft,isPrerelease,publishedAt,assets:[.assets[]|{name:.name}]}' \
+            > deployment-state/published-release.json
+          gh release view "$SOURCE_TAG" \
+            --json databaseId,tagName,targetCommitish,isDraft,isPrerelease,publishedAt,body,assets \
+            --jq '{databaseId,tagName,targetCommitish,isDraft,isPrerelease,publishedAt,body,assets:[.assets[]|{name:.name}]}' \
+            > deployment-state/source-release.json
+          SOURCE_COMMIT="$(
+            gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/commits/$SOURCE_TAG" \
+              --jq .sha
+          )"
+          if [[ ! "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "source release tag did not resolve to one commit" >&2
+            exit 1
+          fi
+          gh release download "$SOURCE_TAG" \
+            --dir deployment-state/source-assets
+          gh release download "$RELEASE_TAG" \
+            --dir deployment-state/rollback-assets
+          BUILD_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/release-artifacts.yml@refs/heads/main"
+          OIDC_ISSUER="https://token.actions.githubusercontent.com"
+          cosign verify-blob \
+            --bundle deployment-state/source-assets/release-manifest.sigstore.json \
+            --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            deployment-state/source-assets/release-manifest.json
+          npm run release:manifest -- verify-published \
+            --release-json deployment-state/source-release.json \
+            --assets-dir deployment-state/source-assets \
+            --tag-commit "$SOURCE_COMMIT" \
+            --identity-out deployment-state/source-identity.json
+          IMAGE_DIGEST="$(
+            node -p "require('./deployment-state/source-identity.json').imageDigest"
+          )"
+          cosign verify-blob-attestation \
+            --bundle deployment-state/source-assets/provenance-attestation.sigstore.json \
+            --digest "${IMAGE_DIGEST#sha256:}" \
+            --digestAlg sha256 \
+            --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            --type slsaprovenance1
+          npm run deployment:authorize -- verify-rollback \
+            --release-json deployment-state/published-release.json \
+            --tag-commit "$TAG_COMMIT" \
+            --provenance-bundle deployment-state/rollback-assets/provenance-attestation.sigstore.json \
+            --source-identity deployment-state/source-identity.json \
+            --identity-out deployment-state/deployment-identity.json
+
+      - name: Build deployment authorization
+        env:
+          RELEASE_ACTION: ${{ steps.release.outputs.action }}
+          TAG_COMMIT: ${{ steps.release.outputs.tag_commit }}
+          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ "$RELEASE_ACTION" = "deploy" ]]; then
+            PROVENANCE_BUNDLE="deployment-state/application-assets/provenance-attestation.sigstore.json"
+          else
+            PROVENANCE_BUNDLE="deployment-state/rollback-assets/provenance-attestation.sigstore.json"
+          fi
+          npm run deployment:authorize -- create \
+            --identity-json deployment-state/deployment-identity.json \
+            --provenance-bundle "$PROVENANCE_BUNDLE" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --release-commit "$TAG_COMMIT" \
+            --workflow-run-url "$WORKFLOW_RUN_URL" \
+            --authorization-out deployment-state/authorization.json \
+            --deployment-out deployment-state/deployment.json \
+            --pending-status-out deployment-state/pending-status.json
+
+      - name: Sign and verify deployment authorization
+        run: |
+          AUTHORIZATION_IDENTITY="https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/published-release-deploy.yml@refs/heads/main"
+          OIDC_ISSUER="https://token.actions.githubusercontent.com"
+          cosign sign-blob --yes \
+            --use-signing-config=true \
+            --bundle deployment-state/authorization.sigstore.json \
+            deployment-state/authorization.json
+          cosign verify-blob \
+            --bundle deployment-state/authorization.sigstore.json \
+            --certificate-identity "$AUTHORIZATION_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            --certificate-github-workflow-ref "$GITHUB_REF" \
+            --certificate-github-workflow-sha "$GITHUB_SHA" \
+            --certificate-github-workflow-repository "$GITHUB_REPOSITORY" \
+            --certificate-github-workflow-trigger release \
+            deployment-state/authorization.json
+
+      - name: Encode bounded deployment request
+        id: request
+        env:
+          RELEASE_ACTION: ${{ steps.release.outputs.action }}
+        run: |
+          if [[ "$RELEASE_ACTION" = "deploy" ]]; then
+            PROVENANCE_BUNDLE="deployment-state/application-assets/provenance-attestation.sigstore.json"
+          else
+            PROVENANCE_BUNDLE="deployment-state/rollback-assets/provenance-attestation.sigstore.json"
+          fi
+          npm run deployment:authorize -- request \
+            --authorization deployment-state/authorization.json \
+            --authorization-bundle deployment-state/authorization.sigstore.json \
+            --provenance-bundle "$PROVENANCE_BUNDLE" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Create pending production deployment
+        id: deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments" \
+            --input deployment-state/deployment.json \
+            > deployment-state/deployment-response.json
+          DEPLOYMENT_ID="$(
+            node -e '
+              const response = require("./deployment-state/deployment-response.json");
+              if (!Number.isSafeInteger(response.id) || response.id <= 0) {
+                throw new TypeError("deployment response has no valid id");
+              }
+              process.stdout.write(String(response.id));
+            '
+          )"
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            --input deployment-state/pending-status.json \
+            > /dev/null
+
+  production:
+    name: Apply authorized release on production
+    needs: validate
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - k8s-yaml-assistant-prod
+    timeout-minutes: 30
+    permissions: {}
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    outputs:
+      result_base64: ${{ steps.adapter.outputs.result_base64 }}
+    steps:
+      - name: Run fixed production adapter
+        id: adapter
+        env:
+          REQUEST_BASE64: ${{ needs.validate.outputs.request_base64 }}
+        run: |
+          set +e
+          ADAPTER_RESULT="$(
+            printf '%s' "$REQUEST_BASE64" |
+              base64 --decode |
+              sudo -n /usr/local/sbin/k8s-yaml-assistant-deploy
+          )"
+          ADAPTER_STATUS=$?
+          set -e
+          if [[ -n "$ADAPTER_RESULT" ]] &&
+             [[ "$ADAPTER_RESULT" != *$'\n'* ]] &&
+             (( ${#ADAPTER_RESULT} <= 4096 )); then
+            RESULT_BASE64="$(
+              printf '%s' "$ADAPTER_RESULT" | base64 | tr -d '\n'
+            )"
+            echo "result_base64=$RESULT_BASE64" >> "$GITHUB_OUTPUT"
+          else
+            ADAPTER_STATUS=1
+          fi
+          exit "$ADAPTER_STATUS"
+
+  finalize:
+    name: Record final production deployment status
+    needs:
+      - validate
+      - production
+    if: ${{ always() && needs.validate.outputs.deployment_id != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout deployment status verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Resolve bounded adapter result
+        env:
+          REQUEST_BASE64: ${{ needs.validate.outputs.request_base64 }}
+          RESULT_BASE64: ${{ needs.production.outputs.result_base64 }}
+          JOB_RESULT: ${{ needs.production.result }}
+          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          npm run deployment:authorize -- result \
+            --request-base64 "$REQUEST_BASE64" \
+            --result-base64 "${RESULT_BASE64:-none}" \
+            --job-result "$JOB_RESULT" \
+            --workflow-run-url "$WORKFLOW_RUN_URL" \
+            --status-out deployment-status.json
+
+      - name: Record final deployment status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ needs.validate.outputs.deployment_id }}
+        run: |
+          if [[ ! "$DEPLOYMENT_ID" =~ ^[1-9][0-9]{0,31}$ ]]; then
+            echo "deployment id is invalid" >&2
+            exit 1
+          fi
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            --input deployment-status.json \
+            > /dev/null

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-yaml-assistant
+  namespace: k8s-yaml-assistant-prod
+data:
+  DEEPSEEK_BASE_URL: https://api.deepseek.com/anthropic
+  DEEPSEEK_ANSWER_MODEL: deepseek-v4-flash
+  VOYAGE_EMBEDDING_URL: https://api.voyageai.com/v1/embeddings
+  VOYAGE_RERANK_URL: https://api.voyageai.com/v1/rerank
+  VOYAGE_EMBEDDING_MODEL: voyage-3
+  VOYAGE_RERANK_MODEL: rerank-2.5
+  INDEX_DIR: /app/data/index
+  ENABLE_QUERY_EXPANSION: "true"
+  ACCESS_MODE: private
+  NODE_ENV: production
+  PORT: "3000"
+  HOSTNAME: 0.0.0.0
+  SERVING_OBSERVATION_MODE: local
+  SERVING_OBSERVATION_SAMPLE_RATE: "1"
+  SERVING_OBSERVATION_MAX_FILE_BYTES: "16777216"
+  SERVING_OBSERVATION_MAX_TOTAL_BYTES: "268435456"
+  SERVING_OBSERVATION_RETENTION_DAYS: "7"
+  SERVING_OBSERVATION_MAX_INPUT_BYTES: "131072"
+  SERVING_OBSERVATION_MAX_TEXT_BYTES: "8192"

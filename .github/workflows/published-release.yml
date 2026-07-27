@@ -1,0 +1,17 @@
+name: Deploy published release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    uses: kkxiaoa/k8s-yaml-assistant/.github/workflows/published-release-deploy.yml@main

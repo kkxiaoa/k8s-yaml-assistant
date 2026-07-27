@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { load } from 'js-yaml';
@@ -13,6 +13,18 @@ const releaseArtifactsWorkflowPath = join(
   'release-artifacts.yml',
 );
 const indexWorkflowPath = join(workflowDir, 'index-build.yml');
+const publishedReleaseDeployWorkflowPath = join(
+  workflowDir,
+  'published-release-deploy.yml',
+);
+const publishedReleaseWorkflowPath = join(
+  workflowDir,
+  'published-release.yml',
+);
+const rollbackCandidateWorkflowPath = join(
+  workflowDir,
+  'rollback-candidate.yml',
+);
 const releasePleaseConfigPath = join(root, 'release-please-config.json');
 const releasePleaseManifestPath = join(root, '.release-please-manifest.json');
 const codeownersPath = join(root, '.github', 'CODEOWNERS');
@@ -70,6 +82,7 @@ const releaseArtifactFiles = [
 
 const prCommands = [
   'npm ci',
+  'npm run adapter:check',
   'npm run schemas:check',
   'npm run aliases:check',
   'npm run corpus:closure',
@@ -203,6 +216,39 @@ function assertSafeExecutionBoundary(source: string): void {
   assert.doesNotMatch(source, /\bself-hosted\b/u);
   assert.doesNotMatch(source, /\bschedule\s*:/u);
   assert.doesNotMatch(source, /\brepository_dispatch\s*:/u);
+}
+
+function assertNoEmbeddedCredentials(source: string, label: string): void {
+  assert.doesNotMatch(
+    source,
+    /-----BEGIN (?:EC |OPENSSH |RSA )?PRIVATE KEY-----/u,
+    label,
+  );
+  assert.doesNotMatch(
+    source,
+    /\b(?:certificate-authority|client-certificate|client-key)-data\s*:/u,
+    label,
+  );
+  assert.doesNotMatch(
+    source,
+    /\bACTIONS_RUNNER_INPUT_TOKEN\s*[:=]/u,
+    label,
+  );
+  assert.doesNotMatch(
+    source,
+    /\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b/u,
+    label,
+  );
+  for (const line of source.split(/\r?\n/u)) {
+    const match =
+      /^\s*(?:DEEPSEEK|VOYAGE)_API_KEY:\s*(?<value>.+)$/u.exec(line);
+    if (!match?.groups?.value) continue;
+    assert.match(
+      match.groups.value,
+      /^\$\{\{\s*secrets\.[A-Z0-9_]+\s*\}\}$/u,
+      label,
+    );
+  }
 }
 
 function assertCodeowners(): void {
@@ -459,6 +505,7 @@ function validateReleaseWorkflow(value: JsonObject, source: string): void {
   assert.equal(artifacts.uses, './.github/workflows/release-artifacts.yml');
   assert.deepEqual(artifacts.permissions, {
     contents: 'write',
+    deployments: 'read',
     packages: 'write',
     'id-token': 'write',
   });
@@ -477,6 +524,7 @@ function validateReleaseWorkflow(value: JsonObject, source: string): void {
   );
   assert.deepEqual(recoveredArtifacts.permissions, {
     contents: 'write',
+    deployments: 'read',
     packages: 'write',
     'id-token': 'write',
   });
@@ -520,6 +568,7 @@ function validateReleaseArtifactsWorkflow(
   assert.deepEqual(verify.permissions, {
     contents: 'write',
     packages: 'read',
+    deployments: 'read',
   });
   assert.deepEqual(build.permissions, {
     contents: 'read',
@@ -536,11 +585,19 @@ function validateReleaseArtifactsWorkflow(
     'release:manifest -- check',
     'gh release view',
     'release:manifest -- prepare',
+    'deployments?environment=production-private',
+    '/statuses?per_page=100',
+    'deployment:authorize -- current-production',
     'release:manifest -- index-identity',
     'docker buildx imagetools inspect',
     'cosign verify',
     'release:manifest -- verify-index',
   ]);
+  assert.equal(
+    object(verify.outputs, 'verify outputs').current_production_digest,
+    '${{ steps.production.outputs.current_production_digest }}',
+  );
+  assert.doesNotMatch(source, /vars\.CURRENT_PRODUCTION_DIGEST/u);
   assert.doesNotMatch(
     verifyText,
     /test "\$SOURCE_SHA" = "\$GITHUB_SHA"/u,
@@ -753,10 +810,257 @@ function validateIndexWorkflow(value: JsonObject, source: string): void {
   assert.doesNotMatch(source, /:latest\b/u);
 }
 
+function validatePublishedReleaseWorkflow(
+  value: JsonObject,
+  source: string,
+): void {
+  assert.deepEqual(object(value.on, 'published release triggers'), {
+    release: { types: ['published'] },
+  });
+  assert.deepEqual(value.permissions, { contents: 'read' });
+  assert.deepEqual(Object.keys(object(value.jobs, 'published release jobs')), [
+    'deploy',
+  ]);
+
+  const deploy = job(value, 'deploy');
+  assert.equal(
+    deploy.uses,
+    'kkxiaoa/k8s-yaml-assistant/.github/workflows/published-release-deploy.yml@main',
+  );
+  assert.deepEqual(deploy.permissions, {
+    contents: 'read',
+    deployments: 'write',
+    'id-token': 'write',
+  });
+  assert.equal(deploy.with, undefined);
+  assert.equal(deploy.secrets, undefined);
+  assert.equal(deploy.steps, undefined);
+  assert.equal(deploy['runs-on'], undefined);
+
+  assert.doesNotMatch(
+    source,
+    /\b(?:workflow_dispatch|push|pull_request|workflow_call|repository_dispatch|schedule)\s*:/u,
+  );
+  assert.doesNotMatch(source, /\$\{\{\s*secrets\./u);
+  assertNoEmbeddedCredentials(source, 'published release trigger');
+}
+
+function validatePublishedReleaseDeployWorkflow(
+  value: JsonObject,
+  source: string,
+): void {
+  assert.deepEqual(object(value.on, 'published release triggers'), {
+    workflow_call: null,
+  });
+  assert.deepEqual(value.permissions, { contents: 'read' });
+
+  const validate = job(value, 'validate');
+  assert.equal(validate['runs-on'], 'ubuntu-24.04');
+  assert.equal(validate['timeout-minutes'], 30);
+  assert.deepEqual(validate.permissions, {
+    contents: 'read',
+    deployments: 'write',
+    'id-token': 'write',
+  });
+  assert.deepEqual(validate.outputs, {
+    request_base64: '${{ steps.request.outputs.request_base64 }}',
+    deployment_id: '${{ steps.deployment.outputs.deployment_id }}',
+  });
+  const validateText = runText(validate, 'published release validation');
+  assertContains(source, [
+    'github.event_name',
+    'github.event.action',
+    'github.event.release.draft',
+    'github.event.release.prerelease',
+    'github.actor',
+    'job.workflow_sha',
+  ]);
+  assert.doesNotMatch(source, /github\.event\.sender\.login/u);
+  assertContains(validateText, [
+    'test "$EVENT_ACTION" = "published"',
+    'release:manifest -- verify-published',
+    'deployment:authorize -- verify-rollback',
+    'cosign verify-blob-attestation',
+    'deployment:authorize -- create',
+    'cosign sign-blob',
+    'cosign verify-blob',
+    '--certificate-github-workflow-ref "$GITHUB_REF"',
+    '--certificate-github-workflow-sha "$GITHUB_SHA"',
+    '--certificate-github-workflow-repository "$GITHUB_REPOSITORY"',
+    '--certificate-github-workflow-trigger release',
+    'deployment:authorize -- request',
+    'repos/$GITHUB_REPOSITORY/deployments',
+    '/statuses',
+  ]);
+  const publishedVerification = validateText.indexOf(
+    'release:manifest -- verify-published',
+  );
+  const rollbackVerification = validateText.indexOf(
+    'deployment:authorize -- verify-rollback',
+  );
+  const authorizationSigning = validateText.indexOf('cosign sign-blob');
+  assert.ok(publishedVerification >= 0);
+  assert.ok(rollbackVerification >= 0);
+  assert.ok(
+    authorizationSigning > publishedVerification &&
+      authorizationSigning > rollbackVerification,
+    'authorization signing must follow both published release branches',
+  );
+  assert.doesNotMatch(validateText, /\bcmp\b/u);
+
+  const production = job(value, 'production');
+  assert.equal(production.needs, 'validate');
+  assert.deepEqual(production['runs-on'], [
+    'self-hosted',
+    'Linux',
+    'X64',
+    'k8s-yaml-assistant-prod',
+  ]);
+  assert.deepEqual(production.permissions, {});
+  assert.equal(production['timeout-minutes'], 30);
+  assert.deepEqual(production.concurrency, {
+    group: 'production-deploy',
+    'cancel-in-progress': false,
+  });
+  assert.deepEqual(production.outputs, {
+    result_base64: '${{ steps.adapter.outputs.result_base64 }}',
+  });
+  assert.equal(production.container, undefined);
+  assert.equal(production.services, undefined);
+  const productionSteps = steps(production, 'production deployment');
+  assert.equal(productionSteps.length, 1);
+  assert.equal(productionSteps[0]?.uses, undefined);
+  assert.deepEqual(productionSteps[0]?.env, {
+    REQUEST_BASE64: '${{ needs.validate.outputs.request_base64 }}',
+  });
+  const productionRun =
+    typeof productionSteps[0]?.run === 'string'
+      ? productionSteps[0].run
+      : '';
+  assertContains(productionRun, [
+    'printf',
+    'base64 --decode',
+    'sudo -n /usr/local/sbin/k8s-yaml-assistant-deploy',
+    'result_base64=',
+    'ADAPTER_STATUS=1',
+    '$GITHUB_OUTPUT',
+  ]);
+  assert.doesNotMatch(
+    productionRun,
+    /\b(?:gh|git|node|npm|npx|docker|cosign|kubectl|curl|wget)\b/u,
+  );
+  assert.doesNotMatch(productionRun, /\beval\b|bash\s+-c|sh\s+-c/u);
+
+  const finalize = job(value, 'finalize');
+  assert.deepEqual(finalize.needs, ['validate', 'production']);
+  assert.equal(
+    finalize.if,
+    "${{ always() && needs.validate.outputs.deployment_id != '' }}",
+  );
+  assert.equal(finalize['runs-on'], 'ubuntu-24.04');
+  assert.deepEqual(finalize.permissions, {
+    contents: 'read',
+    deployments: 'write',
+  });
+  assertContains(runText(finalize, 'deployment finalizer'), [
+    'deployment:authorize -- result',
+    'repos/$GITHUB_REPOSITORY/deployments/',
+    '/statuses',
+  ]);
+  assertContains(source, [
+    'needs.production.result',
+    'needs.production.outputs.result_base64',
+  ]);
+
+  assertPinnedReviewedActions(value);
+  assert.doesNotMatch(
+    source,
+    /\b(?:workflow_dispatch|push|pull_request|repository_dispatch|schedule)\s*:/u,
+  );
+  assert.doesNotMatch(source, /\$\{\{\s*secrets\./u);
+  assert.doesNotMatch(source, /\b(?:VOYAGE|DEEPSEEK)_API_KEY\b/u);
+  assertNoEmbeddedCredentials(source, 'published release deployment');
+}
+
+function validateRollbackCandidateWorkflow(
+  value: JsonObject,
+  source: string,
+): void {
+  const triggers = object(value.on, 'rollback candidate triggers');
+  assert.deepEqual(Object.keys(triggers), ['workflow_dispatch']);
+  const inputs = object(
+    object(triggers.workflow_dispatch, 'rollback dispatch').inputs,
+    'rollback inputs',
+  );
+  assert.deepEqual(Object.keys(inputs), ['source_tag']);
+  const sourceTag = object(inputs.source_tag, 'rollback source tag');
+  assert.equal(sourceTag.required, true);
+  assert.equal(sourceTag.type, 'string');
+  assert.deepEqual(value.concurrency, {
+    group: 'rollback-candidate',
+    'cancel-in-progress': false,
+  });
+  assert.deepEqual(value.permissions, { contents: 'read' });
+
+  const candidate = job(value, 'candidate');
+  assert.equal(candidate['runs-on'], 'ubuntu-24.04');
+  assert.equal(candidate['timeout-minutes'], 30);
+  assert.deepEqual(candidate.permissions, { contents: 'write' });
+  const candidateSteps = steps(candidate, 'rollback candidate');
+  assert.equal(candidateSteps[0]?.uses, undefined);
+  assertContains(
+    typeof candidateSteps[0]?.run === 'string'
+      ? candidateSteps[0].run
+      : '',
+    [
+      'test "$EVENT_ACTOR" = "kkxiaoa"',
+      'test "$EVENT_REF" = "refs/heads/main"',
+    ],
+  );
+  const candidateText = runText(candidate, 'rollback candidate');
+  assertContains(candidateText, [
+    'release:manifest -- verify-published',
+    'cosign verify-blob',
+    'cosign verify-blob-attestation',
+    'deployment:authorize -- rollback-candidate',
+    'deployment:authorize -- verify-rollback-draft',
+    'gh release list',
+    'gh release create',
+    '--draft',
+    '--target "$GITHUB_SHA"',
+    'provenance-attestation.sigstore.json',
+  ]);
+  assert.doesNotMatch(candidateText, /\bcmp\b/u);
+  assertPinnedReviewedActions(value);
+  assertSafeExecutionBoundary(source);
+  assert.doesNotMatch(source, /\bdeployments\s*:/u);
+  assert.doesNotMatch(source, /\bdeployment:authorize -- (?:create|request)\b/u);
+  assert.doesNotMatch(source, /\bgh\s+release\s+(?:publish|delete|edit)\b/u);
+  assert.doesNotMatch(source, /\$\{\{\s*secrets\./u);
+  assert.doesNotMatch(source, /\b(?:VOYAGE|DEEPSEEK)_API_KEY\b/u);
+  assertNoEmbeddedCredentials(source, 'rollback candidate');
+}
+
 test('pull request workflow owns source gates and checks release indexes without secrets', () => {
   const actual = workflow(prWorkflowPath, 'PR workflow');
   validatePrWorkflow(actual.value, actual.source);
   assertCodeowners();
+});
+
+test('only the fixed production deployment workflow may route to the production runner', () => {
+  for (const name of readdirSync(workflowDir).filter((candidate) =>
+    /\.ya?ml$/u.test(candidate),
+  )) {
+    if (name === 'published-release-deploy.yml') continue;
+    const source = readFileSync(join(workflowDir, name), 'utf8');
+    assert.doesNotMatch(source, /\bself-hosted\b/u, name);
+    assert.doesNotMatch(
+      source,
+      /\bk8s-yaml-assistant-prod\b/u,
+      name,
+    );
+    assertNoEmbeddedCredentials(source, name);
+  }
 });
 
 test('release lifecycle owns version preparation and draft creation', () => {
@@ -773,6 +1077,30 @@ test('release artifact workflow verifies identities without repeating PR gates',
   validateReleaseArtifactsWorkflow(actual.value, actual.source);
 });
 
+test('published release tags call the main deployment workflow', () => {
+  const actual = workflow(
+    publishedReleaseWorkflowPath,
+    'published release trigger workflow',
+  );
+  validatePublishedReleaseWorkflow(actual.value, actual.source);
+});
+
+test('published release deployment validates on hosted runners before the minimal production job', () => {
+  const actual = workflow(
+    publishedReleaseDeployWorkflowPath,
+    'published release deployment workflow',
+  );
+  validatePublishedReleaseDeployWorkflow(actual.value, actual.source);
+});
+
+test('rollback candidates accept only one published source release tag', () => {
+  const actual = workflow(
+    rollbackCandidateWorkflowPath,
+    'rollback candidate workflow',
+  );
+  validateRollbackCandidateWorkflow(actual.value, actual.source);
+});
+
 test('manual index workflow is the only workflow allowed to consume Voyage', () => {
   const actual = workflow(indexWorkflowPath, 'index workflow');
   validateIndexWorkflow(actual.value, actual.source);
@@ -780,6 +1108,9 @@ test('manual index workflow is the only workflow allowed to consume Voyage', () 
     prWorkflowPath,
     releaseWorkflowPath,
     releaseArtifactsWorkflowPath,
+    publishedReleaseWorkflowPath,
+    publishedReleaseDeployWorkflowPath,
+    rollbackCandidateWorkflowPath,
   ]) {
     assert.doesNotMatch(readFileSync(path, 'utf8'), /\bVOYAGE_API_KEY\b/u);
   }

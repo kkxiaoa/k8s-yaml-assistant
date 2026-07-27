@@ -31,21 +31,25 @@ test('repository container files satisfy the release build contract', () => {
 
 test('dockerignore must exclude local state without excluding tracked schema closure', () => {
   const contract = repositoryContract();
-  const requiredExclusions = [
-    '.env',
-    '.git',
-    'node_modules',
-    '.next',
-    'data/index',
-    'data/observability',
-    'data/eval/runs',
-    'data/eval/traces',
+  const requiredExclusions: Array<[string, string]> = [
+    ['.env', '.env'],
+    ['.git', '.git'],
+    ['.ruff_cache', '.ruff_cache'],
+    ['__pycache__', '__pycache__'],
+    ['*.pyc', 'adapter.pyc'],
+    ['*.tsbuildinfo', 'tsconfig.tsbuildinfo'],
+    ['node_modules', 'node_modules'],
+    ['.next', '.next'],
+    ['data/index', 'data/index'],
+    ['data/observability', 'data/observability'],
+    ['data/eval/runs', 'data/eval/runs'],
+    ['data/eval/traces', 'data/eval/traces'],
   ];
 
-  for (const exclusion of requiredExclusions) {
+  for (const [rule, excludedPath] of requiredExclusions) {
     const mutated = contract.dockerignore
       .split('\n')
-      .filter((line) => line.trim() !== exclusion)
+      .filter((line) => line.trim() !== rule)
       .join('\n');
     assert.throws(
       () =>
@@ -53,7 +57,7 @@ test('dockerignore must exclude local state without excluding tracked schema clo
           ...contract,
           dockerignore: mutated,
         }),
-      new RegExp(exclusion.replaceAll(/[./]/g, '\\$&')),
+      new RegExp(excludedPath.replaceAll(/[./]/g, '\\$&')),
     );
   }
 
@@ -70,6 +74,17 @@ test('dockerignore must exclude local state without excluding tracked schema clo
         }),
       /tracked schema closure/,
     );
+  }
+});
+
+test('gitignore excludes current local tool caches at the repository boundary', () => {
+  const rules = readFileSync(`${root}/.gitignore`, 'utf8')
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+
+  for (const rule of ['__pycache__/', '*.pyc', '.ruff_cache/', '*.tsbuildinfo']) {
+    assert.ok(rules.includes(rule), `.gitignore missing ${rule}`);
   }
 });
 
