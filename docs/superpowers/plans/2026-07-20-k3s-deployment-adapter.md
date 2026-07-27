@@ -1,6 +1,6 @@
 # K3s 特权部署适配器实施计划
 
-> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-4（任务 7 步骤 1-4）已完成，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes），真实回滚草稿生命周期也已完成无部署验证。Step 5（步骤 5）的只读验收发现 production observation root（生产观测根目录）权限阻断，真实观测生命周期和模型冒烟尚未完成。固定单副本 Deployment（工作负载）仍为 `1/1` 可用，成功台账只有该发布的一条事件，80/443 仍未公开；同区域镜像分发仍作为未来冷拉取的独立风险。
+> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-4（任务 7 步骤 1-4）已完成，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes），真实回滚草稿生命周期也已完成无部署验证。Step 5（步骤 5）发现的 production observation root（生产观测根目录）权限阻断已有本地通过的最小修复，当前等待受控 Pull Request（合并请求）、新版本发布与重新部署；真实观测生命周期和模型冒烟尚未完成。固定单副本 Deployment（工作负载）仍为 `1/1` 可用，成功台账只有该发布的一条事件，80/443 仍未公开；同区域镜像分发仍作为未来冷拉取的独立风险。
 > 用途：把已审核的 K3s（轻量 Kubernetes）特权 deployment adapter（部署适配器）设计拆成反例优先的仓库实现、Kubernetes bootstrap（Kubernetes 引导配置）、生产 runner（运行器）、发布工作流和私有验收步骤。
 > 对应设计：`docs/superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md`。
 > 执行位置：本计划的 Task 1-5（任务 1-5）服务于生产部署总计划的 Task 13（任务 13）；Task 6-7（任务 6-7）服务于总计划的 Task 14（任务 14）。每个 Task（任务）完成后独立停止审核。
@@ -861,7 +861,7 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 - 单副本、`RollingUpdate maxSurge=0/maxUnavailable=1`（滚动更新最大新增 0 / 最大不可用 1）、单容器写入挂载和 `ReadWriteOnce`（单节点读写）共同保证当前最多一个 observation writer（观测写入端）。从本机验证公网 80/443/6443 均超时不可达。
 - 阻断：local-path PV（本地路径持久卷）的宿主目录实际为 `2777 root`，容器内挂载根目录为 `0777 root:10001`；安全 local sink（本地写入端）要求根目录不向组或其他用户开放，因此启动日志明确记录 `stage=sink code=root_unsafe` 并关闭观测。目录仍为空，5 行应用日志没有 YAML、prompt、answer、Secret、API key（配置文件 / 提示词 / 回答 / 密钥 / 应用程序接口密钥）模式，但这不能替代真实脱敏、轮转、7 天/256 MiB、人工删除和符号链接拒绝验收。
 
-在修复、安全发布并重新部署前，不调用 Ask/Generate/Fix（询问 / 生成 / 修复）制造无法持久化的线上请求，也不把本地单元测试当作生产观测验收。推荐的最小修复是让应用在已挂载 PVC（持久卷声明）内创建并固定使用自身拥有的 `0700` 子目录；不引入 root init container（root 初始化容器）、宿主机手工改权或新的存储基础设施。该修复必须先写能复现 `0777` 挂载根目录的反例测试，再通过受控 Pull Request（合并请求）、新发布版本和相同私有部署路径验证。
+在修复、安全发布并重新部署前，不调用 Ask/Generate/Fix（询问 / 生成 / 修复）制造无法持久化的线上请求，也不把本地容器测试当作生产观测验收。最小修复固定使用 PVC（持久卷声明）内 `/app/data/observability/segments` 作为 local sink（本地写入端）根目录，不引入 root init container（root 初始化容器）、宿主机手工改权或新的存储基础设施。容器反例先复现 `0777 root` 挂载根目录并失败，修复后证明应用以 UID/GID（用户 / 组标识）`10001/10001` 创建 `0700` 私有子目录；当前仍须通过受控 Pull Request（合并请求）、新发布版本和相同私有部署路径完成生产验证。
 
 - [ ] **Step 6（步骤 6）：演练自动恢复**
 
