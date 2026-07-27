@@ -20,6 +20,7 @@ import k8s_yaml_assistant_deploy as deployer
 IMAGE_NAME = "ghcr.io/kkxiaoa/k8s-yaml-assistant"
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
+CONFIG_DIGEST = "sha256:" + "c" * 64
 COMMIT_A = "1" * 40
 COMMIT_B = "2" * 40
 NOW = datetime.datetime(2026, 7, 27, 8, 0, tzinfo=datetime.timezone.utc)
@@ -202,9 +203,18 @@ def pods_json(
     *,
     ready: bool = True,
     image_id: str | None = None,
+    image: str | None = None,
     count: int = 1,
 ) -> bytes:
     item = {
+        "spec": {
+            "containers": [
+                {
+                    "name": "app",
+                    "image": image or f"{IMAGE_NAME}@{digest}",
+                }
+            ]
+        },
         "status": {
             "containerStatuses": [
                 {
@@ -237,6 +247,7 @@ class FakeRunner:
         self.pod_ready = True
         self.pod_count = 1
         self.image_id_override: str | None = None
+        self.pod_image_override: str | None = None
         self.observed_verification_files: dict[str, bytes] = {}
 
     def __call__(
@@ -316,6 +327,7 @@ class FakeRunner:
                     self.digest,
                     ready=self.pod_ready,
                     image_id=self.image_id_override,
+                    image=self.pod_image_override,
                     count=self.pod_count,
                 ),
                 False,
@@ -926,13 +938,17 @@ class ProofAndCommandTests(FixtureTestCase):
                 ]:
                     if digest is None:
                         raise SystemExit(23)
-                    print(json.dumps({{"items": [{{"status": {{
-                        "containerStatuses": [{{
+                    print(json.dumps({{"items": [{{
+                        "spec": {{"containers": [{{
+                            "name": {deployer.CONTAINER!r},
+                            "image": {deployer.IMAGE_NAME!r} + "@" + digest,
+                        }}]}},
+                        "status": {{"containerStatuses": [{{
                             "name": {deployer.CONTAINER!r},
                             "ready": True,
-                            "imageID": "containerd://" + digest,
-                        }}],
-                    }}}}]}}))
+                            "imageID": "containerd://" + {CONFIG_DIGEST!r},
+                        }}]}},
+                    }}]}}))
                 elif args == [
                     "delete", "deployment", {deployer.DEPLOYMENT!r},
                     "--ignore-not-found=true", "--wait=true",
@@ -1139,6 +1155,15 @@ class KubernetesStateMachineTests(FixtureTestCase):
         self.assertIsNone(self.fixture.runner.digest)
         self.assertFalse((self.fixture.state_dir / "operation.json").exists())
 
+    def test_containerd_config_digest_can_differ_from_oci_index_digest(
+        self,
+    ) -> None:
+        self.fixture.runner.image_id_override = f"containerd://{CONFIG_DIGEST}"
+        exit_code, result = self.fixture.run()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(result["result"], "success")
+        self.assertEqual(result["targetDigest"], DIGEST_A)
+
     def test_readiness_mismatches_do_not_write_success_ledger(self) -> None:
         cases = [
             ({"observed_generation": 0}, True, 1, None),
@@ -1147,7 +1172,7 @@ class KubernetesStateMachineTests(FixtureTestCase):
             ({"available_replicas": 0}, True, 1, None),
             ({}, False, 1, None),
             ({}, True, 2, None),
-            ({}, True, 1, f"containerd://{DIGEST_B}"),
+            ({}, True, 1, "containerd://not-a-digest"),
         ]
         for overrides, ready, count, image_id in cases:
             with self.subTest(
@@ -1164,6 +1189,11 @@ class KubernetesStateMachineTests(FixtureTestCase):
                 self.assert_failure(request_bytes(), "apply_failed_rolled_back")
                 self.assertFalse((self.fixture.state_dir / "ledger.json").exists())
                 self.fixture.runner = FakeRunner()
+
+    def test_pod_image_reference_must_match_authorized_digest(self) -> None:
+        self.fixture.runner.pod_image_override = f"{IMAGE_NAME}@{DIGEST_B}"
+        self.assert_failure(request_bytes(), "apply_failed_rolled_back")
+        self.assertFalse((self.fixture.state_dir / "ledger.json").exists())
 
     def test_first_deploy_failure_deletes_only_the_fixed_deployment(
         self,
