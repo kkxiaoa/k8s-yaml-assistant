@@ -543,7 +543,7 @@ const BuildSchema = z.strictObject({
   workflowRunUrl: z
     .string()
     .regex(
-      /^https:\/\/github\.com\/kkxiaoa\/k8s-yaml-assistant\/actions\/runs\/[1-9]\d*$/u,
+      /^https:\/\/github\.com\/kkxiaoa\/k8s-yaml-assistant\/actions\/runs\/[1-9]\d*(?:\/attempts\/[1-9]\d*)?$/u,
     ),
   nodeBaseImage: BaseImageSchema,
   runtimeBaseImage: BaseImageSchema,

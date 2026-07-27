@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署设计
 
-> 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产，2026-07-23 审核批准六项发布证据和 Cosign（签名与证明工具）无密钥证明方案，2026-07-24 审核批准 Release Please（发布自动化工具）单一版本所有权与独立索引产物流程，2026-07-26 审核批准把候选镜像 `HIGH/CRITICAL`（高危 / 严重）漏洞扫描前移到 Pull Request（合并请求）门禁，2026-07-27 审核批准发布阶段以单次 Trivy（容器漏洞扫描）完整报告同时承担证据与失败关闭门禁。
+> 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产，2026-07-23 审核批准六项发布证据和 Cosign（签名与证明工具）无密钥证明方案，2026-07-24 审核批准 Release Please（发布自动化工具）单一版本所有权与独立索引产物流程，2026-07-26 审核批准把候选镜像 `HIGH/CRITICAL`（高危 / 严重）漏洞扫描前移到 Pull Request（合并请求）门禁，2026-07-27 审核批准发布阶段以单次 Trivy（容器漏洞扫描）完整报告同时承担证据与失败关闭门禁；同日 `v0.1.0` 已通过人工 Publish（正式发布）和 Attempt 5（第 5 次尝试）完成首次私有部署。
 > 用途：定义当前项目在华为云单机 K3s（轻量 Kubernetes）上的生产部署架构、实施边界和验收门禁。
 > 本文维护设计边界；实际实施状态和审核停止点以对应实施计划为准。
 
@@ -47,7 +47,7 @@
 | Task 11（任务 11）开始时工作区 | 已包含经逐项 review（审核）的本地计划和规则差异；本任务继续保留未暂存边界 |
 | 本轮依赖恢复 | 已按要求执行 npm ci |
 
-GitHub private repository（GitHub 私有仓库）、GitHub Pro（GitHub 专业版）、MFA（多因素认证）、默认分支门禁和 Pull Request verify（合并请求验证）已经建立。Task 11（任务 11）实现已经合入 `main`；8,410 条正式索引已经由独立流水线生成、校验和签名，Release Pull Request #3（发布合并请求 #3）已压缩合并，`v0.1.0` Draft Release（草稿发布版本）已经创建。草稿权限、无参数恢复和活动草稿互斥问题已由 Pull Request #6（合并请求 #6）修复；恢复运行成功构建旧源码候选，但在签名前因 5 项 `HIGH`（高危）运行时依赖漏洞失败关闭。当前受控安全修复分支升级受影响依赖并增加 Pull Request（合并请求）运行镜像扫描；既有草稿尚无附件或真实标签，合入后必须先重定向到精确新提交并更新发布说明。
+GitHub private repository（GitHub 私有仓库）、GitHub Pro（GitHub 专业版）、MFA（多因素认证）、默认分支门禁和 Pull Request verify（合并请求验证）已经建立。Task 11（任务 11）实现已经合入 `main`；8,410 条正式索引已经由独立流水线生成、校验和签名。Release Pull Request #3（发布合并请求 #3）压缩合并后形成的 `v0.1.0` 已整体重定向到审核提交 `1cec0b4cc6e57a2b018ec260627bbb651a1dcb3b`、重建六项证据并由唯一管理员 Publish（正式发布）。发布镜像 `sha256:8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4` 已通过运行 `30265452918/5` 部署到私有 K3s（轻量 Kubernetes）；公开入口仍未创建。
 
 ### 2.2 构建与运行时
 
@@ -1325,14 +1325,14 @@ sudo journalctl -u k3s --since "1 hour ago"
 
 按优先级排序：
 
-1. serving observation（在线观测）的严格 schema（模式）、脱敏、稳定采样、轮转、保留、删除和磁盘上限已实现；生产 PVC（持久卷声明）、单副本单写入端、目录权限、Pod（容器组）接线和告警验收尚未完成，因此生产模式仍必须保持 `off`（关闭）。
+1. serving observation（在线观测）的严格 schema（模式）、脱敏、稳定采样、轮转、保留、删除和磁盘上限已实现；生产 PVC（持久卷声明）和 Pod（容器组）已经接线，单副本当前只有一个写入端。目录写入、轮转、删除、磁盘上限、符号链接拒绝和告警仍须在私有验收中用非敏感输入证明。
 2. 工作区 data/index 仍只有 8,127 条且属于旧索引格式，当前加载会明确失效；它不再是生产交付来源。8,410 条正式索引已经作为独立、校验并签名的 GHCR artifact（GHCR 产物）交付，当前只剩候选应用镜像按 digest（内容摘要）引入并回读验证该产物。
-3. /api/health/live 和 /api/health/ready 健康端点已经实现；Kubernetes startup/readiness/liveness probe（启动 / 就绪 / 存活探针）资源接线和真实容器时序仍待验证。
+3. /api/health/live 和 /api/health/ready 健康端点已经实现并接入 Kubernetes startup/readiness/liveness probe（启动 / 就绪 / 存活探针）；首次私有部署中 Pod（容器组）就绪且节点通过 ClusterIP（集群内服务地址）实际得到 `live/ready`（存活 / 就绪）响应。供应商故障和索引失效的生产反例仍待私有验收。
 4. 没有 ACCESS_MODE（访问模式）服务端授权、管理员专用切换路径、认证、请求体大小、限流、并发和费用熔断；不能公开。
 5. 没有独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计，也没有 Turnstile（人机验证）服务端校验、匿名安全会话或 Interview Pass（面试临时通行证）实现；portfolio（作品集展示）可以公开页面和本地 YAML 检查，但匿名付费模型能力不能启用。存储介质尚未选择，不能把 SQLite/PVC（嵌入式数据库 / 持久卷声明）当作既定答案。
-6. DeepSeek/Voyage（深度求索 / 向量服务）端点和模型身份已按官方契约显式固定，安全错误映射与流式失败协议已实现；ConfigMap/Secret（普通配置 / 密钥）资源接线和供应商故障的生产冒烟测试仍待完成。
-7. Dockerfile、`.dockerignore`、私有 GitHub remote（GitHub 远程仓库）、Pull Request Actions（合并请求流水线）、默认分支规则、Action SHA pinning（流水线动作提交哈希固定）、immutable releases（不可变发布版本）、`index-build` Environment（索引构建环境）、`CURRENT_PRODUCTION_DIGEST`（当前生产镜像摘要）变量、8,410 条正式索引和 `v0.1.0` Draft Release（草稿发布版本）已经建立。最小权限、草稿快照、无参数恢复和活动草稿互斥门禁已经由 Pull Request #6（合并请求 #6）收口；旧源码候选因 5 项 `HIGH`（高危）运行时依赖漏洞被拒绝，草稿仍无附件或真实标签。当前阻断是合入依赖安全与 Pull Request Trivy（合并请求容器漏洞扫描）门禁、把尚未发布的草稿重定向到精确新提交并恢复六项证据；`v*` tag ruleset（标签规则集）尚未建立，因此不得 Publish（正式发布）。GitHub Pro private repository（GitHub 专业版私有仓库）不能使用 GitHub artifact attestation（GitHub 产物证明），已审核改用 Cosign（签名与证明工具）无密钥证明并接受公开透明日志元数据；生产部署 runner/adapter（运行器 / 适配器）仍待后续 Task（任务）独立实现。
-8. K3s（轻量 Kubernetes）已经安装并完成 Phase 1（阶段 1）审核，但生产部署 runner/adapter（运行器 / 适配器）仍不存在。
+6. DeepSeek/Voyage（深度求索 / 向量服务）端点和模型身份已按官方契约显式固定，安全错误映射与流式失败协议已实现；ConfigMap/Secret（普通配置 / 密钥）已经接线，供应商故障的生产冒烟测试仍待完成。
+7. Dockerfile、`.dockerignore`、私有 GitHub remote（GitHub 远程仓库）、Pull Request Actions（合并请求流水线）、默认分支规则、Action SHA pinning（流水线动作提交哈希固定）、immutable releases（不可变发布版本）、`index-build` Environment（索引构建环境）、8,410 条正式索引、`v0.1.0` 不可变发布和六项证据已经建立。无生产消费者的 `CURRENT_PRODUCTION_DIGEST` 仓库变量已经删除；当前生产内容摘要由固定适配器成功台账提供。GitHub Pro private repository（GitHub 专业版私有仓库）不能使用 GitHub artifact attestation（GitHub 产物证明），已审核改用 Cosign（签名与证明工具）无密钥证明并接受公开透明日志元数据。
+8. K3s（轻量 Kubernetes）、固定适配器和仓库级生产 runner（运行器）已经安装并审核；首次私有部署成功。个人仓库级运行器不能像 organization runner group（组织运行器组）一样限制到单一工作流，因此固定适配器仍是生产权限边界。
 9. 最终域名、DNS（域名系统）控制权、OAuth（开放授权）允许名单和证书策略尚未确定；Turnstile（人机验证）生产配置、可承受日预算及计量契约只在准备开放匿名模型能力时进入设计。
 10. 当前尚未基于 8,410 条语料完成正式全量质量评估和错误解释人工正确性审核；在公开发布前必须完成或显式接受风险。
 

@@ -1,6 +1,6 @@
 # K3s 特权部署适配器实施计划
 
-> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-2（任务 7 步骤 1-2）已完成，`v0.1.0` 已 Publish（正式发布）。Step 3（步骤 3）的私有部署已安全定位公网冷拉取、OCI Image Index（开放容器镜像索引）根摘要与配置摘要混淆，以及把 runtime-specific（运行时特有）`imageID` 错当成授权身份门禁三个真实问题。当前没有成功台账或应用 Deployment（工作负载）；`imageID` 产品门禁及对应夹具模拟已经移除并通过本地门禁，等待 review（审核）后安装并利用已缓存镜像重试，同区域镜像分发仍作为后续冷拉取方案。
+> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-3（任务 7 步骤 1-3）已完成，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。固定单副本 Deployment（工作负载）当前为 `1/1` 可用，成功台账只有该发布的一条事件，80/443 仍未公开。下一步是 Step 4（步骤 4）的真实回滚草稿生命周期；同区域镜像分发仍作为未来冷拉取的独立风险。
 > 用途：把已审核的 K3s（轻量 Kubernetes）特权 deployment adapter（部署适配器）设计拆成反例优先的仓库实现、Kubernetes bootstrap（Kubernetes 引导配置）、生产 runner（运行器）、发布工作流和私有验收步骤。
 > 对应设计：`docs/superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md`。
 > 执行位置：本计划的 Task 1-5（任务 1-5）服务于生产部署总计划的 Task 13（任务 13）；Task 6-7（任务 6-7）服务于总计划的 Task 14（任务 14）。每个 Task（任务）完成后独立停止审核。
@@ -25,7 +25,7 @@
 | Python（Python 运行时） | `/usr/bin/python3`，版本 `3.12.3` |
 | sudo（提权工具） | `1.9.15p5`，`/usr/sbin/visudo` 可用 |
 | systemd（系统服务管理器） | `255`，`/usr/bin/systemd-analyze` 可用 |
-| 应用资源 | `k8s-yaml-assistant-prod` Namespace（命名空间）、固定 bootstrap（引导配置）和三类运行时 Secret（密钥）已创建；Deployment（工作负载）尚未创建 |
+| 应用资源 | `k8s-yaml-assistant-prod` Namespace（命名空间）、固定 bootstrap（引导配置）和三类运行时 Secret（密钥）已创建；Deployment（工作负载）固定到 `v0.1.0` 的镜像内容摘要并为 `1/1` 可用 |
 | 生产 runner（运行器） | 系统账号和组已创建；`huawei-k3s-prod-1` 已注册到当前私有仓库，服务为 `active/enabled`（运行中 / 开机自启），GitHub 状态为在线空闲 |
 | 固定适配器路径 | 入口、配置、状态目录、root-only（仅 root）运行时目录和 Cosign（签名工具）均已按固定权限安装 |
 
@@ -780,7 +780,7 @@ Publish（正式发布）必须由管理员在 GitHub UI/API（GitHub 网页 / �
 
 只有 Step 1（步骤 1）的整体回读完成后才能请求本步骤授权；不得只修改 `targetCommitish` 或只替换部分附件。
 
-- [ ] **Step 3（步骤 3）：验证首次 direct deploy（直接部署）**
+- [x] **Step 3（步骤 3）：验证首次 direct deploy（直接部署）**
 
 确认：
 
@@ -803,8 +803,14 @@ Publish（正式发布）必须由管理员在 GitHub UI/API（GitHub 网页 / �
 - 根摘要与配置摘要分层修复由 Pull Request #14（合并请求 #14）合入 `main`，服务器原子安装后摘要与合并提交一致，上一版本以 `root:root 0700` 保留；空输入 sudo（提权）探针仍以 `invalid_request` 失败关闭。
 - attempt 4（尝试 4）再次验证六项证据并命中完整镜像缓存，容器约 2 秒启动，但适配器在 18.3 秒内再次返回 `apply_failed_rolled_back`。K3s（轻量 Kubernetes）只读历史记录证明 Pod spec image（容器组声明镜像）保持授权根摘要，而 `imageID` 是裸配置摘要 `sha256:8284fc3bbc31f0f31876864ffeca075c93e233cf77181cd7c689a435578a8a48`；测试夹具此前使用的 `containerd://sha256:...` 实际混淆了 `containerID`（容器实例标识）命名方式。回退后仍没有 Deployment/Pod（工作负载 / 容器组）、成功台账或遗留 `operation.json`。
 - `imageID` 不能独立证明运行时内容对应授权根摘要，且在节点失陷时与其他 Pod status（容器组状态）字段处于同一不可信边界；继续校验其运行时格式没有实际安全收益。当前收敛删除生产代码中的该字段读取和格式门禁，也删除测试夹具中的模拟，只保留 Deployment/Pod 声明镜像、Pod Ready（容器组就绪）和副本状态门禁。
+- `imageID` 门禁收敛修复由 Pull Request #15（合并请求 #15）合入 `main`，合并提交为 `d40700ac34ca264df863316710b60275fff759bd`。服务器原子安装的适配器 SHA-256（安全哈希算法 256 位）为 `2a05bbf549e741ff14c8e920d7e101ccd1f0bfdf7284a1a87f76dde89be814a8`，上一版本以 `root:root 0700` 保留；安装后的空输入 sudo（提权）探针仍以 `invalid_request` 失败关闭。
+- 同一运行 `30265452918` 的 attempt 5（尝试 5）完整通过发布身份与六项证据验证、部署授权签名、生产适配器应用和最终 GitHub deployment status（GitHub 部署状态）回写。三个 job（任务）分别在 31 秒、37 秒和 26 秒内成功，最新 `production-private` GitHub deployment（私有生产部署记录）`5624354635` 的最终状态为 `success`。
+- 复盘发现 attempt 2-5（尝试 2-5）的 deployment status（部署状态）使用同一个通用 run URL（运行链接），导致历史失败记录的 `View logs`（查看日志）跳到最新成功尝试。本分支将未来部署状态和发布清单链接固定到精确 `/attempts/<run_attempt>`，同时保留既有 `v0.1.0` 发布清单的旧链接兼容；GitHub 已记录的历史状态不回写。
+- K3s（轻量 Kubernetes）独立回读确认 Deployment（工作负载）的 generation/observedGeneration（版本 / 已观察版本）均为 1，`replicas/readyReplicas/availableReplicas/updatedReplicas`（副本 / 就绪副本 / 可用副本 / 已更新副本）均为 1；Pod（容器组）为 `Running/Ready` 且重启次数为 0。Deployment/Pod spec image（工作负载 / 容器组声明镜像）固定为 `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4`。
+- `ledger.json` 为 `root:root 0600`，只有一条成功事件，精确绑定 Release ID（发布版本标识）`359948311`、`v0.1.0`、源提交 `1cec0b4cc6e57a2b018ec260627bbb651a1dcb3b`、上述镜像摘要和 workflow run/attempt（流水线运行 / 尝试次数）`30265452918/5`；没有遗留 `operation.json`。
+- 节点通过 ClusterIP（集群内服务地址）实际访问 `/api/health/live` 和 `/api/health/ready`，分别得到 `{"status":"live"}` 和 `{"status":"ready"}`。该检查只完成 Step 3（步骤 3）的运行态确认，不替代 Step 5（步骤 5）的完整私有功能、安全、资源和 observation（观测）验收。
 
-已撤回扩大 Deployment `progressDeadlineSeconds`（工作负载进度期限）、适配器 rollout（滚动发布）和生产任务超时的候选改动。剩余工作：审核并安装 `imageID` 门禁收敛修复，利用已缓存镜像重跑 Step 3（步骤 3）；同区域镜像分发方案独立解决未来冷拉取，不再阻塞当前镜像的私有验收。
+已撤回扩大 Deployment `progressDeadlineSeconds`（工作负载进度期限）、适配器 rollout（滚动发布）和生产任务超时的候选改动。当前镜像因 attempt 2（尝试 2）的后台拉取已命中完整缓存；同区域镜像分发仍须在下一次真实冷拉取前解决，不能把本次热缓存成功解释为 GHCR（GitHub 容器镜像仓库）跨境分发风险已经消失。
 
 - [ ] **Step 4（步骤 4）：证明真实回滚草稿生命周期不部署**
 

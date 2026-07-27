@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署实施计划
 
-> 状态：执行中；Phase 0-2（阶段 0-2）的实现和审核已完成，`v0.1.0` Draft Release（草稿发布版本）具有固定候选镜像、8,410 条正式索引和六项发布证据，但尚未 Publish（正式发布）或创建实际 Git tag（Git 标签）。Task 12（任务 12）的特权 deployment adapter（部署适配器）设计与独立实施计划已通过审核；Task 13（任务 13）已经完成固定 Kubernetes bootstrap/Secret（Kubernetes 引导配置 / 密钥）、适配器安装、仓库级 runner registration（运行器注册）和真实 systemd hardening（系统服务加固）验证。生产 runner（运行器）当前在线空闲并等待 Task 13 review（任务 13 审核）；应用 Deployment（工作负载）和公网入口仍未创建。
+> 状态：执行中；Phase 0-2（阶段 0-2）、Task 12-13（任务 12-13）和 Task 14 Step 1-2（任务 14 步骤 1-2）的实现与审核已完成。具有 8,410 条正式索引和六项发布证据的 `v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）；固定单副本 Deployment（工作负载）当前为 `1/1` 可用。Task 14（任务 14）仍需完成受控草稿不部署、完整私有验收和回滚；公网入口仍未创建。
 > 对应设计：`docs/superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，该设计已通过 review（审核）。
 > 用途：把已审核的生产部署设计拆成可验证、可回滚、逐阶段停下的实施任务；本文不构成服务器、GitHub（代码托管平台）、模型调用或公开访问授权。
 > Task 10（任务 10）合并提交：`273704fb72133abed5d70678d0259de9c Merge pull request #1 from kkxiaoa/feat/github-pr-gates`。
@@ -900,7 +900,7 @@ sudo ss -lntup
 - Modify（修改）：`src/release/manifest.ts`
 - Modify（修改）：`src/release/manifest.test.ts`
 
-- [ ] **Step 1（步骤 1）：先写 direct deploy（直接部署）反例**
+- [x] **Step 1（步骤 1）：先写 direct deploy（直接部署）反例**
 
 覆盖：
 
@@ -911,7 +911,7 @@ sudo ss -lntup
 - rollout（滚动发布）失败不恢复上一 digest（内容摘要）、回滚可选择发布台账外镜像或无新人工确认时失败；
 - draft（草稿）保存/删除能创建 GitHub deployment（GitHub 部署记录）或改变 K3s 时失败。
 
-- [ ] **Step 2（步骤 2）：实现 published release（已发布版本）验证与部署工作流**
+- [x] **Step 2（步骤 2）：实现 published release（已发布版本）验证与部署工作流**
 
 GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功后才调度生产 runner（运行器）。生产 job（任务）不 checkout（检出），只调用已安装的固定适配器；`production-deploy` concurrency（生产部署并发）设置 `cancel-in-progress=false`。记录 Release ID（发布版本标识）、发布确认账号、前后 digest（内容摘要）、workflow run（流水线运行）和结果，不记录 payload（负载）或 Secret（密钥）。
 
@@ -919,9 +919,9 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 
 保留、编辑和删除一个受控测试 draft Release（草稿发布版本），确认生产 runner（运行器）没有 job（任务）、K3s 中没有应用 Deployment（工作负载）、GitHub deployment（GitHub 部署记录）没有成功记录。不得用“暂时关闭 runner（运行器）”掩盖触发器错误。
 
-- [ ] **Step 4（步骤 4）：人工发布并执行首次 direct deploy（直接部署）**
+- [x] **Step 4（步骤 4）：人工发布并执行首次 direct deploy（直接部署）**
 
-唯一维护者逐项核对 release manifest（发布清单）、漏洞、索引身份、候选/回滚 digest（内容摘要）和维护窗口后，手工点击 Publish release（发布版本）。验证只有发布事件触发适配器创建固定单副本 Deployment（工作负载），实际运行 image ID（镜像标识）等于确认 digest（内容摘要）。
+唯一维护者逐项核对 release manifest（发布清单）、漏洞、索引身份、候选/回滚 digest（内容摘要）和维护窗口后，手工点击 Publish release（发布版本）。验证只有发布事件触发适配器创建固定单副本 Deployment（工作负载），Deployment/Pod spec image（工作负载 / 容器组声明镜像）严格等于确认的 OCI Image Index root digest（开放容器镜像索引根摘要）；不把运行时内部 `imageID` 当作独立发布身份。
 
 - [ ] **Step 5（步骤 5）：通过隧道完成私有验收**
 
