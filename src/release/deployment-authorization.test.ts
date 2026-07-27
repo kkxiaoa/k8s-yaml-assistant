@@ -368,6 +368,33 @@ test('latest successful production deployment resolves one immutable digest', ()
   );
 });
 
+test('complete GitHub histories may span more than one API page', () => {
+  const deployments = Array.from({ length: 101 }, (_, index) =>
+    deploymentRecord({
+      statusCreatedAt:
+        `2026-07-27T08:00:00.${String(index).padStart(3, '0')}Z`,
+      payload: deploymentPayload({
+        imageDigest: index === 100 ? imageDigest : previousDigest,
+      }),
+    }),
+  );
+  assert.equal(resolveCurrentProductionDigest(deployments), imageDigest);
+
+  const releases = Array.from({ length: 101 }, (_, index) => ({
+    tagName: `v0.0.${index + 1}`,
+    isDraft: false,
+  }));
+  assert.equal(
+    resolveRollbackCandidateTag({
+      sourceTag: 'v0.1.0',
+      imageDigest,
+      workflowRunId: '789',
+      releases,
+    }),
+    `rollback-v0.1.0-sha256-${'b'.repeat(64)}-r789`,
+  );
+});
+
 test('deployment history rejects false success and ambiguous identities', async (t) => {
   const invalid: Array<[string, unknown]> = [
     [

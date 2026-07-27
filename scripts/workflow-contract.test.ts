@@ -312,9 +312,17 @@ function validatePrWorkflow(value: JsonObject, source: string): void {
   assert.equal(releaseState['runs-on'], 'ubuntu-24.04');
   assertContains(runText(releaseState, 'PR release state'), [
     'gh api',
+    '--paginate',
+    '--slurp',
     'releases?per_page=100',
+    "jq 'add'",
     'active application draft blocks a new release PR',
   ]);
+  assert.doesNotMatch(source, /--jq 'add/u);
+  assert.doesNotMatch(
+    source,
+    /release inventory exceeds the bounded inspection page/u,
+  );
   assert.equal(
     steps(releaseState, 'PR release state')[0]?.if,
     "github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--branches--main')",
@@ -430,11 +438,19 @@ function validateReleaseWorkflow(value: JsonObject, source: string): void {
     },
   );
   assertContains(runText(releaseState, 'release state'), [
+    '--paginate',
+    '--slurp',
     'releases?per_page=100',
+    "jq 'add | map",
     'commits/$GITHUB_SHA/pulls',
     'release:manifest -- gate',
     '--tag-commit "$TAG_COMMIT"',
   ]);
+  assert.doesNotMatch(
+    source,
+    /release inventory exceeds the bounded inspection page/u,
+  );
+  assert.doesNotMatch(source, /--jq 'add/u);
 
   const releasePlease = job(value, 'release_please');
   assert.equal(releasePlease.needs, 'inspect_release_state');
@@ -587,6 +603,9 @@ function validateReleaseArtifactsWorkflow(
     'release:manifest -- prepare',
     'deployments?environment=production-private',
     '/statuses?per_page=100',
+    '--paginate',
+    '--slurp',
+    "jq 'add'",
     'deployment:authorize -- current-production',
     'release:manifest -- index-identity',
     'docker buildx imagetools inspect',
@@ -739,6 +758,8 @@ function validateReleaseArtifactsWorkflow(
   assert.doesNotMatch(source, /\b(?:VOYAGE|DEEPSEEK)_API_KEY\b/u);
   assert.doesNotMatch(source, /\bgh\s+release\s+(?:create|edit)\b/u);
   assert.doesNotMatch(source, /\bgh\s+api\b[\s\S]*git\/refs/u);
+  assert.doesNotMatch(source, /deployment response must be a bounded array/u);
+  assert.doesNotMatch(source, /--jq 'add/u);
   assert.doesNotMatch(source, /--notes-file\b|--generate-notes\b/u);
   assert.doesNotMatch(source, /\bsecret-envs\b/u);
   assert.doesNotMatch(source, /npm run index:build/u);
@@ -1057,13 +1078,19 @@ function validateRollbackCandidateWorkflow(
     'cosign verify-blob-attestation',
     'deployment:authorize -- rollback-candidate',
     'deployment:authorize -- verify-rollback-draft',
-    'gh release list',
+    'gh api',
+    '--paginate',
+    '--slurp',
+    'releases?per_page=100',
+    "jq 'add | map",
     'gh release create',
     '--draft',
     '--target "$GITHUB_SHA"',
     'provenance-attestation.sigstore.json',
   ]);
   assert.doesNotMatch(candidateText, /\bcmp\b/u);
+  assert.doesNotMatch(candidateText, /\bgh release list\b/u);
+  assert.doesNotMatch(candidateText, /--jq 'add/u);
   assertPinnedReviewedActions(value);
   assertSafeExecutionBoundary(source);
   assert.doesNotMatch(source, /\bdeployments\s*:/u);
