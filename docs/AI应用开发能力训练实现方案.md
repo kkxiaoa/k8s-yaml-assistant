@@ -49,12 +49,14 @@
 
 以下状态是当前主线和停止点的唯一摘要；运行证据与完整步骤保留在直接引用的实施计划中，不在其他入口文档复制。
 
-- 当前主线是 Production Deployment（生产部署），质量评估主线保持暂停。
+- Production Deployment（生产部署）的私有部署阶段已按审核结论收敛，当前主线进入 Phase 4 Task 15（阶段 4 任务 15）的本地访问策略、请求解码与费用前置保护实现；公开入口配置尚未开始。
 - 四份 2026-07-12 纠偏计划、Phase B（阶段 B）工程清理和 Case Governance（评估用例治理）已经完成结构实现与审核；尚未执行新版本完整模型评估或晋升 baseline（基线）。
-- `v0.1.0` 已携带 8,410 条正式索引和六项发布证据完成不可变发布，并通过运行 `30265452918` Attempt 5（第 5 次尝试）部署到私有 K3s（轻量 Kubernetes）；固定单副本 Deployment（工作负载）为 `1/1` 可用，生产 runner（运行器）保持运行中和开机自启。
-- 私有验收发现 production observation root（生产观测根目录）权限过宽，运行时以 `root_unsafe` 安全关闭。卷内 `0700` 私有子目录修复已随 `v0.1.1` 源提交 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d` 合入；对应 Draft Release（草稿发布版本）尚无附件，证据运行 `30286776498` 被非标准文案门禁误阻断。
-- 当前唯一下一路径：审核并合入发布校验边界修复，恢复同一 `v0.1.1` 草稿，生成六项证据，人工 Publish（正式发布），重新部署，再继续真实观测生命周期、有限模型冒烟、恢复和节点重启验收。
-- 80/443、公开入口和匿名模型能力继续关闭；同区域镜像分发在下一次依赖冷拉取前仍需解决。完成私有验收后才恢复 Phase B（阶段 B）的正式质量重建。
+- `v0.1.0` 已携带 8,410 条正式索引和六项发布证据完成不可变发布，并通过运行 `30265452918` Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。随后发现的 production observation root（生产观测根目录）权限阻断已由卷内 `0700` 私有子目录修复，修复随 `v0.1.1` 源提交 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d` 发布。
+- 经本次明确授权，精确绑定该源提交、包含六项发布证据的 `v0.1.1` 已于 2026-07-28 Publish（正式发布）并创建实际不可变标签。`Deploy published release`（部署已发布版本）运行 `30296287472` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5628234264` 均成功。随后人工确认回滚 Release（发布版本）`360812512` 已 Publish（正式发布），运行 `30325880287` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5633580284` 把生产回滚到 `v0.1.0`。经再次明确授权，恢复 Release（发布版本）`360824879` 已于 `2026-07-28T03:56:06Z` Publish（正式发布）；运行 `30327301138` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5633826683` 均成功，生产当前恢复并固定在 `v0.1.1` 镜像摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37`，仓库 `Latest`（最新发布）仍为普通 `v0.1.1` Release（发布版本）。
+- 因跨境 GHCR（GitHub 容器镜像仓库）冷拉取过慢且 SWR（华为云容器镜像服务）企业版仍待审批，本次在 Publish（正式发布）前使用一次性临时路径：本机按精确摘要拉取 `linux/amd64` 镜像，生成保留根摘要的 OCI archive（开放容器镜像归档），校验归档哈希后经 SSH（安全远程登录）传输并导入节点。临时认证文件和两端归档均已删除，节点保留当前生产所需的已导入内容；该路径不替代后续同区域镜像分发方案。
+- 当前固定单副本 Deployment（工作负载）为 `1/1` 可用，Pod（容器组）重启为 `1`，且只来自本次获授权的节点重启，稳定观察期内没有继续增加。生产 runner（运行器）服务为 `active/enabled`（运行中 / 开机自启），GitHub（代码托管平台）显示在线空闲，操作标记不存在。公网 80/443/6443 仍不可达，没有 Ingress（入口）；容器保持非 root（非超级用户）、只读根文件系统、零 Linux capability（Linux 能力）和未挂载 ServiceAccount token（服务账户令牌）。
+- `v0.1.1` 的非模型验收已确认 live/ready（存活 / 就绪）和 `/api/check`，8,410 条镜像内索引身份、哈希与零在线重建，以及 `/app/data/observability/segments` 为 `10001:10001 0700` 且不再出现 `root_unsafe`。经另行授权完成 1 个非敏感 `/api/ask` 请求：HTTP 200、两个预期来源、回答引用完整，精确字段路径证明未进入 Voyage embedding/rerank（Voyage 向量嵌入 / 重排）。生产写入的 1 条 `0600 10001:10001` 严格观测记录不含当前 YAML（配置文件）、提示词或回答。回滚到 `v0.1.0` 后应用按已知边界再次以 `root_unsafe` 安全关闭观测；恢复到 `v0.1.1` 后私有子目录、权限和正常观测边界重新生效，启动日志不再出现 `root_unsafe`，既有分段在整个往返过程中保持 1,170 字节、1 行且权限和所有者不变。回滚和恢复过程均没有模型调用。16 MiB 轮转、7 天 / 256 MiB 清理、人工删除和符号链接拒绝仍只有与 `v0.1.1` 源码一致的本地门禁，没有生产实证。
+- Step 6（步骤 6）当前没有合格真实故障候选，不制造生产故障；Step 7（步骤 7）的标签保护、两次人工 Publish（正式发布）、节点本地镜像命中、生产回滚、恢复和台账闭环已经完成。成功台账当前有四个事件、两个不同摘要，最新事件精确绑定恢复运行 `30327301138/1` 且 `action=rollback`；生产运行器在线空闲，操作标记不存在。Step 8（步骤 8）也已在独立授权下完成：重启前创建并上传数据库与服务端令牌分离备份 `20260728T041517Z-8d2b24cc-0d2d-4954-9997-ce6b2f1aa3e6`，管理员回读核对三项摘要一致；节点重启后 boot ID（启动标识）变为 `b9e5a5c6-b52f-4fb3-9a4d-1d54bc971a71`，K3s（轻量 Kubernetes）、运行器和应用自动恢复，`root:root 0700` 运行时目录按规则重建。节点直接复用本地 `v0.1.1` 镜像，台账、操作标记、观测分段和索引身份均未变化，没有重复部署、模型调用或在线索引重建。2026-07-28 独立审核已接受 Step 5（步骤 5）的部分验收边界和 Step 6（步骤 6）的明确延期风险，Task 7 Step 9（任务 7 步骤 9）事实状态同步完成；这不表示真实观测生命周期或自动恢复生产演练已经完成，也不授权公开入口、模型调用、索引重建或 baseline（基线）晋升。
 
 以下语料和评估数字是 2026-07-19 的工作区快照，索引交付状态更新于 2026-07-28；它们都不是永久规格，若与命令输出冲突，以命令输出为准。
 
@@ -76,7 +78,7 @@ npm run corpus:stats
 - 尚未注册真实数据 provider：`docs`、`example`。
 - `data/schemas/curated.json` 显式包含 2 个真实集群 CRD（自定义资源定义）：`gateway.networking.k8s.io/v1 HTTPRoute` 和 `cert-manager.io/v1 Certificate`。
 - corpus identityVersion（语料身份版本）为 `2`，manifest hash（清单哈希）为 `82621edc73530dffc86e21fe6488a332e98f7d2e1efba3d0d995e7b66fb880c4`。
-- 现有本地 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求 v5 索引格式和 knowledge identity v2（知识身份版本 2），因此当前以 `format_mismatch` 失效。默认 `voyage-3` 的 v5 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`；8,410 条正式索引已经由独立 GitHub Actions（GitHub 自动化流水线）生成、完整回读校验并签名，且已烘焙进 `v0.1.0` 应用镜像并部署；本地目录仍未重建。
+- 现有本地 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求 v5 索引格式和 knowledge identity v2（知识身份版本 2），因此当前以 `format_mismatch` 失效。默认 `voyage-3` 的 v5 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`；8,410 条正式索引已经由独立 GitHub Actions（GitHub 自动化流水线）生成、完整回读校验并签名，且已烘焙进 `v0.1.0` 和当前生产 `v0.1.1` 应用镜像；本地目录仍未重建。
 
 ### 3.2 Eval 数据
 
@@ -319,15 +321,15 @@ Stage 是能力分类，不代表执行时序。
 3. 已完成：工程清理登记的 Deferred Risk Closure（延期风险收敛）第 1-6 项均已核对、处理并完成审核。
 4. 已完成：Case Governance（评估用例治理）已贯通 case contract、artifact、suite、泄漏门禁和分桶报告。
 5. 已完成：补入 2 条真实错误解释、2 个真实 CRD（自定义资源定义）主题和 Retrieval/Grounded Answer、Generation、Fix 的首批 Holdout（留出集）。
-6. 当前暂停项：清理 ignored artifacts（被忽略的产物），重建或复用与发布候选完全一致的 8,410 条 index（索引）和 run artifacts（运行产物），依次运行 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）评估；该项在生产部署计划的公开前质量闸恢复。
+6. 当前暂停项：清理 ignored artifacts（被忽略的产物），重建或复用与发布候选完全一致的 8,410 条 index（索引）和 run artifacts（运行产物），依次运行 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）评估；只有 Phase 4（阶段 4）受限入口和公开路由选择通过审核后，才进入 Task 18（任务 18）的公开前质量闸。
 7. 首次 full（完整集）评估必须人工审核错误解释 trace（轨迹）的 correctness（正确性）和完整性；只在人工审核指标、trace 和 bad case（问题用例）后晋升各 kind baseline（类别基线）。
 
 ### Production Deployment（生产部署，当前优先插入主线）
 
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md`，明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引、private/portfolio（私有 / 作品集展示）双模式和安全 observation（观测）边界。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
-3. Phase 0-2（阶段 0-2）、特权 deployment adapter（部署适配器）Task 1-6（任务 1-6）和首次私有部署已经完成实现与审核；在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。当前精确进度、阻断项和下一操作只维护在 3.0，不在本节重复。
-4. 私有部署和受限入口验证通过后，在公开发布前恢复 Phase B（阶段 B）正式质量重建；新 baseline（基线）审核通过或形成显式风险接受记录后，才进入公开发布。
+3. Phase 0-2（阶段 0-2）、特权 deployment adapter（部署适配器）Task 1-7（任务 1-7）和 Task 14（任务 14）的私有发布、部署、人工回滚、恢复及节点重启证据已经完成实现与审核；Step 5（步骤 5）的长期观测生命周期保持部分验收，Step 6（步骤 6）的真实自动恢复演练因没有合格候选明确延期。在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。
+4. 私有部署阶段审核后进入 Phase 4 Task 15（阶段 4 任务 15）的本地保护实现；Task 16/17（任务 16/17）的受限入口和公开路由选择通过后，才恢复 Phase B（阶段 B）的 Task 18（任务 18）正式质量审核。新 baseline（基线）审核通过或形成显式风险接受记录前，不进入公开发布。
 5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 
 ### Phase C：剩余质量债

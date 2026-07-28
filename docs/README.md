@@ -9,8 +9,8 @@
 - `AI应用开发能力训练实现方案.md`：唯一实施 roadmap（路线图），维护当前事实、质量门禁和执行顺序。
 - `AGENTS.md`：agent 执行规则和工程铁律。
 - `superpowers/specs/2026-07-19-k3s-production-deployment-design.md`：已审核的华为云单机 K3s（轻量 Kubernetes）生产部署设计依据。
-- `superpowers/plans/2026-07-19-k3s-production-deployment.md`：当前生产部署总实施计划；Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-11（任务 5-11）已完成审核。
-- `superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md` / `superpowers/plans/2026-07-20-k3s-deployment-adapter.md`：Task 12（任务 12）的特权 deployment adapter（部署适配器）设计和独立实施计划；Task 1-4（任务 1-4）已完成实现和审核，Task 5（任务 5）已完成固定安装、仓库级 runner registration（运行器注册）和真实 systemd hardening（系统服务加固）验证，当前运行器在线空闲并等待审核。
+- `superpowers/plans/2026-07-19-k3s-production-deployment.md`：当前生产部署总实施计划；Phase 0-2（阶段 0-2）以及 Task 12-14（任务 12-14）的私有发布、部署、人工回滚和节点重启证据已完成审核，Step 5/6（步骤 5/6）的长期观测生命周期与自动恢复生产演练保留明确延期风险。
+- `superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md` / `superpowers/plans/2026-07-20-k3s-deployment-adapter.md`：Task 12（任务 12）的特权 deployment adapter（部署适配器）设计和独立实施计划；Task 1-6（任务 1-6）已完成实现和审核，Task 7（任务 7）已完成真实发布、部署、人工回滚、恢复、节点重启及事实状态收敛。Step 5/6（步骤 5/6）保持未完成并记录明确延期风险。
 - `superpowers/specs/2026-07-17-case-governance-design.md` / `superpowers/plans/2026-07-17-case-governance.md`：Case Governance（评估用例治理）的已实施设计与执行记录。
 - `superpowers/plans/2026-07-16-phase-b-engineering-cleanup.md`：已完成审核的 Phase B（阶段 B）工程清理与 Deferred Risk Closure（延期风险收敛）记录。
 - `doc-inventory.md`：docs lifecycle inventory（文档生命周期清单）。
@@ -30,8 +30,8 @@
 
 1. Phase B（阶段 B）工程清理与 Deferred Risk Closure（延期风险收敛）第 1-6 项已完成审核。
 2. Case Governance（评估用例治理）已完成实现和本地门禁。
-3. 当前优先主线为生产部署：Phase 0-1（阶段 0-1）和 Phase 2（阶段 2）的 Task 5-11（任务 5-11）已完成审核；`v0.1.0` Draft Release（草稿发布版本）已有固定候选镜像和六项证据，但尚未 Publish（正式发布）或创建真实标签。Task 12（任务 12）实施计划的 Task 1-4（任务 1-4）已完成审核；Task 5（任务 5）已安装固定适配器和仓库级生产 runner（运行器），真实 tmpfs（内存文件系统）、root-only（仅 root）运行时目录、服务重启、GitHub 在线空闲和集群零工作负载验证均已通过，等待审核。应用 Deployment（工作负载）和公网入口仍未创建。
-4. 正式质量重建暂缓到私有部署和受限入口验证之后，在公开发布前恢复：清理旧产物、使用候选镜像的 8,410 条索引、依次运行正式评估并人工审核 baseline（基线）。
+3. Production Deployment（生产部署）的私有阶段已完成审核：生产当前固定在 `v0.1.1` 镜像摘要，单副本 Deployment（工作负载）为 `1/1` 可用；真实人工回滚、恢复、新鲜分离备份和节点重启均已验证。公网 80/443/6443 仍不可达，没有 Ingress（入口）；Step 5/6（步骤 5/6）的长期观测生命周期和自动恢复生产演练保留明确延期风险。
+4. 当前主线进入 Production Deployment Phase 4 Task 15（生产部署阶段 4 任务 15）的本地访问策略、请求解码和费用前置保护实现；不配置 DNS（域名系统）、公开端口或生产入口。Task 16/17（任务 16/17）的受限入口与公开路由选择通过审核后，才进入 Task 18（任务 18）正式质量审核；索引重建、模型调用、正式评估和 baseline（基线）晋升均尚未开始，仍需明确授权。
 5. 当前仍没有新口径 full eval（完整评估）或 baseline（基线），不得根据旧指标调优模型或检索。
 
 完整顺序只维护在 `AI应用开发能力训练实现方案.md` 的“唯一执行顺序”中。每个 Task（任务）完成后停止等待审核；未经明确要求不暂存、不提交、不晋升 baseline（基线）。
