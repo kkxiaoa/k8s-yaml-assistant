@@ -16,11 +16,8 @@ import {
   upstreamErrorEvent,
   upstreamErrorResponse,
 } from '@/server/upstream-error';
-import type {
-  AskMode,
-  EditorContext,
-  RetrieveContextOptions,
-} from '@/server/pipeline';
+import { readApiRequest } from '@/server/api-contract';
+import type { RetrieveContextOptions } from '@/server/pipeline';
 
 export const runtime = 'nodejs'; // 需要 Node:Anthropic SDK、dotenv、fetch 向量/rerank
 
@@ -124,19 +121,13 @@ export async function POST(req: Request): Promise<Response> {
     });
   }
 
-  const body = (await req.json()) as {
-    question?: unknown;
-    mode?: unknown;
-    context?: EditorContext;
-  };
-  const question = String(body.question ?? '').trim();
-  if (!question) return new Response('empty question', { status: 400 });
-
-  const editorContext = body.context;
-  const mode: AskMode =
-    body.mode === 'explain_field' || body.mode === 'explain_error'
-      ? body.mode
-      : 'free';
+  const body = await readApiRequest(req, 'ask');
+  if (!body.ok) return body.response;
+  const {
+    question,
+    context: editorContext,
+    mode,
+  } = body.value;
   let prepared;
   let stream;
   try {
