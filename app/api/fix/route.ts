@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
+import { readApiRequest } from '@/server/api-contract';
 import { getClient } from '@/server/pipeline';
 import { fixResource } from '@/server/agent';
-import type { ValidationError } from '@/validation/validate';
 import { requireRuntimeCapability } from '@/server/runtime-config';
 import { upstreamErrorResponse } from '@/server/upstream-error';
 
@@ -14,17 +14,15 @@ export async function POST(req: Request): Promise<Response> {
     return upstreamErrorResponse(error);
   }
 
-  const body = (await req.json()) as { yaml?: unknown; errors?: unknown };
-  const yaml = String(body.yaml ?? '');
-  const errors = Array.isArray(body.errors)
-    ? (body.errors as ValidationError[])
-    : [];
-
-  if (!yaml.trim())
-    return NextResponse.json({ error: 'YAML 为空' }, { status: 400 });
+  const body = await readApiRequest(req, 'fix');
+  if (!body.ok) return body.response;
 
   try {
-    const result = await fixResource(getClient(), yaml, errors);
+    const result = await fixResource(
+      getClient(),
+      body.value.yaml,
+      body.value.errors,
+    );
     return NextResponse.json(result);
   } catch (error) {
     return upstreamErrorResponse(error);
