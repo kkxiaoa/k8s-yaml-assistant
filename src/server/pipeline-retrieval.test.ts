@@ -207,15 +207,19 @@ await check('Ask route 只注入安全 recorder 且不恢复原始持久化入�
     "requireRuntimeCapability('deepseek')",
   );
   const bodyOffset = routeSource.indexOf('await req.json()');
+  const boundedBodyOffset = routeSource.indexOf(
+    "await readApiRequest(req, 'ask')",
+  );
   const pipelineOffset = routeSource.indexOf(
     "await import('@/server/pipeline')",
   );
   assert.ok(
     capabilityOffset >= 0 &&
       capabilityOffset < readinessOffset &&
-      readinessOffset < bodyOffset,
+      readinessOffset < boundedBodyOffset,
   );
-  assert.ok(bodyOffset < pipelineOffset);
+  assert.equal(bodyOffset, -1);
+  assert.ok(boundedBodyOffset < pipelineOffset);
 });
 
 await check('健康路由隔离 liveness 并封闭 readiness 响应', () => {
