@@ -1,6 +1,6 @@
 # K3s 特权部署适配器实施计划
 
-> 状态：执行中；Task 1-6（任务 1-6）已完成实现和审核。Task 7 Step 1-4（任务 7 步骤 1-4）已完成，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes），真实回滚草稿生命周期也已完成无部署验证。Step 5（步骤 5）发现的 production observation root（生产观测根目录）权限阻断已有本地通过的最小修复，当前等待受控 Pull Request（合并请求）、新版本发布与重新部署；真实观测生命周期和模型冒烟尚未完成。固定单副本 Deployment（工作负载）仍为 `1/1` 可用，成功台账只有该发布的一条事件，80/443 仍未公开；同区域镜像分发仍作为未来冷拉取的独立风险。
+> 状态：Task 1-6（任务 1-6）和 Task 7（任务 7）已完成实现、真实验收或明确延期收敛，并于 2026-07-28 通过独立 review（审核）。经逐项明确授权，`v0.1.1` 先通过运行 `30296287472` Attempt 1（第 1 次尝试）部署，再由人工回滚 Release（发布版本）`360812512` 和运行 `30325880287` Attempt 1（第 1 次尝试）切换到 `v0.1.0`，最后由恢复 Release（发布版本）`360824879` 和运行 `30327301138` Attempt 1（第 1 次尝试）恢复到 `v0.1.1` 镜像摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37`。重启前的新鲜分离备份已上传私有 OBS（对象存储服务）并由管理员核对摘要，节点重启后 K3s（轻量 Kubernetes）、运行器、应用和适配器运行时目录均自动恢复；当前单副本为 `1/1` 可用，Pod（容器组）重启为预期的 `1` 且没有继续增加，成功台账仍为四个事件和两个不同摘要，公网 80/443/6443 仍不可达。Step 5（步骤 5）的时间、容量、删除和故障型观测生命周期保持部分验收，Step 6（步骤 6）的真实自动恢复演练因没有合格故障候选明确延期；两项均保持未勾选，不冒充完整生产实证。
 > 用途：把已审核的 K3s（轻量 Kubernetes）特权 deployment adapter（部署适配器）设计拆成反例优先的仓库实现、Kubernetes bootstrap（Kubernetes 引导配置）、生产 runner（运行器）、发布工作流和私有验收步骤。
 > 对应设计：`docs/superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md`。
 > 执行位置：本计划的 Task 1-5（任务 1-5）服务于生产部署总计划的 Task 13（任务 13）；Task 6-7（任务 6-7）服务于总计划的 Task 14（任务 14）。每个 Task（任务）完成后独立停止审核。
@@ -25,7 +25,7 @@
 | Python（Python 运行时） | `/usr/bin/python3`，版本 `3.12.3` |
 | sudo（提权工具） | `1.9.15p5`，`/usr/sbin/visudo` 可用 |
 | systemd（系统服务管理器） | `255`，`/usr/bin/systemd-analyze` 可用 |
-| 应用资源 | `k8s-yaml-assistant-prod` Namespace（命名空间）、固定 bootstrap（引导配置）和三类运行时 Secret（密钥）已创建；Deployment（工作负载）固定到 `v0.1.0` 的镜像内容摘要并为 `1/1` 可用 |
+| 应用资源 | `k8s-yaml-assistant-prod` Namespace（命名空间）、固定 bootstrap（引导配置）和三类运行时 Secret（密钥）已创建；Deployment（工作负载）固定到 `v0.1.1` 的镜像内容摘要并为 `1/1` 可用 |
 | 生产 runner（运行器） | 系统账号和组已创建；`huawei-k3s-prod-1` 已注册到当前私有仓库，服务为 `active/enabled`（运行中 / 开机自启），GitHub 状态为在线空闲 |
 | 固定适配器路径 | 入口、配置、状态目录、root-only（仅 root）运行时目录和 Cosign（签名工具）均已按固定权限安装 |
 
@@ -729,7 +729,7 @@ Pull Request #9（合并请求 #9）最终提交 `492b33bb85cb3fe8b680c3b2bf00d0
 
 ## Task 7：验证 draft → publish → private deploy（草稿 → 发布 → 私有部署）和回滚
 
-**Precondition（前置条件）：** Task 6（任务 6）审核通过；当前 `v0.1.0` 草稿仍未发布。草稿修改与证据重建、Publish（正式发布）、首次部署、回滚草稿删除、有限模型冒烟、故障候选、功能回滚和节点重启分别获得当次明确授权。
+**Precondition（前置条件）：** Task 7（任务 7）启动时 Task 6（任务 6）已审核通过，`v0.1.0` 草稿仍未发布。草稿修改与证据重建、Publish（正式发布）、首次部署、回滚草稿删除、有限模型冒烟、故障候选、功能回滚和节点重启分别获得当次明确授权。
 
 - [x] **Step 1（步骤 1）：整体重定向 `v0.1.0` 草稿和六项证据**
 
@@ -861,7 +861,22 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 - 单副本、`RollingUpdate maxSurge=0/maxUnavailable=1`（滚动更新最大新增 0 / 最大不可用 1）、单容器写入挂载和 `ReadWriteOnce`（单节点读写）共同保证当前最多一个 observation writer（观测写入端）。从本机验证公网 80/443/6443 均超时不可达。
 - 阻断：local-path PV（本地路径持久卷）的宿主目录实际为 `2777 root`，容器内挂载根目录为 `0777 root:10001`；安全 local sink（本地写入端）要求根目录不向组或其他用户开放，因此启动日志明确记录 `stage=sink code=root_unsafe` 并关闭观测。目录仍为空，5 行应用日志没有 YAML、prompt、answer、Secret、API key（配置文件 / 提示词 / 回答 / 密钥 / 应用程序接口密钥）模式，但这不能替代真实脱敏、轮转、7 天/256 MiB、人工删除和符号链接拒绝验收。
 
-在修复、安全发布并重新部署前，不调用 Ask/Generate/Fix（询问 / 生成 / 修复）制造无法持久化的线上请求，也不把本地容器测试当作生产观测验收。最小修复固定使用 PVC（持久卷声明）内 `/app/data/observability/segments` 作为 local sink（本地写入端）根目录，不引入 root init container（root 初始化容器）、宿主机手工改权或新的存储基础设施。容器反例先复现 `0777 root` 挂载根目录并失败，修复后证明应用以 UID/GID（用户 / 组标识）`10001/10001` 创建 `0700` 私有子目录；当前仍须通过受控 Pull Request（合并请求）、新发布版本和相同私有部署路径完成生产验证。
+在修复、安全发布并重新部署前，不调用 Ask/Generate/Fix（询问 / 生成 / 修复）制造无法持久化的线上请求，也不把本地容器测试当作生产观测验收。最小修复固定使用 PVC（持久卷声明）内 `/app/data/observability/segments` 作为 local sink（本地写入端）根目录，不引入 root init container（root 初始化容器）、宿主机手工改权或新的存储基础设施。容器反例先复现 `0777 root` 挂载根目录并失败，修复后证明应用以 UID/GID（用户 / 组标识）`10001/10001` 创建 `0700` 私有子目录。该修复已随 `v0.1.1` 源提交 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d` 合入；Release lifecycle（发布生命周期）运行 `30286776498` Attempt 2（第 2 次尝试）曾恢复六项证据，发布前草稿精确绑定该提交且实际标签不存在。
+
+2026-07-28 经本次明确授权完成 `v0.1.1` 发布、部署和非模型验收：
+
+- 发布前再次确认草稿源提交、六项附件、镜像摘要和索引身份一致，且实际标签不存在、生产运行器在线空闲。因跨境 GHCR（GitHub 容器镜像仓库）冷拉取过慢且 SWR（华为云容器镜像服务）企业版仍待审批，本机按精确摘要拉取 `linux/amd64` 镜像，使用固定版本 Skopeo（容器镜像复制工具）生成保留完整 OCI index（开放容器镜像索引）的归档；归档 SHA-256（安全哈希算法）为 `86766515ef4793329808f60747dfce4a50c43e610e1cbaeafbc7f06aa535ff29`。归档经 SSH（安全远程登录）传输后由 `k3s ctr images import` 导入并建立精确根摘要引用，导入内容重新计算得到授权镜像摘要。
+- `v0.1.1` 于 `2026-07-27T18:59:54Z` Publish（正式发布），Release ID（发布版本标识）为 `360575653`，实际标签指向 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d`。自动触发的 `Deploy published release`（部署已发布版本）运行 `30296287472` Attempt 1（第 1 次尝试）完整成功；GitHub deployment（GitHub 部署记录）`5628234264` 最终为 `success`，适配器台账新增镜像摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37`。
+- Deployment/Pod（工作负载 / 容器组）为 `1/1` 可用且重启为 `0`，固定镜像声明为上述根摘要；生产运行器服务为 `active`（运行中），操作标记不存在。实际进程 UID/GID（用户 / 组标识）为 `10001/10001`，根文件系统只读，Linux capability（Linux 能力）全部为零，ServiceAccount token（服务账户令牌）未挂载。只读资源采样为 CPU `1m`、内存 `124 MiB`，RSS high-water mark（常驻内存高水位）为 `301,876 KiB`（约 `295 MiB`）。
+- `/api/health/live` 和 `/api/health/ready` 均返回 200；非敏感非法 YAML（配置文件）调用 `/api/check` 返回结构化解析错误且不进入模型路径。镜像内索引为 format/identity version（格式 / 身份版本）`5/2`、模型 `voyage-3`、维度 1024、条数 8,410，三个文件哈希与发布清单一致且修改时间早于 Pod（容器组），没有在线重建。
+- `/app/data/observability/segments` 已由应用创建为 `10001:10001 0700`，启动和请求日志没有 `root_unsafe`、observation failure（观测失败）或 YAML/prompt/answer/Secret（配置文件 / 提示词 / 回答 / 密钥）模式。公网 80/443/6443 仍不可达，没有 Ingress（入口）。本次传输归档和临时认证文件已删除，节点保留生产所需的已导入镜像内容。
+- 经单独授权发送 1 个非敏感 `/api/ask` 客户端请求，允许 Anthropic SDK（Anthropic 软件开发工具包）在瞬时错误时自动重试最多 2 次且不手工重试。请求在 2,885 ms 内返回 HTTP 200，包含两个预期来源、178 个流式增量、一个完成事件和零错误，658 字节回答同时引用 `[S1]`、`[S2]`。生产路由不返回 SDK（软件开发工具包）重试次数或 `usage`，因此只能证明客户端请求数为 1、DeepSeek（回答模型）上游尝试数在授权上限 3 以内，不能声称精确调用次数或费用。
+- 该请求命中 `Deployment.spec.replicas` 精确字段路径；观测记录的 `route.path=exact`、`cache.index.status=not_used`、粗排 / 重排结果为空且没有 embedding/dense/rerank latency（向量嵌入 / 稠密检索 / 重排延迟），证明没有进入 Voyage（向量与重排模型）调用路径。最终来源固定为 `schema::apps/v1::Deployment::spec.replicas` 和 `policy.deployment.replicas.min-two`。
+- 生产创建 `serving-observations.2026-07-28.0001.jsonl`，大小 1,170 字节、权限与所有者为 `0600 10001:10001`、非符号链接且只有 1 条 `serving-observation/v2` 记录。记录使用 `serving-redaction/v1`，只保存预期非敏感问题和允许字段投影，不含 `queryText`、`selectedText`、提示词、回答或当前 YAML（配置文件）；Pod（容器组）日志也没有问题、YAML、`root_unsafe` 或观测失败模式。
+- 冒烟后 Pod（容器组）继续就绪且重启为 `0`，CPU / 内存采样为 `1m / 164 MiB`，进程 RSS high-water mark（常驻内存高水位）仍为 `301,876 KiB`，健康端点继续返回 200，公网 80/443/6443 仍不可达。临时 SSH tunnel（SSH 隧道）已经关闭。
+- 已部署源提交与当前主线的观测代码无差异；配置、脱敏、严格投影、采样、轮转、保留、总量清理和符号链接拒绝的 55 项本地门禁全部通过。单条生产记录只证明采样率 1 下的真实写入、权限和安全投影，不能证明 16 MiB 轮转、7 天 / 256 MiB 清理、人工删除或符号链接攻击拒绝；不为补齐这些项制造生产容量、过期文件或故障，Step 5（步骤 5）继续保持未完成。
+
+2026-07-28 独立 review（审核）接受上述部分验收边界为本阶段的明确延期结论。Step 5（步骤 5）保持未勾选，不声称真实时间、容量、删除或故障型生命周期已经完成；后续只能由真实运行时间、容量或合格故障事件补证。
 
 - [ ] **Step 6（步骤 6）：演练自动恢复**
 
@@ -873,7 +888,9 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 - 把真实自动恢复演练标记为明确延期风险；
 - 不用随意破坏探针、镜像或生产 Secret（密钥）冒充验收。
 
-- [ ] **Step 7（步骤 7）：演练人工确认回滚**
+截至 2026-07-28 没有符合上述约束的真实故障候选，本次未制造生产故障或执行自动恢复演练；独立 review（审核）接受该项为明确延期风险。Step 6（步骤 6）保持未勾选，后续出现拥有完整发布证据和清理路径的真实候选时再恢复。
+
+- [x] **Step 7（步骤 7）：演练人工确认回滚**
 
 只有本机成功台账中至少存在两个不同内容摘要时才有真实功能回滚目标。满足前置条件后：
 
@@ -883,11 +900,24 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 4. 适配器验证目标在成功台账后执行；
 5. 验证新 GitHub deployment（GitHub 部署记录）和本机台账均把历史内容摘要记录为当前版本。
 
-首发时只有一个成功内容摘要，不创建伪造第二版本；该演练等待第二个真实版本部署后完成。
+`v0.1.1` 成功部署后，本机成功台账已包含 `v0.1.0` 和 `v0.1.1` 两个不同内容摘要，真实功能回滚目标的数量前置条件已经满足。
 
 在 Publish（正式发布）任何 `rollback-*` Release（回滚发布版本）前，必须另行授权并把现有 `v*` 标签保护等价扩展到 `refs/tags/rollback-*`：管理员是唯一创建限制绕过者，已经创建的标签禁止所有主体更新或删除。只创建和删除 Draft Release（草稿发布版本）的 Step 4（步骤 4）不依赖实际标签，因此不以提前放宽规则冒充前置条件。
 
-- [ ] **Step 8（步骤 8）：节点重启恢复**
+2026-07-28 经逐项授权完成真实人工回滚：
+
+- `Release tag creation`（发布标签创建）和 `Immutable release tags`（不可变发布标签）两个 active ruleset（启用规则集）均在保留 `refs/tags/v*` 的同时增加 `refs/tags/rollback-*`。前者只有管理员账号可绕过创建限制；后者阻断更新和删除且没有绕过者。
+- `Prepare rollback release`（准备回滚发布）运行 `30324645187` Attempt 1（第 1 次尝试）只输入 `v0.1.0` 后成功创建 Release ID（发布版本标识）`360812512` 的 Draft Release（草稿发布版本）。完整标签为 `rollback-v0.1.0-sha256-8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4-r30324645187`，目标提交为 `d43a8b24dee8dcc720d16f90304e6a74f7899ac5`，且只有 1 份 `provenance-attestation.sigstore.json`；草稿阶段没有实际标签、生产任务或新增部署记录。
+- 管理员选择 `None`（无发布标签）后人工 Publish（正式发布）同一 Release（发布版本）。发布于 `2026-07-28T03:25:24Z`，实际标签已创建且 Release（发布版本）不可变；仓库 `Latest`（最新发布）仍为 `v0.1.1`。
+- `Deploy published release`（部署已发布版本）运行 `30325880287` Attempt 1（第 1 次尝试）的发布验证、生产适配器和最终状态回写三个任务均成功；GitHub deployment（GitHub 部署记录）`5633580284` 最终为 `success`。节点事件明确记录目标镜像已存在于本机，没有访问 GHCR（GitHub 容器镜像仓库）拉取。
+- Deployment（工作负载）generation/observedGeneration（代次 / 已观察代次）均为 3，当前镜像为上述 `v0.1.0` 摘要，单副本为 `1/1` 可用。新 Pod（容器组）`k8s-yaml-assistant-76d6777489-2w7x9` 在创建后约 6 秒就绪且重启为 `0`；live/ready（存活 / 就绪）均通过，只读资源采样为 `1m / 123 MiB`。
+- 本机台账新增第三条 `action=rollback` 成功事件，精确绑定本次 Release（发布版本）、历史源码提交、目标摘要和运行 `30325880287/1`；操作标记不存在，生产运行器重新在线空闲。`v0.1.0` 启动日志按已知边界记录 `stage=sink code=root_unsafe` 并关闭观测；`v0.1.1` 留下的 1,170 字节、`0600 10001:10001`、1 行非符号链接分段保持不变，回滚过程没有模型调用。
+- 为保留回滚验收终态，生产先有意停在带已知观测降级的 `v0.1.0`。经单独授权，`Prepare rollback release`（准备回滚发布）运行 `30326502022` Attempt 1（第 1 次尝试）创建 Release ID（发布版本标识）`360824879` 的恢复 Draft Release（草稿发布版本）。草稿标题为 `Rollback v0.1.1`，完整标签为 `rollback-v0.1.1-sha256-9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37-r30326502022`，目标提交为 `d43a8b24dee8dcc720d16f90304e6a74f7899ac5`，且只有 1 份 `provenance-attestation.sigstore.json`。草稿阶段仍为 `draft=true`、`prerelease=false`，没有实际标签、发布事件、生产任务、部署记录或台账事件。
+- 经再次明确授权，同一 Release（发布版本）于 `2026-07-28T03:56:06Z` Publish（正式发布）并成为不可变版本，仓库 `Latest`（最新发布）仍为普通 `v0.1.1` Release（发布版本）。`Deploy published release`（部署已发布版本）运行 `30327301138` Attempt 1（第 1 次尝试）的发布验证、生产适配器和最终状态回写三个任务均成功；GitHub deployment（GitHub 部署记录）`5633826683` 最终为 `success`。
+- Deployment（工作负载）generation/observedGeneration（代次 / 已观察代次）均为 4，当前镜像恢复为上述 `v0.1.1` 摘要，单副本为 `1/1` 可用。新 Pod（容器组）`k8s-yaml-assistant-6887f85ff5-9btxn` 在创建后约 6 秒就绪且重启为 `0`；live/ready（存活 / 就绪）均通过，只读资源采样为 `1m / 122 MiB`。节点事件明确记录镜像已存在于本机，没有访问 GHCR（GitHub 容器镜像仓库）拉取。
+- 本机台账新增第四条 `action=rollback` 成功事件，精确绑定恢复 Release（发布版本）、`v0.1.1` 源提交、目标摘要和运行 `30327301138/1`；操作标记不存在，生产运行器重新在线空闲。恢复后的启动日志不再出现 `root_unsafe` 或观测失败；`/app/data/observability/segments` 保持 `10001:10001 0700`，既有分段保持 1,170 字节、`0600 10001:10001`、1 行且不是符号链接。恢复过程没有模型调用。
+
+- [x] **Step 8（步骤 8）：节点重启恢复**
 
 在单独维护窗口和备份核对后验证：
 
@@ -897,7 +927,23 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 - GitHub/GHCR（GitHub / GitHub 容器镜像仓库）短暂不可用不影响已运行 Pod（容器组）；
 - 没有因服务重启重新构建索引或重复部署。
 
-- [ ] **Step 9（步骤 9）：更新事实状态**
+2026-07-28 经两次独立明确授权，先完成停服备份，再完成节点重启：
+
+- 新备份 identity（身份）为 `20260728T041517Z-8d2b24cc-0d2d-4954-9997-ce6b2f1aa3e6`。SQLite（嵌入式数据库）`quick_check` 返回 `ok`，K3s（轻量 Kubernetes）停服、恢复约 `7` 秒，应用容器未因这次服务停启重启。上传使用 root-only tmpfs（仅 root 内存临时文件系统）中的一次性配置、实例元数据临时凭证和既有私有 OBS（对象存储服务）桶；持久 `/root/.obsutilconfig` 未修改，上传完成后的归档和配置均已删除。
+
+| 对象 | 大小 | SHA-256（安全哈希算法） |
+|---|---:|---|
+| `k3s-sqlite-database/20260728T041517Z-8d2b24cc-0d2d-4954-9997-ce6b2f1aa3e6/k3s-sqlite-database.tar.gz` | `6,437,369` bytes（字节） | `7e4e1ed6c74bbc76dc235d7e4acd7229e66178561507f7dd9b95a49351b8c088` |
+| `k3s-server-token/20260728T041517Z-8d2b24cc-0d2d-4954-9997-ce6b2f1aa3e6/k3s-server-token.tar.gz` | `196` bytes（字节） | `85352eb0ec67bd65f7141d6f793fa74dcb18e3f5bbc2b4702798088f7d1f5602` |
+| `manifests/backups/20260728T041517Z-8d2b24cc-0d2d-4954-9997-ce6b2f1aa3e6.json` | `710` bytes（字节） | `4cb10f2428844259601577bae6ca6c0686d52bec1d3e37d161ed11ccc5e67b49` |
+
+- 管理员回读复算的三项摘要与上传侧一致后才授权重启。boot ID（启动标识）从 `93e7dc8c-26eb-4c42-a422-8a99f8c669d4` 变为 `b9e5a5c6-b52f-4fb3-9a4d-1d54bc971a71`；SSH（安全远程登录）约 `26` 秒恢复，约 `55` 秒后 K3s（轻量 Kubernetes）、生产运行器和应用全部就绪。系统没有 failed unit（失败服务单元）或启动错误。
+- K3s（轻量 Kubernetes）与生产运行器均为 `active/enabled`（运行中 / 开机自启），GitHub（代码托管平台）显示运行器在线空闲。`/run/k8s-yaml-assistant-deployer` 由固定 `tmpfiles.d`（临时目录创建规则）重新创建为 `root:root 0700`，规则文件摘要仍为 `7d8a0d3864e0e7c3ceb8e817004ee19e820c34962f24710e6a6c232b6a6395de`。
+- Deployment（工作负载）的 generation/observedGeneration（代次 / 已观察代次）仍为 `4/4`，单副本为 `1/1` 可用；Pod（容器组）名称和 UID（唯一标识）均未变化，容器重启为预期的 `1`，启动时间为 `2026-07-28T04:50:41Z`。节点事件确认 `v0.1.1` 摘要镜像已在本机，没有访问 GHCR（GitHub 容器镜像仓库）拉取。启动瞬间只有一条连接拒绝的 startup probe（启动探针）警告，之后 live/ready（存活 / 就绪）持续返回 HTTP `200`，稳定观察期内重启数未继续增加；资源采样为 CPU `1m`、内存 `183-186 MiB`。
+- 成功台账仍为四个事件，文件摘要仍为 `1d87e2877b2d444749a6d6b1081b0eb26c61cb68fa7d7d468e5d52da31b9a7e0`，最新事件仍精确绑定运行 `30327301138/1` 和 `action=rollback`；操作标记不存在，GitHub（代码托管平台）没有新增运行或 deployment（部署记录）。
+- observation PVC（观测持久卷声明）保持绑定，既有分段仍为 1,170 字节、`0600 10001:10001`、1 行且摘要为 `1cf1f9b71d48bbb8463640958ef00136068866a89f2e576ccdd5be8bab60497b`。三个索引文件的时间和摘要 `fea306251d2774a13cf5b7db8d2f65b86f37c71c7e808548d09663f7359dfee2`、`691c18abda830a60ca2cf6be2424eaefd23b01225c33595e40e411e7aedd74d1`、`5e778fe07bc30064bd63a2e8dc813acc34b7d50d9b45869f06159be38fb904a5` 均未变化。日志没有 `root_unsafe` 或观测错误；本步骤没有部署、模型调用或在线索引重建。
+
+- [x] **Step 9（步骤 9）：更新事实状态**
 
 只有上述已获授权的步骤完成并审核后，更新：
 
@@ -906,7 +952,9 @@ Ask/Generate/Fix（询问 / 生成 / 修复）模型冒烟只使用另行批准�
 - `docs/AI应用开发能力训练实现方案.md` 当前执行状态；
 - `docs/README.md` 文档入口。
 
-**Phase 3 Stop（阶段 3 停止点）：** 汇报草稿不部署、人工发布、实际镜像内容摘要、台账、runner/workflow（运行器 / 流水线）权限、私有功能和安全反例、模型调用次数/费用、RSS（常驻内存）、observation（观测）生命周期、自动恢复实际完成或延期原因，以及人工回滚是否具备两个真实版本前置条件。等待独立 review（审核）。
+2026-07-28 独立 review（审核）接受 Step 5（步骤 5）的部分验收边界、Step 6（步骤 6）的明确延期风险以及 Step 8（步骤 8）的节点重启证据。上述发布、部署、有限模型冒烟、真实人工回滚、`v0.1.1` 生产恢复、新鲜分离备份和节点重启恢复事实已经同步到非敏感实施证据、设计、计划、唯一执行状态和 `docs/README.md`；Step 9（步骤 9）完成。该状态收敛不把 Step 5/6（步骤 5/6）改写为已完成，也不授权公开入口、模型调用、索引重建或 baseline（基线）晋升。
+
+**Phase 3 Stop（阶段 3 停止点）：** 草稿不部署、人工发布、实际镜像内容摘要、台账、runner/workflow（运行器 / 流水线）权限、私有功能和安全反例、模型调用边界、RSS（常驻内存）、observation（观测）部分生命周期、自动恢复延期原因、人工回滚和节点重启证据已于 2026-07-28 通过独立 review（审核）。Task 7（任务 7）在保留 Step 5/6（步骤 5/6）未完成标记和延期风险的前提下收敛。
 
 ## 全局回滚边界
 
