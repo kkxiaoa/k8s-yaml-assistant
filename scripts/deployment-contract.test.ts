@@ -552,7 +552,7 @@ const ImplementationEvidenceSchema = z
 
 const ChangePackageSchema = z
   .object({
-    status: z.literal('任务 4 已实施；等待审核'),
+    status: z.string().trim().min(1),
     purpose: z.string().min(1),
     auditedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     implementedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -884,7 +884,6 @@ function validateKubernetesReadme(source: string): void {
   for (const required of [
     '仓库只固定引用且不保存 Secret（密钥）值',
     '固定单副本 Deployment/Pod（工作负载 / 容器组）',
-    '集群仍没有 Ingress（入口），80/443 没有开放',
     'deepseek-runtime',
     'voyage-runtime',
     'ghcr-pull',

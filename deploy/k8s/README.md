@@ -1,9 +1,9 @@
-状态：Task 4-5（任务 4-5）已完成实施和 review（审核）；`v0.1.0` 已通过固定部署适配器运行在私有 K3s（轻量 Kubernetes）。Task 7 Step 5（任务 7 步骤 5）的只读验收发现 observation PVC root（观测持久卷声明根目录）权限阻断，真实轨迹尚未落盘。
+状态：Task 4-5（任务 4-5）已完成实施和 review（审核）；Task 7 Step 7（任务 7 步骤 7）的真实人工回滚与恢复及 Step 8（步骤 8）的节点重启恢复均已完成。私有 K3s（轻量 Kubernetes）先从 `v0.1.1` 切换到 `v0.1.0`，再恢复到 `v0.1.1`，随后在新鲜分离备份和独立授权下完成节点重启。2026-07-28 独立审核接受 Step 5（步骤 5）的部分验收边界和 Step 6（步骤 6）的明确延期风险，Step 9（步骤 9）事实状态同步完成；两项仍保持未完成，不冒充真实观测生命周期或自动恢复生产实证。
 用途：定义生产 Kubernetes（容器编排系统）固定非敏感资源、应用模板及其审核和回退边界。
 
 # K3s 生产资源边界
 
-2026-07-27 在单独获得 bootstrap/Secret（引导配置 / 密钥）授权后，生产集群已创建本目录的固定 bootstrap（引导配置）和三类运行时 Secret（密钥）。同日 `app/deployment-template.yaml` 已由固定部署适配器替换唯一镜像摘要并应用，`v0.1.0` 的固定单副本 Deployment/Pod（工作负载 / 容器组）为 `1/1` 可用；集群仍没有 Ingress（入口），80/443 没有开放。
+2026-07-27 在单独获得 bootstrap/Secret（引导配置 / 密钥）授权后，生产集群已创建本目录的固定 bootstrap（引导配置）和三类运行时 Secret（密钥）。2026-07-28 经逐项授权，`app/deployment-template.yaml` 已由固定部署适配器先应用 `v0.1.1`，再通过人工确认回滚切换到 `v0.1.0`，最后通过同一受信链恢复到 `v0.1.1`；节点重启后当前固定单副本 Deployment/Pod（工作负载 / 容器组）为 `1/1` 可用，Pod（容器组）重启为预期的 `1` 且没有继续增加。集群仍没有 Ingress（入口），公网 80/443/6443 不可达。
 
 同日已把 GitHub Actions runner `v2.336.0`（GitHub 自动化流水线运行器版本 2.336.0）安装并注册为 `huawei-k3s-prod-1`。首次真实隔离验证发现旧 drop-in（附加配置）的 `ReadWritePaths` 会遮蔽工作/诊断目录的有界 tmpfs（内存文件系统），且 `RuntimeDirectory`（运行时目录）最终把适配器运行时目录交给服务账号；首次修正又证明 `ExecStartPre`（启动前命令）无法修改下一执行阶段的私有挂载。最终配置由 tmpfs 挂载直接使用固定 `UID 996 / GID 988`（用户 / 组数字标识），已通过真实启动、写入和第二次服务重启验证。当前服务为 `active/enabled`（运行中 / 开机自启），GitHub 状态在线空闲。
 
@@ -56,7 +56,7 @@ bootstrap（引导配置）只管理不随应用版本变化的固定资源。�
 
 ## 存储边界
 
-`k8s-yaml-assistant-observation` 只挂载到 `/app/data/observability`，应用只把 `/app/data/observability/segments` 作为 local sink（本地写入端）根目录。应用配置定义 7 天、单文件 16 MiB、总量 256 MiB 的轮转和删除边界；1 GiB PVC（持久卷声明）不是应用可无限使用的配额。2026-07-28 的真实验收发现 local-path PV（本地路径持久卷）的挂载根目录为 `0777 root:10001`，不符合 `0700` 根目录契约，旧版本因此以 `root_unsafe` 安全关闭观测。当前最小修复已用同权限容器反例证明应用会以 UID/GID（用户 / 组标识）`10001/10001` 创建 `0700` 私有子目录；新版本重新部署并完成真实生命周期验收前，不得声称轮转、保留和删除边界已经在生产生效。
+`k8s-yaml-assistant-observation` 只挂载到 `/app/data/observability`，应用只把 `/app/data/observability/segments` 作为 local sink（本地写入端）根目录。应用配置定义 7 天、单文件 16 MiB、总量 256 MiB 的轮转和删除边界；1 GiB PVC（持久卷声明）不是应用可无限使用的配额。2026-07-28 的首次真实验收发现 local-path PV（本地路径持久卷）的挂载根目录为 `0777 root:10001`，不符合旧 `0700` 根目录契约，`v0.1.0` 因此以 `root_unsafe` 安全关闭观测。`v0.1.1` 已在相同挂载中由 UID/GID（用户 / 组标识）`10001/10001` 创建 `0700` 私有子目录，且日志不再出现 `root_unsafe`；经单独授权的有限模型冒烟已创建 1 条 `0600 10001:10001` 真实分段并验证安全投影。回滚到 `v0.1.0` 后 `root_unsafe` 按预期再次出现，观测写入关闭；恢复到 `v0.1.1` 后私有子目录和正常写入边界重新生效，启动日志不再出现 `root_unsafe`。既有分段在整个往返过程中保持 1,170 字节、1 行、`0600 10001:10001` 且不是符号链接。单条记录不能证明 16 MiB 轮转、7 天 / 256 MiB 清理、人工删除或符号链接攻击拒绝，因此仍不得声称这些边界已经完成生产验收。
 
 索引固定在镜像 `/app/data/index` 中，依靠只读根文件系统读取，不挂载 PVC（持久卷声明），Pod（容器组）重启也不会重建索引。`/tmp` 使用上限为 64 MiB 的 emptyDir（临时卷）。不得把索引、原始 YAML、模型回答、Secret（密钥）或未来计量状态写入 observation PVC（观测持久卷声明）。
 
@@ -117,6 +117,23 @@ sudo k3s kubectl -n k8s-yaml-assistant-prod get deployment,pod,ingress
 - `local-path` StorageClass（本地路径存储类）使用 `WaitForFirstConsumer`（等待首个消费者），因此 observation PVC（观测持久卷声明）在没有 Pod（容器组）时为预期 `Pending`（等待中）；
 - 集群不存在应用 Deployment/Pod/Ingress（工作负载 / 容器组 / 入口）；服务器目标监听仍只有既有 K3s `6443`，从当次外部来源验证 80/443/6443 均不可达；
 - 三个本地临时输入和 `ghcr.io` Docker Keychain（Docker 钥匙串）登录项在单独确认删除范围后清理；GitHub PAT（GitHub 个人访问令牌）和 Kubernetes Secret（Kubernetes 密钥）不属于该删除范围。
+
+## Task 7（任务 7）`v0.1.1` 与人工回滚、恢复非敏感实施证据
+
+2026-07-28 经本次明确授权完成发布、部署和非模型验收：
+
+- `v0.1.1` Release（发布版本）`360575653` 精确绑定源提交 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d`，包含六项证据；`Deploy published release`（部署已发布版本）运行 `30296287472` Attempt 1（第 1 次尝试）成功，GitHub deployment（GitHub 部署记录）`5628234264` 最终为 `success`。
+- 因跨境 GHCR（GitHub 容器镜像仓库）冷拉取过慢且 SWR（华为云容器镜像服务）企业版仍待审批，本次在 Publish（正式发布）前把精确 `linux/amd64` 镜像制作为保留根摘要的 OCI archive（开放容器镜像归档），校验 SHA-256（安全哈希算法）`86766515ef4793329808f60747dfce4a50c43e610e1cbaeafbc7f06aa535ff29` 后经 SSH（安全远程登录）传输并由 `k3s ctr images import` 导入。临时认证文件和两端归档已删除，节点保留生产所需的已导入内容；这是一条一次性临时路径，不替代同区域镜像分发。
+- 人工回滚 Release（发布版本）`360812512` 通过不可变标签精确绑定 `v0.1.0` 摘要和唯一 provenance bundle（来源证明包）；`Deploy published release`（部署已发布版本）运行 `30325880287` Attempt 1（第 1 次尝试）成功，GitHub deployment（GitHub 部署记录）`5633580284` 最终为 `success`。节点事件确认目标镜像已存在于本机，没有跨境拉取。
+- 恢复 Release（发布版本）`360824879` 通过不可变标签精确绑定 `v0.1.1` 摘要和唯一 provenance bundle（来源证明包），于 `2026-07-28T03:56:06Z` Publish（正式发布）；仓库 `Latest`（最新发布）仍为普通 `v0.1.1` Release（发布版本）。`Deploy published release`（部署已发布版本）运行 `30327301138` Attempt 1（第 1 次尝试）成功，GitHub deployment（GitHub 部署记录）`5633826683` 最终为 `success`。节点事件确认目标镜像已存在于本机，没有跨境拉取。
+- 当前生产镜像为 `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37`；Deployment/Pod（工作负载 / 容器组）为 `1/1` 可用，节点重启后 Pod（容器组）重启为预期的 `1` 且没有继续增加。生产运行器服务为 `active/enabled`（运行中 / 开机自启），GitHub（代码托管平台）显示在线空闲，适配器操作标记不存在。成功台账已有四个事件和两个不同摘要，最新事件仍为精确绑定运行 `30327301138/1` 的 `action=rollback`。
+- `/api/health/live`、`/api/health/ready` 和非模型 `/api/check` 均通过固定本机 SSH tunnel（SSH 隧道）验证；8,410 条镜像内索引的身份和文件哈希与发布清单一致，文件时间早于 Pod（容器组），没有在线重建。公网 80/443/6443 仍不可达，没有 Ingress（入口）。
+- `v0.1.1` 容器进程保持 UID/GID（用户 / 组标识）`10001/10001`、只读根文件系统、零 Linux capability（Linux 能力）和未挂载 ServiceAccount token（服务账户令牌）。其 `/app/data/observability/segments` 为 `10001:10001 0700`，回滚前日志没有 `root_unsafe`、观测失败或敏感内容模式。
+- 经单独授权发送 1 个非敏感 `/api/ask` 客户端请求，允许 SDK（软件开发工具包）自动重试最多 2 次且没有手工重试；请求返回 HTTP 200、两个预期来源、完整结束事件和零错误。精确字段路径未进入 Voyage（向量与重排模型）；当前路由不返回 DeepSeek（回答模型）的实际上游重试次数或 `usage`，因此不记录猜测的调用次数和费用。
+- 生产创建 1,170 字节的 `serving-observations.2026-07-28.0001.jsonl`，权限与所有者为 `0600 10001:10001`、非符号链接且只有 1 条严格记录。记录不含当前 YAML（配置文件）、提示词或回答，Pod（容器组）日志也没有这些内容、`root_unsafe` 或观测失败模式；模型冒烟后 Pod（容器组）继续就绪且重启为 `0`。
+- 与 `v0.1.1` 源码一致的配置、脱敏、投影、采样、轮转、保留、总量清理和符号链接拒绝本地门禁为 55/55 通过。恢复后的 `/app/data/observability/segments` 为 `10001:10001 0700`，既有分段仍为 1,170 字节、`0600 10001:10001`、1 行且不是符号链接；启动日志没有 `root_unsafe` 或观测失败，恢复过程没有模型调用。16 MiB 轮转、7 天 / 256 MiB 清理、人工删除和符号链接攻击拒绝仍没有生产实证。
+- 节点重启前已创建数据库与服务端令牌分离备份 `20260728T041517Z-8d2b24cc-0d2d-4954-9997-ce6b2f1aa3e6`，上传私有 OBS（对象存储服务）的三个对象均由管理员回读核对摘要。重启后 K3s（轻量 Kubernetes）、生产运行器和应用自动恢复，适配器运行时目录重新创建为 `root:root 0700`；节点复用本地 `v0.1.1` 镜像，没有跨境拉取。
+- 节点重启没有改变 Deployment（工作负载）代次、成功台账、操作标记、observation PVC（观测持久卷声明）分段或三个索引文件的时间与摘要，也没有产生 GitHub（代码托管平台）运行、deployment（部署记录）、模型调用或在线索引重建。启动瞬间一条 startup probe（启动探针）连接拒绝警告后，live/ready（存活 / 就绪）持续返回 HTTP `200`。
 
 ## 非破坏性回退
 
