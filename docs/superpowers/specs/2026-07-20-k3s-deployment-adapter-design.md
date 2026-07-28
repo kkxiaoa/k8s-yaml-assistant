@@ -1,8 +1,8 @@
 # K3s 特权部署适配器设计
 
-> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）和 Task 7 Step 1-4（任务 7 步骤 1-4）已完成实现和审核，`v0.1.0` 已 Publish（正式发布）并通过 Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。Step 5（步骤 5）发现的 production observation root（生产观测根目录）权限阻断已有本地通过的最小修复，当前等待受控 Pull Request（合并请求）、新版本发布与重新部署，之后才能完成真实观测生命周期和模型冒烟。没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已经清退。
+> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）和 Task 7（任务 7）已完成实现、真实验收或明确延期收敛。经逐项明确授权，`v0.1.1` 已通过运行 `30296287472` Attempt 1（第 1 次尝试）部署并完成 Step 5（步骤 5）的非模型验收和 1 个有限 Ask（询问）模型冒烟；人工回滚 Release（发布版本）`360812512` 随后通过运行 `30325880287` Attempt 1（第 1 次尝试）把生产切换到 `v0.1.0`，恢复 Release（发布版本）`360824879` 又通过运行 `30327301138` Attempt 1（第 1 次尝试）把生产恢复到 `v0.1.1`。重启前的新鲜数据库与服务端令牌分离备份已上传私有 OBS（对象存储服务）并核对摘要，节点重启后应用、运行器、适配器运行时目录、台账、观测分段和索引身份均按设计恢复。2026-07-28 独立审核接受 Step 5（步骤 5）的部分验收边界和 Step 6（步骤 6）的明确延期风险，Step 9（步骤 9）事实状态同步完成；两项仍保持未完成，不冒充生产实证。没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已经清退。
 > 用途：定义华为云单机 K3s（轻量 Kubernetes）中固定应用发布的 deployment adapter（部署适配器）协议、信任边界、权限、并发、回滚和测试门禁。
-> 当前仓库和服务器已有固定适配器、信任根与权限配置，生产集群已有固定 bootstrap/Secret（引导配置 / 密钥）；仓库级 self-hosted runner（自托管运行器）已经注册并通过真实隔离与重启验证。Attempt 1（第 1 次尝试）在生产调度前失败，Attempt 2-4（第 2-4 次尝试）均删除本轮新建的 Deployment（工作负载）并清除操作标记；Attempt 5（第 5 次尝试）成功后固定单副本 Deployment（工作负载）为 `1/1` 可用，成功台账只有一条事件，80/443 仍未公开。
+> 当前仓库和服务器已有固定适配器、信任根与权限配置，生产集群已有固定 bootstrap/Secret（引导配置 / 密钥）；仓库级 self-hosted runner（自托管运行器）已经注册并通过真实隔离、服务重启和节点重启验证。生产当前固定在 `v0.1.1` 镜像摘要，单副本 Deployment（工作负载）为 `1/1` 可用、Pod（容器组）重启为预期的 `1` 且没有继续增加，成功台账仍有四个事件和两个不同摘要，公网 80/443/6443 仍不可达。生产运行器在线空闲，`root:root 0700` 适配器运行时目录已在节点重启后重新创建，操作标记不存在，没有重复部署。
 > 对应总计划：`docs/superpowers/plans/2026-07-19-k3s-production-deployment.md` 的 Task 12（任务 12）。独立实施计划位于 `docs/superpowers/plans/2026-07-20-k3s-deployment-adapter.md`。
 
 ## 1. 结论
@@ -32,26 +32,26 @@
 | 核对项 | 当前事实 |
 | --- | --- |
 | 仓库 | 个人私有仓库 `kkxiaoa/k8s-yaml-assistant`，默认分支 `main` |
-| 已发布应用源码 | `1cec0b4cc6e57a2b018ec260627bbb651a1dcb3b` |
+| 已发布应用源码 | `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d` |
 | 当前适配器源码 | `d40700ac34ca264df863316710b60275fff759bd` |
-| 应用镜像 | `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4` |
+| 应用镜像 | `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37` |
 | 平台 | `linux/amd64` |
-| Release（发布版本） | `v0.1.0`，Release ID（发布版本标识）`359948311`，已于 2026-07-27 Publish（正式发布）并创建不可变 Git tag（Git 标签） |
+| Release（发布版本） | `v0.1.1`，Release ID（发布版本标识）`360575653`，已于 `2026-07-27T18:59:54Z` Publish（正式发布）并创建不可变 Git tag（Git 标签） |
 | 发布证据 | 六项附件存在，发布清单 schema（模式）版本为 2 |
 | 证明提供者 | `sigstore-cosign` |
 | 构建证明身份 | `https://github.com/kkxiaoa/k8s-yaml-assistant/.github/workflows/release-artifacts.yml@refs/heads/main` |
 | OIDC issuer（开放身份连接签发者） | `https://token.actions.githubusercontent.com` |
-| 当前生产内容摘要 | `sha256:8b512c49ce0c434f0b65eaf69d2fd827209b56e8859473a274230612e9e0b5a4` |
+| 当前生产内容摘要 | `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37` |
 
 当前实际附件大小为：
 
 | 文件 | 字节数 | 适配器是否需要 |
 | --- | ---: | --- |
-| `provenance-attestation.sigstore.json` | 23,690 | 是 |
-| `provenance.slsa.json` | 12,400 | 否；同一 predicate（断言）已在证明包的 DSSE envelope（签名信封）中 |
-| `release-manifest.json` | 3,675 | GitHub 托管验证任务需要，适配器不重复接收 |
-| `release-manifest.sigstore.json` | 10,527 | GitHub 托管验证任务需要，适配器不重复接收 |
-| `sbom-attestation.sigstore.json` | 1,480,482 | 否；不把与部署授权无关的大文件交给生产节点 |
+| `provenance-attestation.sigstore.json` | 25,977 | 是 |
+| `provenance.slsa.json` | 14,677 | 否；同一 predicate（断言）已在证明包的 DSSE envelope（签名信封）中 |
+| `release-manifest.json` | 3,819 | GitHub 托管验证任务需要，适配器不重复接收 |
+| `release-manifest.sigstore.json` | 10,756 | GitHub 托管验证任务需要，适配器不重复接收 |
+| `sbom-attestation.sigstore.json` | 1,480,492 | 否；不把与部署授权无关的大文件交给生产节点 |
 | `sbom.spdx.json` | 1,102,121 | 否 |
 
 现有来源证明包为 Sigstore bundle v0.3（Sigstore 证明包版本 0.3），包含 `dsseEnvelope` 和 `verificationMaterial`。其受签名内容实际绑定：
@@ -471,7 +471,7 @@ GitHub runner（GitHub 运行器）固定版本安装后禁用自动更新，二
 
 当前 systemd 255（系统服务管理器版本 255）会为不同执行阶段重建服务私有挂载，`ExecStartPre`（启动前命令）不能持久修改后续 tmpfs（内存文件系统）的所有者。实现因此固定专用账号 UID/GID（用户 / 组数字标识）为 `996/988`，由 tmpfs 挂载选项直接指定所有者；灾难恢复时必须先验证数字标识没有冲突，不能动态分配后继续使用旧配置。
 
-`/run/k8s-yaml-assistant-deployer` 在节点重启后不存在，必须由 root-owned（root 所有）的 `tmpfiles.d`（临时目录创建规则）以 `root:root 0700` 重新创建。不能使用会把所有权交给服务账号的 `RuntimeDirectory`（运行时目录），不能把 `/run` 整体设为可写，也不能让 runner account（运行器账号）拥有适配器运行时目录。工作和诊断目录不得同时出现在 `TemporaryFileSystem` 与 `ReadWritePaths`：后者的绑定挂载会遮蔽前者的容量上限。
+`/run/k8s-yaml-assistant-deployer` 在节点重启后不存在，必须由 root-owned（root 所有）的 `tmpfiles.d`（临时目录创建规则）以 `root:root 0700` 重新创建。不能使用会把所有权交给服务账号的 `RuntimeDirectory`（运行时目录），不能把 `/run` 整体设为可写，也不能让 runner account（运行器账号）拥有适配器运行时目录。工作和诊断目录不得同时出现在 `TemporaryFileSystem` 与 `ReadWritePaths`：后者的绑定挂载会遮蔽前者的容量上限。2026-07-28 的授权节点重启已验证该目录按固定规则和权限自动恢复。
 
 ## 12. 日志
 
