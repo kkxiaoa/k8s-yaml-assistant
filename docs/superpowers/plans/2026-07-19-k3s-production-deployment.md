@@ -974,7 +974,7 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 - Modify（修改）：`src/server/runtime-config.test.ts`
 - Modify（修改）：页面/面板中的最小隐私与费用提示，具体文件按当前 UI（用户界面）复核
 
-- [ ] **Step 1（步骤 1）：先写 API contract（应用程序接口契约）与字节上限反例**
+- [x] **Step 1（步骤 1）：先写 API contract（应用程序接口契约）与字节上限反例**
 
 覆盖：
 
@@ -984,11 +984,15 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 - UTF-8（Unicode 字符编码）跨 chunk（分块）边界、流中断、JSON（JavaScript 对象表示）非法和 reader error（读取错误）不会产生未处理异常或日志 payload（负载）；
 - error response（错误响应）不回显 body（请求体）、YAML、选中内容、校验错误或供应商错误。
 
+2026-07-28 已新增统一的有界流读取和四条业务路由 strict runtime decoder（严格运行时解码器）：总上限固定为 256 KiB，各路由使用不超过总上限的独立预算；合法超限 `Content-Length` 在读取前拒绝，缺失、非法或伪小值仍按实际字节拒绝。四条路由不再直接调用 `Request.json()`，未知字段、错误类型、空白必填值和超预算输入统一返回不回显请求内容的稳定 400/413 响应。反例、完整本地测试和 TypeScript（类型系统）检查均通过，没有模型调用。
+
 - [ ] **Step 2（步骤 2）：先证明认证 identity header（身份头）信任链**
 
 在实现应用授权前，明确 Traefik → oauth2-proxy ForwardAuth → application（入口控制器 → 认证代理前置认证 → 应用）的头清理和注入顺序：所有客户端可提交的身份头必须先删除，只有成功认证结果可以重新注入；NetworkPolicy（网络策略）只允许审核后的入口/认证组件访问应用 Service（服务）。
 
 如果不能通过实际版本配置、集成反例和网络策略证明应用收到的主体不可由公网客户端伪造，立即停止，重新选择 oauth2-proxy reverse proxy（认证代理反向代理）或带签名的内部身份契约；不得仅凭 `X-Auth-Request-User` 字符串存在就宣称认证。
+
+2026-07-28 只读前置核对确认仓库中没有 Ingress（入口）、ForwardAuth（前置认证）或 oauth2-proxy（认证代理）配置，也没有身份头先清理后注入的实际链路；现有 `deploy/k8s/bootstrap/network-policy.yaml` 仍允许 `kube-system` 中的 Traefik（入口控制器）直接访问应用。当前无法证明应用收到的主体不可由客户端伪造，因此按本步骤停止条件停在 Step 2（步骤 2），没有开始访问策略、限流、费用保护、隐私提示或部署。恢复前必须先审核入口认证拓扑及其与 Task 16（任务 16）的执行顺序。
 
 - [ ] **Step 3（步骤 3）：实现 fail-safe ACCESS_MODE（安全失败访问模式）**
 

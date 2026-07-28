@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readApiRequest } from '@/server/api-contract';
 import { getClient } from '@/server/pipeline';
 import { generateResource } from '@/server/agent';
 import { requireRuntimeCapability } from '@/server/runtime-config';
@@ -13,12 +14,11 @@ export async function POST(req: Request): Promise<Response> {
     return upstreamErrorResponse(error);
   }
 
-  const body = (await req.json()) as { requirement?: unknown };
-  const requirement = String(body.requirement ?? '').trim();
-  if (!requirement) return NextResponse.json({ error: '需求为空' }, { status: 400 });
+  const body = await readApiRequest(req, 'generate');
+  if (!body.ok) return body.response;
   try {
     const { yaml, rounds, diagnostics } = await generateResource(getClient(), {
-      requirement,
+      requirement: body.value.requirement,
     });
     return NextResponse.json({ yaml, rounds, diagnostics });
   } catch (error) {
