@@ -206,7 +206,7 @@ test('DeepSeek key 缺失时 Generate/Fix 返回安全 503，Check 仍可用', a
       const check = await checkPost(
         new Request('http://localhost/api/check', {
           method: 'POST',
-          body: JSON.stringify({ yaml: '' }),
+          body: JSON.stringify({ yaml: 'kind: [' }),
         }),
       );
       assert.equal(check.status, 200);
