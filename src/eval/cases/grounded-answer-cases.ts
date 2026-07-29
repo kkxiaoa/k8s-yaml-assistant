@@ -808,10 +808,7 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: 'policy-conflict-privileged',
     input: { kind: 'retrieval_case', retrievalCaseId: 'policy-conflict-privileged' },
     expectedBehavior: EXPLAIN_SCHEMA_POLICY_CONFLICT,
-    sourceExpectation: {
-      mode: 'allow_missing_with_disclosure',
-      types: ['schema', 'policy'],
-    },
+    sourceExpectation: { mode: 'required', types: ['schema', 'policy'] },
   },
   {
     id: 'error-deployment-replicas-type',

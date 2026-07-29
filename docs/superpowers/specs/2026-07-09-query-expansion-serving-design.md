@@ -1,5 +1,7 @@
 # Alias-aware Query Expansion Serving 接入设计
 
+> 状态：已实施；2026-07-29 根据 `policy-conflict-privileged` 的正式评估证据修订粗召回与重排边界。
+
 ## 1. 背景与证据
 
 A3 已通过全量 eval A/B 验证 schema alias query expansion 的收益：
@@ -56,10 +58,11 @@ retrieveContext / retrieval eval / faith eval / A/B
           boostResource,
           resourceStrategy: alias-aware
         )
-      → 得到 expandedQuery + aliasSelectedResource
+      → 得到 expandedQuery + aliasSelectedResource + 唯一匹配字段路径
       → embed(expandedQuery)
-      → denseSearch(effectiveResource)
-      → rerank(expandedQuery)
+      → denseSearch(effectiveResource, effectivePath)
+      → 有 alias 命中时 rerank(originalQuery + matchedPaths, title + text)
+      → 无 alias 命中时保持 rerank(expandedQuery, text)
       → 返回 hits + expansion trace
 ```
 
@@ -67,9 +70,13 @@ retrieveContext / retrieval eval / faith eval / A/B
 
 ```text
 effectiveResource = aliasSelectedResource ?? boostResource
+effectivePath = callerBoostPath
+  ?? (唯一 matched alias 的 resource 与 effectiveResource 相同时使用其 path)
 ```
 
 weak/strong、同资源/跨资源启用规则完全复用现有 `expandQueryWithAliases()`，serving 不重新实现规则。
+
+扩展术语只帮助 dense retrieval（稠密检索）跨语言或口语召回字段。有 alias 命中时，rerank（重排）使用原始用户问题和全部命中字段路径，并让文档携带既有标题，避免字段术语覆盖“能否使用”等原始意图，同时保留资源和路径身份。多个 alias 同时命中时不为 dense retrieval 推断单一字段路径，防止按注册顺序任意偏向其中一个字段；调用方显式提供的 `boostPath` 始终优先。无 alias 命中的请求保持原有重排行为。
 
 ## 5. Exact Path 与模糊叶子字段
 
@@ -165,7 +172,7 @@ queryExpansion?: {
 
 字段语义：
 
-- `queryText`：真正送入 embedding/rerank 的 query。
+- `queryText`：真正送入 embedding 的扩展后 query；有 alias 命中时，rerank 使用 `originalQueryText`、命中字段路径及文档标题，否则保持原有 query 和正文。
 - `resourceHint`：alias 处理前的原始路由结果。
 - `selectedResource`：alias 规则处理后的最终软加权资源。
 - `status=skipped_exact`：完全字段路径命中，没有执行 expansion。
@@ -252,6 +259,8 @@ searchCorpusTraced(question, {
 8. alias 缺失时回退原始 query并记录 `aliases_missing`。
 9. alias 损坏时回退原始 query并记录 `aliases_invalid`。
 10. trace 中的 query、resource、匹配 alias 和 registry 元数据语义正确。
+11. 唯一 alias 命中可提供字段软加权路径，多个 alias 命中不猜测路径。
+12. alias 命中时 rerank 使用原始用户问题、命中路径和文档标题；未命中时保持旧输入。
 
 ### 11.2 指标门禁
 

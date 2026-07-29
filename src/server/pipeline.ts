@@ -135,7 +135,12 @@ function retrievalText(query: RetrievalQuery): string {
 
 function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
   return {
-    ...chunk,
+    id: chunk.id,
+    title: chunk.title,
+    text: chunk.text,
+    sourceType: chunk.sourceType,
+    provenance: chunk.provenance,
+    targets: chunk.targets,
     score,
   };
 }
