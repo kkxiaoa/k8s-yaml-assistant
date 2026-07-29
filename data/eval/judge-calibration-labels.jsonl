@@ -1,20 +1,20 @@
-{"id":"pod-image","category":"faithful","human":{"faithful":true,"note":"照文档列 containers/initContainers.image"}}
-{"id":"svc-type","category":"faithful","human":{"faithful":true,"note":"四个枚举值照文档"}}
-{"id":"deploy-replicas","category":"faithful","human":{"faithful":true,"note":"replicas 字段 + 默认 1,照文档"}}
-{"id":"sc-reclaimpolicy","category":"faithful","human":{"faithful":true,"note":"枚举 Delete/Recycle/Retain + 默认 Delete,文档全有"}}
-{"id":"quota-hard","category":"faithful","human":{"faithful":true,"note":"此 answer 干净复述 hard 字段作用,未举资源名"}}
-{"id":"pdb-minavailable","category":"faithful","human":{"faithful":true,"note":"此 answer 只述 minAvailable 作用 + 100% 例,未编绝对数字"}}
-{"id":"rolebinding-roleref","category":"faithful","human":{"faithful":true,"note":"S1 明确 Role/ClusterRole 两类引用，S3 定义 kind 为被引用资源类型；问题限定引用 Role，因此 kind=Role 由两片段联合推出，当前命名空间也由 S1 支持"}}
-{"id":"refusal-prometheus-retention","category":"correct_refusal","human":{"faithful":true,"note":"语料外,正确拒答"}}
-{"id":"refusal-nonexistent-field","category":"correct_refusal","human":{"faithful":true,"note":"虚构字段,正确拒答"}}
-{"id":"svc-nodeport","category":"hallucinated","human":{"faithful":false,"note":"\"0<x<65536\" 串了 containerPort;nodePort chunk 只说 in-range"}}
-{"id":"pod-imagepullpolicy","category":"hallucinated","human":{"faithful":false,"note":"把\"不可更新\"扩大到 volumes.image(该 chunk 无此限制)=过度推广编造(初判偏宽,校准修正)"}}
-{"id":"policy-deploy-limits","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":false,"misstatedAsOfficial":false},"note":"答案正确标注资源限制为组织策略,并用 schema chunk 支撑字段层事实"}}
-{"id":"policy-pod-privileged","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":true,"misstatedAsOfficial":false},"note":"问题虽是 policy 问询,答案实际同时说明 schema boolean/default 与 policy forbidden,且未误称官方强制"}}
-{"id":"policy-sc-reclaim","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":false,"misstatedAsOfficial":false},"note":"纯 policy 问询,回答应标组织策略且不说成 K8s 官方强制"}}
-{"id":"policy-secret-plaintext","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":true,"misstatedAsOfficial":false},"note":"答案同时说明 Secret data schema/base64 层与平台 discouraged 策略层,且未误称官方强制"}}
-{"id":"policy-crb-admin","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":false,"misstatedAsOfficial":false},"note":"纯 policy 问询,回答应标组织策略且不说成 K8s 官方强制"}}
-{"id":"policy-ingress-tls","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":false,"misstatedAsOfficial":false},"note":"答案正确标注 Ingress TLS 为生产环境组织策略,并用 schema chunk 支撑字段层事实"}}
-{"id":"policy-conflict-latest","category":"policy_conflict","human":{"faithful":false,"policy":{"distinguished":true,"conflictExplained":true,"misstatedAsOfficial":false},"note":"答案应分层表达 image 字段类型校验与 latest tag 组织禁用;当前样本 schema 依据缺失导致忠实度=false"}}
-{"id":"policy-conflict-nodeport","category":"policy_conflict","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":true,"misstatedAsOfficial":false},"note":"答案用 schema::v1::Service::spec.type 支撑 NodePort schema 取值,并用 policy chunk 表达生产禁用"}}
-{"id":"policy-conflict-privileged","category":"policy_conflict","human":{"faithful":true,"note":"当前样本未检索到 policy context,回答应只答 schema 层并说明未检索到组织规范;policy detail 不校准"}}
+{"id":"pod-image","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"faithful","human":{"faithful":true,"note":"照文档列 containers/initContainers.image"}}
+{"id":"svc-type","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"faithful","human":{"faithful":true,"note":"四个枚举值照文档"}}
+{"id":"deploy-replicas","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"faithful","human":{"faithful":true,"note":"replicas 字段 + 默认 1,照文档"}}
+{"id":"sc-reclaimpolicy","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"faithful","human":{"faithful":true,"note":"枚举 Delete/Recycle/Retain + 默认 Delete,文档全有"}}
+{"id":"quota-hard","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"faithful","human":{"faithful":true,"note":"此 answer 干净复述 hard 字段作用,未举资源名"}}
+{"id":"pdb-minavailable","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"faithful","human":{"faithful":true,"note":"此 answer 只述 minAvailable 作用 + 100% 例,未编绝对数字"}}
+{"id":"rolebinding-roleref","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"faithful","human":{"faithful":true,"note":"S1 明确 Role/ClusterRole 两类引用，S3 定义 kind 为被引用资源类型；问题限定引用 Role，因此 kind=Role 由两片段联合推出，当前命名空间也由 S1 支持"}}
+{"id":"refusal-prometheus-retention","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"correct_refusal","human":{"faithful":true,"note":"语料外,正确拒答"}}
+{"id":"refusal-nonexistent-field","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"correct_refusal","human":{"faithful":true,"note":"虚构字段,正确拒答"}}
+{"id":"svc-nodeport","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"hallucinated","human":{"faithful":false,"note":"\"0<x<65536\" 串了 containerPort;nodePort chunk 只说 in-range"}}
+{"id":"pod-imagepullpolicy","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"hallucinated","human":{"faithful":false,"note":"把\"不可更新\"扩大到 volumes.image(该 chunk 无此限制)=过度推广编造(初判偏宽,校准修正)"}}
+{"id":"policy-deploy-limits","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":false,"misstatedAsOfficial":false},"note":"答案正确标注资源限制为组织策略,并用 schema chunk 支撑字段层事实"}}
+{"id":"policy-pod-privileged","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":true,"misstatedAsOfficial":false},"note":"问题虽是 policy 问询,答案实际同时说明 schema boolean/default 与 policy forbidden,且未误称官方强制"}}
+{"id":"policy-sc-reclaim","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":false,"misstatedAsOfficial":false},"note":"纯 policy 问询,回答应标组织策略且不说成 K8s 官方强制"}}
+{"id":"policy-secret-plaintext","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":true,"misstatedAsOfficial":false},"note":"答案同时说明 Secret data schema/base64 层与平台 discouraged 策略层,且未误称官方强制"}}
+{"id":"policy-crb-admin","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":false,"misstatedAsOfficial":false},"note":"纯 policy 问询,回答应标组织策略且不说成 K8s 官方强制"}}
+{"id":"policy-ingress-tls","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_distinction","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":false,"misstatedAsOfficial":false},"note":"答案正确标注 Ingress TLS 为生产环境组织策略,并用 schema chunk 支撑字段层事实"}}
+{"id":"policy-conflict-latest","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_conflict","human":{"faithful":false,"policy":{"distinguished":true,"conflictExplained":true,"misstatedAsOfficial":false},"note":"答案应分层表达 image 字段类型校验与 latest tag 组织禁用;当前样本 schema 依据缺失导致忠实度=false"}}
+{"id":"policy-conflict-nodeport","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_conflict","human":{"faithful":true,"policy":{"distinguished":true,"conflictExplained":true,"misstatedAsOfficial":false},"note":"答案用 schema::v1::Service::spec.type 支撑 NodePort schema 取值,并用 policy chunk 表达生产禁用"}}
+{"id":"policy-conflict-privileged","sourceFaithRunId":"2026-07-29T10-38-42-300Z-full","category":"policy_conflict","human":{"faithful":true,"note":"当前样本未检索到 policy context,回答应只答 schema 层并说明未检索到组织规范;policy detail 不校准"}}

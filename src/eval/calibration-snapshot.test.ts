@@ -103,6 +103,7 @@ const { context: _context, ...TRACE_WITHOUT_CONTEXT } = BASE_TRACE;
 
 const LABEL = {
   id: 'case-1',
+  sourceFaithRunId: 'faith-run-1',
   category: 'hallucinated',
   human: { faithful: false, note: 'human label' },
 } satisfies JudgeCalibrationLabel;
@@ -160,6 +161,17 @@ assert.throws(
     buildJudgeCalibrationCaseFromFaith({
       label: LABEL,
       trace: BASE_TRACE,
+      sourceFaithRunId: 'faith-run-2',
+      sourceFaithTraceId: 'faith-run-2:case-1',
+    }),
+  /source run mismatch/i,
+);
+
+assert.throws(
+  () =>
+    buildJudgeCalibrationCaseFromFaith({
+      label: LABEL,
+      trace: BASE_TRACE,
       sourceFaithRunId: 'faith-run-1',
       sourceFaithTraceId: '',
     }),
@@ -177,4 +189,4 @@ assert.throws(
   /missing answer snapshot/i,
 );
 
-console.log('calibration-snapshot: 6 checks passed');
+console.log('calibration-snapshot: 7 checks passed');

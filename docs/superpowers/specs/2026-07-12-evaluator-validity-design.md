@@ -87,6 +87,7 @@ Faith trace 必须保存实际送入生成和 judge 的 context/source snapshot�
 - 有效票平票返回不可判定，不能归为 false。
 - policy 每个维度独立计算 quorum；只返回部分 policy 字段不能被当成完整成功。
 - agreement 的分母只包含达到 quorum 的 case；不足 quorum 单独计入 judge failure。
+- human label 绑定明确的 source faith run ID；同名用例的新回答不能自动继承旧标签。
 - calibration snapshot 保存实际 context、answer、human label、source faith run/trace ID 和版本指纹。
 
 ## 5. Generation

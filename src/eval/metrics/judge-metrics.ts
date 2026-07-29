@@ -51,6 +51,7 @@ export const JudgeHumanLabelSchema = z.strictObject({
 
 export const JudgeCalibrationLabelSchema = z.strictObject({
   id: NonBlankStringSchema,
+  sourceFaithRunId: NonBlankStringSchema,
   category: JudgeCalibrationCategorySchema,
   human: JudgeHumanLabelSchema,
 });
