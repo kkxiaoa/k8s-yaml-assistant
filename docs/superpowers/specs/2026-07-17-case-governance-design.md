@@ -181,7 +181,7 @@ Holdout 保护：
 首批 Grounded Answer 错误解释直接引用现有真实 Fix fixture：
 
 - `fix-type-replicas`：解释 Deployment `spec.replicas` 类型错误。
-- `fix-missing-provisioner`：解释 StorageClass 缺少必填 `provisioner`。
+- `fix-missing-deployment-selector`：解释 Deployment 缺少必填且须匹配 Pod 模板标签的 `spec.selector`。
 
 runner 必须调用与 Ask API 共用的 `retrieveContext()`、`ASK_SYSTEM` 和 prompt builder（提示词构建器），mode 为 `explain_error`；校验错误由当前 validator 现场生成。它们不进入 semantic Recall/MRR。
 

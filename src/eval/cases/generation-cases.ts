@@ -177,7 +177,8 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
   {
     governance: GENERATION_DEVELOPMENT,
     id: 'job-basic',
-    requirement: '名为 migrate 的 Job,镜像 busybox 执行迁移,完成 1 次,失败重试 3 次',
+    requirement:
+      '名为 migrate 的 Job,使用单个 busybox 容器和 command ["sh","-c","echo migrate"] 执行迁移,完成 1 次,失败重试 3 次',
     expectedResources: [
       {
         ref: 'job',
@@ -188,16 +189,25 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
           {
             type: 'matches',
             path: 'spec.template.spec.containers',
+            rule: { name: 'array_length_equals', value: 1 },
+          },
+          {
+            type: 'matches',
+            path: 'spec.template.spec.containers',
             rule: {
               name: 'array_contains_object',
               value: { image: 'busybox' },
             },
           },
+          {
+            type: 'equals',
+            path: 'spec.template.spec.containers.command',
+            value: ['sh', '-c', 'echo migrate'],
+          },
           { type: 'exists', path: 'spec.template.spec.restartPolicy' },
         ],
       },
     ],
-    rationale: ['“执行迁移”没有给出稳定的命令或参数文本，因此不猜测具体 command。'],
   },
   {
     governance: GENERATION_DEVELOPMENT,
@@ -917,7 +927,7 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
     governance: GENERATION_DEVELOPMENT,
     id: 'hard-cronjob-full',
     requirement:
-      '名为 cleanup 的 CronJob,每 5 分钟执行;concurrencyPolicy 为 Forbid,保留 3 条成功历史、1 条失败历史;镜像 busybox 执行清理,restartPolicy 为 OnFailure',
+      '名为 cleanup 的 CronJob,每 5 分钟执行;concurrencyPolicy 为 Forbid,保留 3 条成功历史、1 条失败历史;使用单个 busybox 容器和 command ["sh","-c","echo cleanup"] 执行清理,restartPolicy 为 OnFailure',
     expectedResources: [
       {
         ref: 'cronjob',
@@ -938,10 +948,20 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
           {
             type: 'matches',
             path: 'spec.jobTemplate.spec.template.spec.containers',
+            rule: { name: 'array_length_equals', value: 1 },
+          },
+          {
+            type: 'matches',
+            path: 'spec.jobTemplate.spec.template.spec.containers',
             rule: {
               name: 'array_contains_object',
               value: { image: 'busybox' },
             },
+          },
+          {
+            type: 'equals',
+            path: 'spec.jobTemplate.spec.template.spec.containers.command',
+            value: ['sh', '-c', 'echo cleanup'],
           },
           {
             type: 'equals',
@@ -951,7 +971,6 @@ export const GENERATION_CASES: GenerationEvalCase[] = [
         ],
       },
     ],
-    rationale: ['“执行清理”没有给出稳定的命令或参数文本，因此不猜测具体 command。'],
   },
   {
     governance: GENERATION_DEVELOPMENT,

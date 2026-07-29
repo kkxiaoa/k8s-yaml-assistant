@@ -826,14 +826,14 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     sourceExpectation: { mode: 'required', types: ['schema'] },
   },
   {
-    id: 'error-storageclass-missing-provisioner',
+    id: 'error-deployment-missing-selector',
     governance: ERROR_DEVELOPMENT,
     input: {
       kind: 'validation_error',
-      fixCaseId: 'fix-missing-provisioner',
-      question: 'StorageClass 为什么提示缺少 provisioner，应该怎么修复？',
+      fixCaseId: 'fix-missing-deployment-selector',
+      question: 'Deployment 为什么提示缺少 spec.selector，应该怎么修复？',
       expectedChunkIds: [
-        'schema::storage.k8s.io/v1::StorageClass::provisioner',
+        'schema::apps/v1::Deployment::spec.selector',
       ],
     },
     expectedBehavior: ANSWER_WITH_SOURCES,

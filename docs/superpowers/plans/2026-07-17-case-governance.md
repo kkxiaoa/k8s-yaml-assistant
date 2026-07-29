@@ -292,7 +292,7 @@ API streaming（流式调用）和 eval non-streaming（非流式调用）复用
 - [x] **Step 3: 新增两条代表性用例**
 
 - Deployment `spec.replicas` 字符串类型错误，引用 `fix-type-replicas`。
-- StorageClass 缺少 `provisioner`，引用 `fix-missing-provisioner`。
+- Deployment 缺少 `spec.selector`，引用 `fix-missing-deployment-selector`。
 
 两条均为 `error_explanation/human/development`，保存 expected chunk IDs；不复制 broken YAML 或错误消息。
 
