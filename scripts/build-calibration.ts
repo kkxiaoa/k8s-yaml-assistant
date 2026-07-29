@@ -1,4 +1,4 @@
-// 从人工标签和最近可用的已完成非 smoke faith traces 生成非 Holdout calibration snapshot。
+// 从人工标签绑定的已完成非 smoke faith run 生成非 Holdout calibration snapshot。
 // 用法: npm run build:calibration
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -44,15 +44,14 @@ function readLabels(): JudgeCalibrationLabel[] {
   return parseJudgeCalibrationLabelsJsonl(readFileSync(LABELS_PATH, 'utf8'));
 }
 
-function faithRunsNewestFirst(): FaithEvalRun[] {
+function completedFaithRuns(): FaithEvalRun[] {
   return listRuns({ kind: 'faith' })
     .filter(
       (run): run is FaithEvalRun =>
         run.kind === 'faith' &&
         run.status === 'completed' &&
         run.scope !== 'smoke',
-    )
-    .reverse();
+    );
 }
 
 interface FaithTraceSnapshot {
@@ -107,40 +106,41 @@ function readTraceFile(run: FaithEvalRun): FaithTraceSnapshot[] {
   return snapshots;
 }
 
-function latestTraceById(
-  runs: readonly FaithEvalRun[],
-  requiredIds: readonly string[],
-): Map<string, FaithTraceSnapshot> {
-  const latest = new Map<string, FaithTraceSnapshot>();
-  const pending = new Set(requiredIds);
-  for (const run of runs) {
-    for (const snapshot of readTraceFile(run)) {
-      if (pending.has(snapshot.trace.id)) {
-        latest.set(snapshot.trace.id, snapshot);
-        pending.delete(snapshot.trace.id);
-      }
-    }
-    if (pending.size === 0) break;
-  }
-  return latest;
-}
-
 function main(): void {
-  const runs = faithRunsNewestFirst();
+  const runs = completedFaithRuns();
   const labels = readLabels();
   if (runs.length === 0) {
     throw new Error('无可用 faith trace snapshot');
   }
-  const latestById = latestTraceById(
-    runs,
-    labels.map((label) => label.id),
-  );
+  const runsById = new Map(runs.map((run) => [run.id, run]));
+  const snapshotsByRunId = new Map<
+    string,
+    Map<string, FaithTraceSnapshot>
+  >();
   const out = labels.map((label) => {
-    const found = latestById.get(label.id);
-    if (!found) {
-      throw new Error(`明细缺 faith snapshot ${label.id}`);
+    const run = runsById.get(label.sourceFaithRunId);
+    if (!run) {
+      throw new Error(
+        `明细缺已完成非 smoke faith run ${label.sourceFaithRunId}`,
+      );
     }
-    const { trace: t, run, traceId } = found;
+    let snapshots = snapshotsByRunId.get(run.id);
+    if (!snapshots) {
+      snapshots = new Map(
+        readTraceFile(run).map((snapshot) => [
+          snapshot.trace.id,
+          snapshot,
+        ]),
+      );
+      snapshotsByRunId.set(run.id, snapshots);
+    }
+    const found = snapshots.get(label.id);
+    if (!found) {
+      throw new Error(
+        `明细缺 faith snapshot ${label.sourceFaithRunId}:${label.id}`,
+      );
+    }
+    const { trace: t, traceId } = found;
     assertTuningEligibleCase(t, `calibration label ${label.id}`);
     return buildJudgeCalibrationCaseFromFaith({
       label,
@@ -155,7 +155,7 @@ function main(): void {
     `${calibration.map((item) => JSON.stringify(item)).join('\n')}\n`,
   );
   console.error(`已写 ${calibration.length} 条 → ${CALIBRATION_PATH}`);
-  console.error(`全部刷新自 faith trace snapshot: ${calibration.length} 条`);
+  console.error(`全部来自人工标签绑定的 faith snapshot: ${calibration.length} 条`);
   const f = calibration.filter((item) => item.human.faithful).length;
   console.error(`人工 label:忠实 ${f} / 不忠 ${calibration.length - f}`);
   const policyDims = calibration.reduce(

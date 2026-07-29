@@ -97,6 +97,7 @@ check('calibration preflight rejects malformed labels and missing snapshots', ()
     decodeJudgeCalibrationLabels([
       {
         id: 'case-a',
+        sourceFaithRunId: 'faith-run-1',
         category: 'faithful',
         human: { faithful: true, note: 'reviewed' },
       },
@@ -108,6 +109,7 @@ check('calibration preflight rejects malformed labels and missing snapshots', ()
       decodeJudgeCalibrationLabels([
         {
           id: 'case-a',
+          sourceFaithRunId: 'faith-run-1',
           category: 'faithful',
           human: { faithful: 'true', note: 'reviewed' },
         },
@@ -119,6 +121,7 @@ check('calibration preflight rejects malformed labels and missing snapshots', ()
       decodeJudgeCalibrationLabels([
         {
           id: 'case-a',
+          sourceFaithRunId: 'faith-run-1',
           category: 'faithful',
           human: { faithful: true },
         },
@@ -165,7 +168,7 @@ check('calibration preflight rejects malformed labels and missing snapshots', ()
   assert.throws(
     () =>
       parseJudgeCalibrationLabelsJsonl(
-        '{"id":"case-a","category":"faithful","human":{"faithful":true,"note":"reviewed"}}\n{bad json}\n',
+        '{"id":"case-a","sourceFaithRunId":"faith-run-1","category":"faithful","human":{"faithful":true,"note":"reviewed"}}\n{bad json}\n',
       ),
     /line 2/i,
   );
