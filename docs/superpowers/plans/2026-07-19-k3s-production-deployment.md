@@ -1242,17 +1242,17 @@ openssl s_client -connect 120.46.57.214:443 -verify_ip 120.46.57.214
 - Read only（只读）：Task 11（任务 11）release manifest（发布清单）与候选镜像内索引
 - Modify（修改）：只有人工审核确认的 bad case/eval case（问题用例 / 评估用例）及对应治理文件；不能自动回灌
 
-- [ ] **Step 1（步骤 1）：列出并确认 ignored artifact（被忽略产物）清理范围**
+- [x] **Step 1（步骤 1）：列出并确认 ignored artifact（被忽略产物）清理范围**
 
 使用只读命令列出旧 schema v1/v2 run/trace（模式 v1/v2 运行 / 轨迹）、旧 calibration（校准）、临时报告和旧索引目录的精确路径、大小和协议版本。移动到受控临时归档或删除属于破坏性操作，必须在列出目标后获得确认；不清理 `.env`、用户文件、当前/上一候选镜像或未知目录。
 
-- [ ] **Step 2（步骤 2）：复用发布候选的精确索引身份**
+- [x] **Step 2（步骤 2）：复用发布候选的精确索引身份**
 
 正式评估必须使用与候选镜像完全相同的 corpus/model/index identity（语料 / 模型 / 索引身份）。优先从固定 image digest（镜像内容摘要）读取/提取并校验索引 artifact（产物），避免为了得到相同索引再次付费构建；如果工具链不能安全复用而必须重新执行 `index:build`，先获得 Voyage 费用授权，并要求新旧 index hash/file hash（索引哈希 / 文件哈希）完全一致，否则停止调查。
 
 不得用当前失效的 8,127 条 `data/index`、运行时在线重建结果或未固定模型生成的索引评估候选发布版本。
 
-- [ ] **Step 3（步骤 3）：按治理顺序运行正式 full evaluation（完整集评估）**
+- [x] **Step 3（步骤 3）：按治理顺序运行正式 full evaluation（完整集评估）**
 
 先运行所有无模型 preflight（预检），再按检索、忠实度、裁判、生成、修复的顺序执行 full（完整集）范围。每类开始前记录 dataset/config/model/corpus/index identity（数据集 / 配置 / 模型 / 语料 / 索引身份）和费用预算；上一类 harness（评估框架）不完整或 identity（身份）不一致时不继续。
 
@@ -1273,7 +1273,7 @@ npm run eval:fix -- --full
 
 不得把 retrieval（检索）通过当作 answer/generation/fix（回答 / 生成 / 修复）通过，也不得用 smoke/tuning/holdout（冒烟 / 调优 / 留出集）替代 full（完整集）。
 
-- [ ] **Step 4（步骤 4）：人工审核 metrics/trace/bad case（指标 / 轨迹 / 问题用例）**
+- [x] **Step 4（步骤 4）：人工审核 metrics/trace/bad case（指标 / 轨迹 / 问题用例）**
 
 逐类核对：
 
@@ -1285,11 +1285,19 @@ npm run eval:fix -- --full
 - trace（轨迹）、日志和报告无 Secret（密钥）或生产敏感 YAML；
 - bad case（问题用例）先形成候选，只有人工脱敏、复现和治理标记后进入提交数据。
 
-- [ ] **Step 5（步骤 5）：人工晋升或明确拒绝 baseline（基线）**
+- [x] **Step 5（步骤 5）：人工晋升或明确拒绝 baseline（基线）**
 
 只有 full run（完整集运行）完成、协议/定义可比较、trace coverage（轨迹覆盖）完整、harness error（评估框架错误）为 0 且人工审核通过时，才逐 kind（类别）显式执行 promotion（晋升）。任何未通过项都记录为阻断，不用 override（覆盖开关）或降低断言强度晋升。
 
 如果用户决定先公开受控作品集而不等待新 baseline（基线），必须形成书面风险接受：明确哪些能力/指标未证实、匿名模型仍关闭、页面展示文案不得宣称生产质量已经验证。
+
+2026-07-29 执行记录：经独立授权，先删除已确认的旧 8,127 条索引和 `.next` 构建产物，再从当前生产镜像固定摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37` 提取并校验 8,410 条 v5 索引；没有调用 `index:build`。成功运行依次为 retrieval（检索）`2026-07-29T10-27-35-327Z`、faith（忠实度）`2026-07-29T10-38-42-300Z-full`、judge（裁判）`2026-07-29T11-04-44-208Z-judge`、generation（生成）`2026-07-29T11-22-41-770Z-generation` 和 fix（修复）`2026-07-29T11-24-08-465Z-fix`。首次 faith（忠实度）运行 `2026-07-29T10-29-48-748Z-full` 因检索结果携带内部 embedding（向量）字段而在 artifact write（产物写入）阶段失败；最小边界修复完成 317 项测试后，使用相同 dataset/config/model/corpus/index identity（数据集 / 配置 / 模型 / 语料 / 索引身份）重新运行成功，失败产物按协议保留且未复用。
+
+人工审核结论：成功运行的 83/88/20/27/9 条用例均有一一对应 trace（轨迹），Holdout（留出集）未进入校准或自动回灌；两条错误解释正确且完整，85 个带来源回答的 `[S]` 编号均与实际 source snapshot（来源快照）一致；12 个本轮正式产物未发现真实凭据或生产敏感 YAML（配置文件），Generation（生成）的 `secret-basic` 只包含评估用例明确提供的合成值。阻断项包括 retrieval（检索）的 `policy-conflict-privileged` 失召回、faith（忠实度）的 18 条有来源幻觉和 6 条裁判不可判定、judge（裁判）的 19/100 无效投票及 4 个不可判定/2 个不稳定/1 个标签与判定歧义，以及机器满分未覆盖的 `job-basic`、`hard-cronjob-full` 未定义命令补全和 `fix-missing-provisioner` 不可判定目标值。运行协议未记录 raw usage/cost（原始用量 / 费用），只能从 trace（轨迹）对账成功运行的 338 次 Voyage（向量服务）请求、124 次 DeepSeek answer（回答模型）请求和 201 次 DeepSeek judge（裁判模型）请求；首次失败运行另有无法从产物精确还原的首用例调用。
+
+Step 5（步骤 5）决定：本轮 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）baseline（基线）全部明确拒绝晋升，不执行 `eval:promote`，也不以 override（覆盖开关）降低门禁。Faith bad case（忠实度问题用例）只完成无写入预览；既有 retrieval bad case（检索问题用例）的复发证据保留为待 review（审核）工作区差异。后续先修正已确认的评估用例和裁判边界，再单独授权必要的模型复测；当前不满足 Phase 5（阶段 5）前置条件。
+
+2026-07-29 retrieval follow-up（检索后续）：经独立授权，`policy-conflict-privileged` 使用真实复发短语补入既有 reviewed alias（已审核别名），共享检索复用唯一匹配字段路径进行软加权；alias 命中的 rerank（重排）使用原始问题、命中路径及既有标题，未增加 policy quota（策略配额）、BM25/RRF（关键词检索 / 融合排序）或全局候选数。82 条 tuning A/B（调优集对照评估）Recall@3 为 `100.0%`、MRR 为 `0.927`、无 Recall lost case（召回损失用例）。随后运行 full retrieval（完整检索）`2026-07-29T12-20-24-990Z`：相同 8,410 条索引、`voyage-3`、`rerank-2.5` 和 `k=3`，83/83 条 trace（轨迹）完整，Recall@3=`83/83`、MRR@3=`77/83`、harness error（评估框架错误）=0；目标策略排第 2，Holdout（留出集）排第 1，未新增 bad case（问题用例）。既有 `policy-conflict-privileged` 问题用例人工标为 `fixed`，回答契约收紧为 schema + policy（结构定义与组织策略）均必需。该结果只关闭 retrieval（检索）阻断，尚未执行 baseline promotion（基线晋升）；faith、judge、generation、fix（忠实度、裁判、生成、修复）阻断及 Phase 5（阶段 5）停止点不变。
 
 **Rollback（回滚）：** 不合格评估不晋升 baseline（基线），继续使用上一合法基线或“无当前基线”状态；不修改候选生产镜像来迎合结果。疑似敏感 artifact（产物）立即隔离并按安全事件处理。
 
@@ -1297,7 +1305,9 @@ npm run eval:fix -- --full
 
 ## Phase 5（阶段 5）：公开发布与运维验收
 
-## Task 19（任务 19）：先以 private（私有）公开 443，再人工开启 portfolio（作品集展示）
+## Task 19（任务 19，历史候选）：先以 private（私有）公开 443，再人工开启 portfolio（作品集展示）
+
+> 状态：本 Task（任务）依赖已撤销的 oauth2-proxy（认证代理）和 `private/portfolio`（私有 / 作品集展示）协议，已被 `2026-07-29-public-experience-control-design.md` 的统一公开界面、应用内身份和 `normal|interview|sleep` 三态设计替代，不得执行以下步骤。Task 18（任务 18）当前也未通过质量闸；修正并复测通过或形成明确风险接受记录后，必须先按新设计第 6 节另行确认生产发布与公网开放计划，并分别取得 Publish（正式发布）、生产部署、GitHub OAuth App（GitHub 开放授权应用）、生产 Secret（密钥）、安全组和模型开关授权。
 
 **Precondition（前置条件）：** Phase 4（阶段 4）和 Task 18（任务 18）通过，或 Task 18（任务 18）具有明确风险接受；生产证书、告警、回滚、当前/上一 digest（内容摘要）和 emergency stop（紧急停止）已验证。修改华为云安全组和公开访问获得当次明确授权。
 
@@ -1341,7 +1351,7 @@ npm run eval:fix -- --full
 
 ## Task 20（任务 20）：完成恢复演练、容量基线与观察期验收
 
-**Precondition（前置条件）：** Task 19（任务 19）受控试运行已开始；破坏性重启、隔离恢复和 Secret（密钥）轮换分别获得维护窗口与明确授权。
+**Precondition（前置条件）：** 按 2026-07-29 统一公开体验设计另行确认的生产发布任务已开始受控试运行；不得使用上方历史 Task 19（任务 19）代替。破坏性重启、隔离恢复和 Secret（密钥）轮换分别获得维护窗口与明确授权。
 
 **Files（文件）：**
 

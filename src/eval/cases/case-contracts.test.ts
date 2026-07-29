@@ -556,10 +556,7 @@ assert.deepEqual(
     },
     {
       id: 'policy-conflict-privileged',
-      sourceExpectation: {
-        mode: 'allow_missing_with_disclosure',
-        types: ['schema', 'policy'],
-      },
+      sourceExpectation: { mode: 'required', types: ['schema', 'policy'] },
     },
   ],
 );
@@ -580,7 +577,7 @@ assert.deepEqual(
   FIELD_DEVELOPMENT,
 );
 assert.deepEqual(resolvedConflict.sourceExpectation, {
-  mode: 'allow_missing_with_disclosure',
+  mode: 'required',
   types: ['schema', 'policy'],
 });
 assert.deepEqual(

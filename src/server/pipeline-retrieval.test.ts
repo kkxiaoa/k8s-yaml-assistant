@@ -577,6 +577,10 @@ await check(
 
 await check('exact path 未命中时回到 search path', async () => {
   const serviceType = chunk('schema::v1::Service::spec.type');
+  const indexedServiceType = {
+    ...serviceType,
+    embedding: new Float32Array([0.25, 0.75]),
+  };
   let called = false;
   let boostPath: string | undefined;
   const fakeSearch: RetrieveContextOptions['search'] = async (
@@ -586,7 +590,7 @@ await check('exact path 未命中时回到 search path', async () => {
     called = true;
     boostPath = options.boostPath;
     return {
-      hits: [{ chunk: serviceType, score: 0.9 }],
+      hits: [{ chunk: indexedServiceType, score: 0.9 }],
       trace: {
         queryText,
         queryExpansion: {
@@ -622,6 +626,7 @@ await check('exact path 未命中时回到 search path', async () => {
     result.hits.map((hit) => hit.id),
     ['schema::v1::Service::spec.type'],
   );
+  assert.equal('embedding' in result.hits[0]!, false);
 });
 
 await check(

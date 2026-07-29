@@ -1,7 +1,7 @@
 # AI 应用开发能力训练实现方案
 
 > 状态：当前执行依据。
-> 最近核对：2026-07-28。
+> 最近核对：2026-07-29。
 > 用途：维护当前能力状态、质量门禁和唯一执行顺序。具体数据契约由已确认的 design/spec 定义，不在本文重复维护。
 
 ## 1. 项目目标
@@ -49,8 +49,8 @@
 
 以下状态是当前主线和停止点的唯一摘要；运行证据与完整步骤保留在直接引用的实施计划中，不在其他入口文档复制。
 
-- Production Deployment（生产部署）的私有部署阶段已按审核结论收敛。2026-07-29 用户确认以 `docs/superpowers/specs/2026-07-29-public-experience-control-design.md` 和对应实施计划取代尚未部署的 oauth2-proxy（认证代理）、`private/portfolio`（私有 / 作品集展示）双模式及 `set-access-mode`（设置访问模式）候选。新的 Task 16-17（任务 16-17）统一公开界面、30 天匿名低额度完整体验、任意 GitHub（代码托管平台）用户登录增额、持久个人额度、Open Showcase Mode（开放展示模式）、Sleep Mode（休眠模式）和全局费用预算；控制库 OBS（对象存储服务）备份因数据价值低且运维复杂度高，在部署前从候选清退，回答反馈也明确不进入本阶段。匿名身份只使用服务端签名 Cookie（浏览器标识）和匿名化账本，不声称防机器人。体验状态现按 `ask`、`generate`、`fix` 分别表达真实运行时依赖和各自点数：Voyage（向量服务）不可用不再连带关闭只依赖 DeepSeek（回答模型）的 `generate`、`fix`。修订后的本地候选已通过完整本地门禁，当前停止等待 review（审核）。公网身份仍为 `120.46.57.214` 与 `/k8s-yaml-assistant`，域名只作为未来备选。真实 GitHub OAuth callback（开放授权回调）、公开入口、发布与部署均未创建或执行。
-- 四份 2026-07-12 纠偏计划、Phase B（阶段 B）工程清理和 Case Governance（评估用例治理）已经完成结构实现与审核；尚未执行新版本完整模型评估或晋升 baseline（基线）。
+- Production Deployment（生产部署）的私有部署阶段已按审核结论收敛。2026-07-29 用户确认以 `docs/superpowers/specs/2026-07-29-public-experience-control-design.md` 和对应实施计划取代尚未部署的 oauth2-proxy（认证代理）、`private/portfolio`（私有 / 作品集展示）双模式及 `set-access-mode`（设置访问模式）候选。新的 Task 16-17（任务 16-17）统一公开界面、30 天匿名低额度完整体验、任意 GitHub（代码托管平台）用户登录增额、持久个人额度、Open Showcase Mode（开放展示模式）、Sleep Mode（休眠模式）和全局费用预算；控制库 OBS（对象存储服务）备份因数据价值低且运维复杂度高，在部署前从候选清退，回答反馈也明确不进入本阶段。匿名身份只使用服务端签名 Cookie（浏览器标识）和匿名化账本，不声称防机器人。体验状态现按 `ask`、`generate`、`fix` 分别表达真实运行时依赖和各自点数：Voyage（向量服务）不可用不再连带关闭只依赖 DeepSeek（回答模型）的 `generate`、`fix`。修订后的本地候选已通过完整本地门禁和用户 review（审核），Task 18（任务 18）质量审核随后按独立授权执行。公网身份仍为 `120.46.57.214` 与 `/k8s-yaml-assistant`，域名只作为未来备选。真实 GitHub OAuth callback（开放授权回调）、公开入口、发布与部署均未创建或执行。
+- 四份 2026-07-12 纠偏计划、Phase B（阶段 B）工程清理和 Case Governance（评估用例治理）已经完成结构实现与审核；2026-07-29 已使用发布候选的精确 8,410 条索引执行新版本完整模型评估，因人工审核未通过而未晋升任何 baseline（基线）。
 - `v0.1.0` 已携带 8,410 条正式索引和六项发布证据完成不可变发布，并通过运行 `30265452918` Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。随后发现的 production observation root（生产观测根目录）权限阻断已由卷内 `0700` 私有子目录修复，修复随 `v0.1.1` 源提交 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d` 发布。
 - 经本次明确授权，精确绑定该源提交、包含六项发布证据的 `v0.1.1` 已于 2026-07-28 Publish（正式发布）并创建实际不可变标签。`Deploy published release`（部署已发布版本）运行 `30296287472` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5628234264` 均成功。随后人工确认回滚 Release（发布版本）`360812512` 已 Publish（正式发布），运行 `30325880287` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5633580284` 把生产回滚到 `v0.1.0`。经再次明确授权，恢复 Release（发布版本）`360824879` 已于 `2026-07-28T03:56:06Z` Publish（正式发布）；运行 `30327301138` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5633826683` 均成功，生产当前恢复并固定在 `v0.1.1` 镜像摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37`，仓库 `Latest`（最新发布）仍为普通 `v0.1.1` Release（发布版本）。
 - 因跨境 GHCR（GitHub 容器镜像仓库）冷拉取过慢且 SWR（华为云容器镜像服务）企业版仍待审批，本次在 Publish（正式发布）前使用一次性临时路径：本机按精确摘要拉取 `linux/amd64` 镜像，生成保留根摘要的 OCI archive（开放容器镜像归档），校验归档哈希后经 SSH（安全远程登录）传输并导入节点。临时认证文件和两端归档均已删除，节点保留当前生产所需的已导入内容；该路径不替代后续同区域镜像分发方案。
@@ -58,9 +58,12 @@
 - `v0.1.1` 的非模型验收已确认 live/ready（存活 / 就绪）和 `/api/check`，8,410 条镜像内索引身份、哈希与零在线重建，以及 `/app/data/observability/segments` 为 `10001:10001 0700` 且不再出现 `root_unsafe`。经另行授权完成 1 个非敏感 `/api/ask` 请求：HTTP 200、两个预期来源、回答引用完整，精确字段路径证明未进入 Voyage embedding/rerank（Voyage 向量嵌入 / 重排）。生产写入的 1 条 `0600 10001:10001` 严格观测记录不含当前 YAML（配置文件）、提示词或回答。回滚到 `v0.1.0` 后应用按已知边界再次以 `root_unsafe` 安全关闭观测；恢复到 `v0.1.1` 后私有子目录、权限和正常观测边界重新生效，启动日志不再出现 `root_unsafe`，既有分段在整个往返过程中保持 1,170 字节、1 行且权限和所有者不变。回滚和恢复过程均没有模型调用。16 MiB 轮转、7 天 / 256 MiB 清理、人工删除和符号链接拒绝仍只有与 `v0.1.1` 源码一致的本地门禁，没有生产实证。
 - Step 6（步骤 6）当前没有合格真实故障候选，不制造生产故障；Step 7（步骤 7）的标签保护、两次人工 Publish（正式发布）、节点本地镜像命中、生产回滚、恢复和台账闭环已经完成。成功台账当前有四个事件、两个不同摘要，最新事件精确绑定恢复运行 `30327301138/1` 且 `action=rollback`；生产运行器在线空闲，操作标记不存在。Step 8（步骤 8）也已在独立授权下完成：重启前创建并上传数据库与服务端令牌分离备份 `20260728T041517Z-8d2b24cc-0d2d-4954-9997-ce6b2f1aa3e6`，管理员回读核对三项摘要一致；节点重启后 boot ID（启动标识）变为 `b9e5a5c6-b52f-4fb3-9a4d-1d54bc971a71`，K3s（轻量 Kubernetes）、运行器和应用自动恢复，`root:root 0700` 运行时目录按规则重建。节点直接复用本地 `v0.1.1` 镜像，台账、操作标记、观测分段和索引身份均未变化，没有重复部署、模型调用或在线索引重建。2026-07-28 独立审核已接受 Step 5（步骤 5）的部分验收边界和 Step 6（步骤 6）的明确延期风险，Task 7 Step 9（任务 7 步骤 9）事实状态同步完成；这不表示真实观测生命周期或自动恢复生产演练已经完成，也不授权公开入口、模型调用、索引重建或 baseline（基线）晋升。
 - Task 15（任务 15）中严格请求契约、有界请求体、短窗口限速/并发、模型紧急开关、上游超时/重试、输出和序列化字节边界继续作为新方案输入。旧身份头、单用户允许名单、`ACCESS_MODE`、认证代理、双模式路由、访问模式发布授权和适配器扩展只形成过本地候选，从未部署，现由新设计直接替代，不保留运行时兼容分支。
-- 新 Task 16-17（任务 16-17）以应用内 GitHub OAuth 2.0（开放授权协议）、`normal|interview|sleep` 全局状态、SQLite（嵌入式数据库）额度/费用账本和统一公开页面为边界。匿名浏览器在 30 天签名身份有效期内获得 7 点模型体验包，`check` 不扣点；任意登录用户获得独立每日额度，管理员只绕过个人额度并可切换开放展示或休眠。控制库只保存低价值状态且新库默认休眠，不增加异地备份或备份故障反向门禁。Task 18（任务 18）正式质量审核仍位于公开发布之前，回答反馈、真实模型调用和索引身份变化仍需后续 Task（任务）或单独授权。
+- 新 Task 16-17（任务 16-17）以应用内 GitHub OAuth 2.0（开放授权协议）、`normal|interview|sleep` 全局状态、SQLite（嵌入式数据库）额度/费用账本和统一公开页面为边界。匿名浏览器在 30 天签名身份有效期内获得 7 点模型体验包，`check` 不扣点；任意登录用户获得独立每日额度，管理员只绕过个人额度并可切换开放展示或休眠。控制库只保存低价值状态且新库默认休眠，不增加异地备份或备份故障反向门禁。Task 18（任务 18）已完成正式运行和人工审核；后续检索复测已关闭唯一失召回，但回答忠实度、裁判稳定性及 Generation/Fix（生成 / 修复）用例有效性仍阻断公开发布。回答反馈、后续模型调用和索引身份变化仍需后续 Task（任务）或单独授权。
+- Task 18（任务 18）先删除已确认的旧 8,127 条索引和 `.next` 构建产物，再从当前生产镜像摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37` 提取并校验 8,410 条候选索引；没有调用 `index:build`。五类成功运行依次为 retrieval（检索）`2026-07-29T10-27-35-327Z`、faith（忠实度）`2026-07-29T10-38-42-300Z-full`、judge（裁判）`2026-07-29T11-04-44-208Z-judge`、generation（生成）`2026-07-29T11-22-41-770Z-generation` 和 fix（修复）`2026-07-29T11-24-08-465Z-fix`；首次 faith（忠实度）运行 `2026-07-29T10-29-48-748Z-full` 因内部 embedding（向量）字段越过 trace（轨迹）边界失败，最小边界修复通过 317 项完整测试后重新运行成功，失败产物按协议保留且未复用。
+- Task 18（任务 18）首次人工审核确认：83/88/20/27/9 条成功运行与 trace（轨迹）可对账，Holdout（留出集）未进入校准或自动回灌，两条错误解释正确且完整，85 个带回答来源的用例引用编号均与 source snapshot（来源快照）一致，未发现真实凭据或生产敏感 YAML（配置文件）。当次阻断项为：retrieval（检索）仍有 `policy-conflict-privileged` 失召回；faith（忠实度）仅 64/82，另有 18 条有来源幻觉和 6 条裁判不可判定；judge（裁判）100 次投票含 19 次无效、4 个不可判定、2 个不稳定及 `rolebinding-roleref` 标签/判定歧义；Generation/Fix（生成 / 修复）虽机器指标全通过，但 `job-basic`、`hard-cronjob-full` 在命令未定义时自行补出命令，`fix-missing-provisioner` 只验证字段存在且输出值无法从输入确定。运行协议尚未贯通 raw usage/cost（原始用量 / 费用），只能对账请求次数，不能给出实际费用。Faith bad case（忠实度问题用例）只完成无写入预览；现有 retrieval bad case（检索问题用例）的复发证据作为工作区差异等待 review（审核），没有自动回灌、提交或 baseline（基线）晋升。当时决定先审核并修正上述评估用例/裁判边界，再另行授权必要的模型复测；不得直接进入公开发布。
+- 2026-07-29 经本次明确授权修复 `policy-conflict-privileged`：既有 reviewed alias（已审核别名）只增加真实复发短语，唯一匹配字段路径复用现有软加权；dense retrieval（稠密检索）继续使用扩展问题，alias 命中的 rerank（重排）改用原始问题、命中路径及既有标题。82 条 tuning A/B（调优集对照评估）为 Recall@3 `100.0%`、MRR `0.927`、零 Recall lost case（召回损失用例）。正式 full retrieval（完整检索）运行 `2026-07-29T12-20-24-990Z` 使用相同 8,410 条索引和模型身份，83 条 trace（轨迹）完整，Recall@3 从 `82/83` 提升为 `83/83`，MRR@3 保持 `77/83`；目标策略位于第 2，Holdout（留出集）仍为第 1，harness error（评估框架错误）为 0，未新增 bad case（问题用例）。对应既有问题用例已人工标记为 `fixed`，回答来源契约同步收紧为 schema + policy（结构定义与组织策略）均必需。该运行尚未晋升 retrieval baseline（检索基线）；faith、judge、generation、fix（忠实度、裁判、生成、修复）的既有阻断不变，仍不得进入公开发布。
 
-以下语料和评估数字是 2026-07-19 的工作区快照，索引交付状态更新于 2026-07-28；它们都不是永久规格，若与命令输出冲突，以命令输出为准。
+以下语料、索引和评估数字已于 2026-07-29 按 Task 18（任务 18）重新核对；它们都不是永久规格，若与命令输出冲突，以命令输出为准。
 
 ### 3.1 Corpus
 
@@ -80,7 +83,7 @@ npm run corpus:stats
 - 尚未注册真实数据 provider：`docs`、`example`。
 - `data/schemas/curated.json` 显式包含 2 个真实集群 CRD（自定义资源定义）：`gateway.networking.k8s.io/v1 HTTPRoute` 和 `cert-manager.io/v1 Certificate`。
 - corpus identityVersion（语料身份版本）为 `2`，manifest hash（清单哈希）为 `82621edc73530dffc86e21fe6488a332e98f7d2e1efba3d0d995e7b66fb880c4`。
-- 现有本地 `data/index` 仍是 `8,127` chunks 的 v2 索引；在线加载器现要求 v5 索引格式和 knowledge identity v2（知识身份版本 2），因此当前以 `format_mismatch` 失效。默认 `voyage-3` 的 v5 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`；8,410 条正式索引已经由独立 GitHub Actions（GitHub 自动化流水线）生成、完整回读校验并签名，且已烘焙进 `v0.1.0` 和当前生产 `v0.1.1` 应用镜像；本地目录仍未重建。
+- 本地 `data/index` 已从当前生产 `v0.1.1` 镜像的固定摘要直接提取，不是重新构建：共 `8,410` chunks，格式 v5、knowledge identity v2（知识身份版本 2），默认 `voyage-3` 的 index expectation hash（索引期望哈希）为 `fc5b2110fea1339106aacc3829ac19404dab4dc1c9d81ae26c63fa11119ed15a`，与镜像内正式索引一致。
 
 ### 3.2 Eval 数据
 
@@ -90,14 +93,15 @@ npm run corpus:stats
 |---|---:|---|---|---|
 | Semantic Retrieval（语义检索） | 83 | field_explanation=74，policy_explanation=9 | human=83 | development=71，regression=11，holdout=1 |
 | Grounded Answer（有依据回答） | 88 | field_explanation=74，policy_explanation=9，error_explanation=2，refusal=3 | human=88 | development=76，regression=11，holdout=1 |
+| Judge Calibration（裁判校准） | 20 | field_explanation=9，policy_explanation=9，refusal=2 | human=20 | development=18，regression=2 |
 | Generation（生成） | 27 | generation=27 | human=27 | development=26，holdout=1 |
 | Fix（修复） | 9 | fix=9 | human=9 | development=8，holdout=1 |
 
 - Grounded Answer 由 83 条 retrieval 引用、2 条真实 validation error（校验错误）解释和 3 条独立拒答组成。
 - Retrieval/Grounded Answer 的 Holdout（留出集）是 `Certificate.spec.issuerRef`；Generation 是 DaemonSet；Fix 是 HPA `spec.maxReplicas` 类型修复。
 - 当前 origin 仍缺 `schema_generated` 和 `bad_case` 样本。这是实际分布，不为填满分桶新增送分题。
-- 错误解释自动门禁覆盖真实 Fix fixture（修复夹具）、validator（校验器）、Ask 检索与 Faithfulness（忠实度）；correctness（正确性）和完整性尚未完整自动覆盖，首次 full trace（完整集轨迹）必须人工审核。
-- 资源值断言、跨资源关系、修复保留/副作用检查和 fixture preflight（夹具预检）已进入 evaluator（评估器）；正式指标仍待新版本 full run（完整集运行）验证。
+- 错误解释自动门禁覆盖真实 Fix fixture（修复夹具）、validator（校验器）、Ask 检索与 Faithfulness（忠实度）；2026-07-29 已逐条人工确认两条错误解释的 correctness/completeness（正确性 / 完整性）。
+- 资源值断言、跨资源关系、修复保留/副作用检查和 fixture preflight（夹具预检）已进入 evaluator（评估器）；首次 full run（完整集运行）的机器指标虽然全通过，人工审核仍发现未定义命令和不可判定目标值可绕过现有断言，因此该指标尚不能作为 baseline（基线）。
 
 ### 3.3 能力状态
 
@@ -105,12 +109,12 @@ npm run corpus:stats
 |---|---|---|
 | Monaco YAML 工作流与 `ask/check/gen/fix` | 已完成基础闭环 | 继续以编辑器 YAML authoring 为唯一产品场景 |
 | schema ingestion、`$ref` registry、curated corpus | provenance、targets、版本化 ID 和 corpus/index identity 已纠偏 | 尚未接入 docs/example provider，真实 CRD 样本不足 |
-| dense retrieval、rerank、query expansion serving | 已完成基础能力 | 历史指标需在新 evaluator 下重测，不能直接沿用 |
-| run/trace/baseline/bad case | runtime protocol、metric registry、compare/promote 门禁已实现 | 新 baseline 尚未重建，usage/cost 尚未贯通 |
-| Generation/Fix repair loop | evaluator 已验证目标值、资源关系、保留项和副作用 | 尚未执行新版本 full eval/baseline |
-| `[S]` 引用、schema/policy 分层 | 部分完成 | answer correctness 与 claim-level verification 未完成 |
+| dense retrieval、rerank、query expansion serving | 候选 full run 下 Recall@3 为 83/83、MRR@3 为 77/83 | 唯一失召回已关闭，运行 `2026-07-29T12-20-24-990Z` 等待 retrieval baseline 人工审核 |
+| run/trace/baseline/bad case | runtime protocol、metric registry、compare/promote 门禁已实现并完成首次正式运行 | 本轮 baseline 全部拒绝；usage/cost 尚未贯通 |
+| Generation/Fix repair loop | full run 的结构、值、关系、保留项和副作用机器指标全通过 | 人工审核发现用例/断言有效性缺口，需修尺子后复测 |
+| `[S]` 引用、schema/policy 分层 | 85 个带来源回答的引用编号和快照结构均对齐 | Faithfulness（忠实度）为 64/82，另有 18 条有来源幻觉、6 条不可判定；answer correctness 与 claim-level verification 未完成 |
 | Stage 6 policy | 已完成 Ask 侧接入 | docs/examples 与 Generate/Fix policy compliance 未完成 |
-| Stage 7 离线 feedback | retrieval/faith bad case 前置已完成 | serving feedback、采纳信号和审核式回灌未完成 |
+| Stage 7 离线 feedback | retrieval/faith bad case 前置和首次无写入候选预览已完成 | 候选仍须人工治理；serving feedback、采纳信号和审核式回灌未完成 |
 
 ## 4. 当前质量契约
 
@@ -293,12 +297,12 @@ Stage 是能力分类，不代表执行时序。
 
 | Stage | 能力主题 | 当前状态 | 未完成出口 |
 |---|---|---|---|
-| 0 | Scope 与评估代表性 | curated 28 resources、治理分层和首批 Holdout 已落地 | 用新版本 full run 验证代表性并人工审核错误解释 |
+| 0 | Scope 与评估代表性 | curated 28 resources、治理分层、首批 Holdout 和新版本 full run 已落地 | 修正人工审核发现的用例有效性缺口后复测 |
 | 1 | YAML Copilot 工作流 | 基础闭环完成 | 持续保持 editor-context 场景，不扩张产品叙事 |
-| 2 | 质量工程底座 | artifact/metric/evaluator/provenance/governance 契约已纠偏 | 重建正式 baseline；贯通 usage/cost |
+| 2 | 质量工程底座 | artifact/metric/evaluator/provenance/governance 契约已纠偏并完成首次正式运行 | 修正审核阻断后重建正式 baseline；贯通 usage/cost |
 | 3 | 检索优化 | query expansion 已落地，Hybrid 未触发 | 新 baseline 下复测 rerank；证据触发后再选方案 |
-| 4 | Generate/Fix | case contract、关系断言、fixture preflight 和指标语义已纠偏 | 执行新版本 full eval 并审核 baseline |
-| 5 | Grounding/Judge | `[S]` 引用和 policy judge 基础已有 | judge 重新校准；answer quality 分维度；Claim-level Grounding |
+| 4 | Generate/Fix | case contract、关系断言、fixture preflight、指标语义和首次 full run 已完成 | 修正命令未定义与目标值不可判定用例，再复测并审核 baseline |
+| 5 | Grounding/Judge | `[S]` 引用和 policy judge 基础已有，首次 full run 已暴露稳定性缺口 | 修正 18 条有来源幻觉与 judge 不可判定/歧义；answer quality 分维度；Claim-level Grounding |
 | 6.1 | Policy | Ask 侧已完成 | Generate/Fix policy lint 需独立设计 |
 | 6.2 | Official Docs | 未开始 | provider、版本化 ingestion、behavior eval |
 | 6.3 | Examples | 未开始 | provider、Generation/Fix 接入与收益评估 |
@@ -313,7 +317,7 @@ Stage 是能力分类，不代表执行时序。
 2. 已完成：Eval Artifact Protocol（评估产物协议）已实施并完成审核。
 3. 已完成：Knowledge Provenance / Corpus Identity（知识来源 / 语料身份）与 Evaluator Validity（评估器有效性）已实施并完成逐任务审核。
 4. 已完成：Metric Semantics（指标语义）注册表、N/A（不适用）/ 分母、比较、晋升和全评估框架本地门禁已经实施并完成逐任务审核；正式 baseline（基线）重建不属于结构实现完成条件。
-5. 当前边界：未执行真实模型评估，未晋升任何 baseline（基线），不根据旧指标优化检索、提示词或模型。
+5. 当前边界：已执行首次真实模型完整评估，人工审核未通过，未晋升任何 baseline（基线）；不根据机器满分或旧指标优化检索、提示词或模型。
 6. 已完成提交数据的一次性 canonical identity（规范身份）迁移；ignored runs/traces（被忽略的运行 / 轨迹产物）不兼容读取，正式评估前按当前身份清理重建。
 
 ### Phase B：工程收尾与重建尺子（结构完成，正式重建暂缓）
@@ -323,15 +327,16 @@ Stage 是能力分类，不代表执行时序。
 3. 已完成：工程清理登记的 Deferred Risk Closure（延期风险收敛）第 1-6 项均已核对、处理并完成审核。
 4. 已完成：Case Governance（评估用例治理）已贯通 case contract、artifact、suite、泄漏门禁和分桶报告。
 5. 已完成：补入 2 条真实错误解释、2 个真实 CRD（自定义资源定义）主题和 Retrieval/Grounded Answer、Generation、Fix 的首批 Holdout（留出集）。
-6. 当前暂停项：清理 ignored artifacts（被忽略的产物），重建或复用与发布候选完全一致的 8,410 条 index（索引）和 run artifacts（运行产物），依次运行 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）评估；只有 Phase 4（阶段 4）受限入口和公开路由选择通过审核后，才进入 Task 18（任务 18）的公开前质量闸。
-7. 首次 full（完整集）评估必须人工审核错误解释 trace（轨迹）的 correctness（正确性）和完整性；只在人工审核指标、trace 和 bad case（问题用例）后晋升各 kind baseline（类别基线）。
+6. 已完成：清理确认范围内的 ignored artifacts（被忽略产物），复用与发布候选完全一致的 8,410 条 index（索引），并依次运行 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）评估；没有重建索引。
+7. 已完成首次 full（完整集）评估的 metrics/trace/bad case（指标 / 轨迹 / 问题用例）人工审核。错误解释、引用编号、Holdout（留出集）隔离和敏感信息检查通过；检索、忠实度、裁判稳定性和 Generation/Fix（生成 / 修复）用例有效性存在阻断，明确拒绝本轮所有 baseline（基线）晋升。
+8. 当前边界：retrieval（检索）唯一失召回已修复并完成新的 full run（完整集运行），候选指标为 Recall@3 `83/83`、MRR@3 `77/83`，尚未人工晋升 baseline（基线）；下一步继续修正 faith/judge 与 Generation/Fix（忠实度 / 裁判与生成 / 修复）已确认的尺子和质量阻断。
 
 ### Production Deployment（生产部署，当前优先插入主线）
 
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md` 的 Phase 0-3（阶段 0-3）明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引和安全 observation（观测）边界；其中未部署的 Phase 4-5（阶段 4-5）双访问模式候选已被 2026-07-29 公共体验控制设计替代。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
 3. Phase 0-2（阶段 0-2）、特权 deployment adapter（部署适配器）Task 1-7（任务 1-7）和 Task 14（任务 14）的私有发布、部署、人工回滚、恢复及节点重启证据已经完成实现与审核；Step 5（步骤 5）的长期观测生命周期保持部分验收，Step 6（步骤 6）的真实自动恢复演练因没有合格候选明确延期。在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。
-4. 新 Task 16-17（任务 16-17）的本地身份、三态控制、额度/费用、统一页面和直接入口候选已经按 `superpowers/specs/2026-07-29-public-experience-control-design.md` 与对应计划完成，控制库 OBS（对象存储服务）备份已在部署前清退，三项模型操作状态也已按 DeepSeek（回答模型）与 Voyage（向量服务）的真实依赖拆分，当前停止等待 review（审核）。审核通过后才进入 Task 18（任务 18）正式质量审核；新 baseline（基线）审核通过或形成显式风险接受记录前不进入公开发布。OAuth App（开放授权应用）、真实 GitHub callback（开放授权回调）、候选发布、安全组、证书管理器安装、Kubernetes（容器编排系统）写入、模型调用和节点重启仍须分别获得授权。
+4. 新 Task 16-17（任务 16-17）的本地身份、三态控制、额度/费用、统一页面和直接入口候选已经按 `superpowers/specs/2026-07-29-public-experience-control-design.md` 与对应计划完成并通过 review（审核），控制库 OBS（对象存储服务）备份已在部署前清退，三项模型操作状态也已按 DeepSeek（回答模型）与 Voyage（向量服务）的真实依赖拆分。Task 18（任务 18）正式质量审核未通过，后续只关闭了 retrieval（检索）失召回；其新 baseline（基线）尚未晋升，其他质量阻断仍未修复。全部质量阻断复测通过或形成显式风险接受记录前不进入公开发布。OAuth App（开放授权应用）、真实 GitHub callback（开放授权回调）、候选发布、安全组、证书管理器安装、Kubernetes（容器编排系统）写入、后续模型调用和节点重启仍须分别获得授权。
 5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 
 ### Phase C：剩余质量债

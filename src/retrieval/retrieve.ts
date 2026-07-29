@@ -271,6 +271,7 @@ export async function searchCorpusTraced(
   });
   const effectiveQueryText = prepared.queryText;
   const effectiveBoostResource = prepared.boostResource;
+  const effectiveBoostPath = boostPath ?? prepared.boostPath;
   const index = await executeRetrievalStage('index', () => getCorpusIndex());
   const indexCache = getCorpusIndexCache();
   if (!indexCache) {
@@ -308,7 +309,7 @@ export async function searchCorpusTraced(
       index,
       coarseN,
       effectiveBoostResource,
-      boostPath,
+      effectiveBoostPath,
       boostApiVersion,
     ),
   );
@@ -316,10 +317,21 @@ export async function searchCorpusTraced(
   if (coarse.length === 0) return { hits: [], trace: emptyTrace() };
 
   const tRerank = performance.now();
+  const matchedAliasPaths = [
+    ...new Set(prepared.trace.matchedAliases.map((alias) => alias.path)),
+  ];
+  const rerankQuery =
+    matchedAliasPaths.length > 0
+      ? `${queryText}\n\n字段路径: ${matchedAliasPaths.join(' ')}`
+      : effectiveQueryText;
   const rr = await executeRetrievalStage('rerank', () =>
     rerank(
-      effectiveQueryText,
-      coarse.map((h) => h.chunk.text),
+      rerankQuery,
+      coarse.map((h) =>
+        matchedAliasPaths.length > 0
+          ? `${h.chunk.title}\n${h.chunk.text}`
+          : h.chunk.text,
+      ),
       coarse.length,
       runtimeAccess,
       requestObserver,
