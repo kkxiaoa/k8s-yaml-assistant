@@ -4,7 +4,7 @@
 {"id":"sc-reclaimpolicy","category":"faithful","human":{"faithful":true,"note":"枚举 Delete/Recycle/Retain + 默认 Delete,文档全有"}}
 {"id":"quota-hard","category":"faithful","human":{"faithful":true,"note":"此 answer 干净复述 hard 字段作用,未举资源名"}}
 {"id":"pdb-minavailable","category":"faithful","human":{"faithful":true,"note":"此 answer 只述 minAvailable 作用 + 100% 例,未编绝对数字"}}
-{"id":"rolebinding-roleref","category":"faithful","human":{"faithful":true,"note":"kind=Role / name / 当前命名空间,均 roleRef chunk 有据"}}
+{"id":"rolebinding-roleref","category":"faithful","human":{"faithful":true,"note":"S1 明确 Role/ClusterRole 两类引用，S3 定义 kind 为被引用资源类型；问题限定引用 Role，因此 kind=Role 由两片段联合推出，当前命名空间也由 S1 支持"}}
 {"id":"refusal-prometheus-retention","category":"correct_refusal","human":{"faithful":true,"note":"语料外,正确拒答"}}
 {"id":"refusal-nonexistent-field","category":"correct_refusal","human":{"faithful":true,"note":"虚构字段,正确拒答"}}
 {"id":"svc-nodeport","category":"hallucinated","human":{"faithful":false,"note":"\"0<x<65536\" 串了 containerPort;nodePort chunk 只说 in-range"}}
