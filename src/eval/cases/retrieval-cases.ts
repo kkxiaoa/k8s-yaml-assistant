@@ -160,6 +160,17 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     expectedChunkIds: ['schema::v1::Pod::spec.volumes'],
   },
   {
+    id: 'cross-pod-volume-sources',
+    governance: FIELD_DEVELOPMENT,
+    target: { kind: 'Pod' },
+    question: 'Pod 怎么分别引用 PVC、ConfigMap 和 Secret 作为卷?',
+    expectedChunkIds: [
+      'schema::v1::Pod::spec.volumes.persistentVolumeClaim',
+      'schema::v1::Pod::spec.volumes.configMap',
+      'schema::v1::Pod::spec.volumes.secret',
+    ],
+  },
+  {
     id: 'pod-serviceaccountname',
     governance: FIELD_DEVELOPMENT,
     target: { kind: 'Pod' },
@@ -383,6 +394,16 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     question: 'Ingress 怎么配 TLS 证书?',
     expectedChunkIds: ['schema::networking.k8s.io/v1::Ingress::spec.tls'],
   },
+  {
+    id: 'cross-ingress-service-secret',
+    governance: FIELD_DEVELOPMENT,
+    target: { kind: 'Ingress' },
+    question: 'Ingress 怎么把请求转发到 Service，并用 Secret 终止 TLS?',
+    expectedChunkIds: [
+      'schema::networking.k8s.io/v1::Ingress::spec.rules.http.paths.backend.service',
+      'schema::networking.k8s.io/v1::Ingress::spec.tls.secretName',
+    ],
+  },
 
   // ── NetworkPolicy ───────────────────────────────
   {
@@ -481,6 +502,13 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     expectedChunkIds: ['schema::autoscaling/v2::HorizontalPodAutoscaler::spec.scaleTargetRef'],
   },
   {
+    id: 'cross-hpa-deployment',
+    governance: FIELD_DEVELOPMENT,
+    target: { kind: 'HorizontalPodAutoscaler' },
+    question: 'HPA 怎么指定需要伸缩的 Deployment?',
+    expectedChunkIds: ['schema::autoscaling/v2::HorizontalPodAutoscaler::spec.scaleTargetRef'],
+  },
+  {
     id: 'hpa-metrics',
     governance: FIELD_DEVELOPMENT,
     target: { kind: 'HorizontalPodAutoscaler' },
@@ -525,6 +553,16 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     target: { kind: 'RoleBinding' },
     question: 'RoleBinding 怎么指定被授权的用户或 SA?',
     expectedChunkIds: ['schema::rbac.authorization.k8s.io/v1::RoleBinding::subjects'],
+  },
+  {
+    id: 'cross-rolebinding-role-subject',
+    governance: FIELD_DEVELOPMENT,
+    target: { kind: 'RoleBinding' },
+    question: 'RoleBinding 怎么把 ServiceAccount 绑定到 Role 或 ClusterRole?',
+    expectedChunkIds: [
+      'schema::rbac.authorization.k8s.io/v1::RoleBinding::roleRef',
+      'schema::rbac.authorization.k8s.io/v1::RoleBinding::subjects',
+    ],
   },
   {
     id: 'clusterrole-rules',
@@ -623,6 +661,16 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     target: { kind: 'StorageClass' },
     question: '怎么允许 PVC 扩容?',
     expectedChunkIds: ['schema::storage.k8s.io/v1::StorageClass::allowVolumeExpansion'],
+  },
+  {
+    id: 'cross-pvc-storageclass-expansion',
+    governance: FIELD_DEVELOPMENT,
+    target: { kind: 'PersistentVolumeClaim' },
+    question: 'PVC 扩容需要修改申请容量，StorageClass 还要允许什么?',
+    expectedChunkIds: [
+      'schema::v1::PersistentVolumeClaim::spec.resources.requests',
+      'schema::storage.k8s.io/v1::StorageClass::allowVolumeExpansion',
+    ],
   },
   {
     id: 'pvc-resources',
