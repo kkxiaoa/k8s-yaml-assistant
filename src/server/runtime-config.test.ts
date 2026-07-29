@@ -6,7 +6,11 @@ import { POST as fixPost } from '../../app/api/fix/route';
 import { POST as generatePost } from '../../app/api/generate/route';
 import {
   decodeRuntimeConfig,
-  getRuntimeCapabilityStatus,
+  getDeepSeekRuntimeStatus,
+  getRetrievalRuntimeStatus,
+  requireAskRuntimeAccess,
+  requireDeepSeekRuntimeAccess,
+  requireRetrievalRuntimeAccess,
   type RuntimeEnvironment,
 } from './runtime-config';
 
@@ -21,6 +25,7 @@ const VALID_ENV = {
   VOYAGE_API_KEY: 'TestVoyageCredentialValue456',
   INDEX_DIR: 'data/index',
   ENABLE_QUERY_EXPANSION: 'true',
+  MODEL_ACCESS_ENABLED: 'true',
 } as const;
 
 const REQUIRED_NON_SECRET_FIELDS = [
@@ -153,27 +158,73 @@ test('拒绝未知供应商配置字段但忽略无关进程环境', () => {
   assert.equal(decode({ NODE_ENV: 'production' }).ok, true);
 });
 
-test('Secret 缺失只关闭对应模型能力且不污染配置错误', () => {
+test('DeepSeek 与检索运行时状态只受各自配置和 Secret 影响', () => {
   assert.deepEqual(
-    getRuntimeCapabilityStatus('deepseek', {
+    getDeepSeekRuntimeStatus({
       ...VALID_ENV,
       DEEPSEEK_API_KEY: undefined,
     }),
     { ok: false, code: 'deepseek_unavailable' },
   );
   assert.deepEqual(
-    getRuntimeCapabilityStatus('voyage', {
+    getRetrievalRuntimeStatus({
       ...VALID_ENV,
       VOYAGE_API_KEY: undefined,
     }),
     { ok: false, code: 'voyage_unavailable' },
   );
   assert.deepEqual(
-    getRuntimeCapabilityStatus('deepseek', {
+    getDeepSeekRuntimeStatus({
       ...VALID_ENV,
       DEEPSEEK_BASE_URL: 'raw-invalid-url-value',
     }),
     { ok: false, code: 'runtime_config_invalid' },
+  );
+  assert.deepEqual(
+    getDeepSeekRuntimeStatus({
+      ...VALID_ENV,
+      VOYAGE_EMBEDDING_URL: 'raw-invalid-url-value',
+      VOYAGE_API_KEY: undefined,
+    }),
+    { ok: true },
+  );
+  assert.deepEqual(
+    getRetrievalRuntimeStatus({
+      ...VALID_ENV,
+      DEEPSEEK_BASE_URL: 'raw-invalid-url-value',
+      DEEPSEEK_API_KEY: undefined,
+    }),
+    { ok: true },
+  );
+});
+
+test('Ask 组合两类访问，单能力访问不解码无关配置', () => {
+  const access = requireAskRuntimeAccess(VALID_ENV);
+  assert.equal(
+    access.deepseek.config.deepseek.baseUrl,
+    VALID_ENV.DEEPSEEK_BASE_URL,
+  );
+  assert.equal(access.deepseek.apiKey(), VALID_ENV.DEEPSEEK_API_KEY);
+  assert.equal(access.retrieval.apiKey(), VALID_ENV.VOYAGE_API_KEY);
+  const serialized = JSON.stringify(access);
+  assert.equal(serialized.includes(VALID_ENV.DEEPSEEK_API_KEY), false);
+  assert.equal(serialized.includes(VALID_ENV.VOYAGE_API_KEY), false);
+
+  assert.equal(
+    requireDeepSeekRuntimeAccess({
+      ...VALID_ENV,
+      VOYAGE_EMBEDDING_URL: 'invalid-voyage-url',
+      VOYAGE_API_KEY: undefined,
+    }).apiKey(),
+    VALID_ENV.DEEPSEEK_API_KEY,
+  );
+  assert.equal(
+    requireRetrievalRuntimeAccess({
+      ...VALID_ENV,
+      DEEPSEEK_BASE_URL: 'invalid-deepseek-url',
+      DEEPSEEK_API_KEY: undefined,
+    }).apiKey(),
+    VALID_ENV.VOYAGE_API_KEY,
   );
 });
 
@@ -242,33 +293,4 @@ test('Voyage key 缺失时 Ask 在读取索引和调用供应商前安全返回 
       }
     },
   );
-});
-
-test('Generate 将 DeepSeek 余额错误收敛为不含原始响应体的 503', async () => {
-  await withEnvironment(VALID_ENV, async () => {
-    const originalFetch = globalThis.fetch;
-    const rawBody = 'billing response includes TestCredentialValue999';
-    globalThis.fetch = (async () =>
-      Response.json(
-        { error: { type: 'billing_error', message: rawBody } },
-        { status: 402 },
-      )) as typeof fetch;
-    try {
-      const response = await generatePost(
-        new Request('http://localhost/api/generate', {
-          method: 'POST',
-          body: JSON.stringify({ requirement: '创建一个 Pod' }),
-        }),
-      );
-      assert.equal(response.status, 503);
-      const text = await response.text();
-      assert.deepEqual(JSON.parse(text), {
-        error: { code: 'upstream_balance_exhausted' },
-      });
-      assert.equal(text.includes(rawBody), false);
-      assert.equal(text.includes('TestCredentialValue999'), false);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
 });

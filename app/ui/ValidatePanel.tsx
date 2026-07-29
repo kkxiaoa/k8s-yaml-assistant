@@ -5,9 +5,19 @@ interface Props {
   errors: VErr[] | null;
   onFix?: () => void;
   fixing?: boolean;
+  fixDisabled?: boolean;
+  fixLoginRequired?: boolean;
+  fixActionHint?: string;
 }
 
-export function ValidatePanel({ errors, onFix, fixing }: Props) {
+export function ValidatePanel({
+  errors,
+  onFix,
+  fixing,
+  fixDisabled,
+  fixLoginRequired = false,
+  fixActionHint,
+}: Props) {
   return (
     <div className="rounded-lg border border-line bg-surface">
       <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
@@ -37,9 +47,22 @@ export function ValidatePanel({ errors, onFix, fixing }: Props) {
               ))}
             </ul>
             {onFix && (
-              <button className={`mt-3 ${PRIMARY_BTN}`} onClick={onFix} disabled={fixing}>
-                {fixing ? '修复中…(自检)' : '修复当前问题'}
-              </button>
+              <span
+                className="mt-3 inline-block"
+                title={fixActionHint}
+              >
+                <button
+                  className={PRIMARY_BTN}
+                  onClick={onFix}
+                  disabled={fixDisabled}
+                >
+                  {fixing
+                    ? '修复中…(自检)'
+                    : fixLoginRequired
+                      ? '登录后修复当前问题'
+                      : '修复当前问题'}
+                </button>
+              </span>
             )}
           </>
         )}

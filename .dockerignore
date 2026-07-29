@@ -11,6 +11,7 @@ __pycache__
 data/index
 data/index-*
 data/observability
+data/control
 data/eval/runs
 data/eval/traces
 data/aliases/drafts

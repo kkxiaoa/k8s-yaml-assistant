@@ -189,8 +189,10 @@ await check('Ask route 只注入安全 recorder 且不恢复原始持久化入�
     /trace\.(?:question|queryText|coarseHits|rerankHits|finalHits)/,
   );
   assert.match(routeSource, /getReadiness\(\)/);
-  assert.match(routeSource, /requireRuntimeCapability\('deepseek'\)/);
-  assert.match(routeSource, /requireRuntimeCapability\('voyage'\)/);
+  assert.match(
+    routeSource,
+    /requireAskRuntimeAccess\(\)/,
+  );
   assert.match(
     routeSource,
     /controller\.enqueue\(sse\('error', upstreamErrorEvent\(error\)\)\)/,
@@ -204,7 +206,7 @@ await check('Ask route 只注入安全 recorder 且不恢复原始持久化入�
   );
   const readinessOffset = routeSource.indexOf('await getReadiness()');
   const capabilityOffset = routeSource.indexOf(
-    "requireRuntimeCapability('deepseek')",
+    'requireAskRuntimeAccess()',
   );
   const bodyOffset = routeSource.indexOf('await req.json()');
   const boundedBodyOffset = routeSource.indexOf(

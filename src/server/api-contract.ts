@@ -63,7 +63,17 @@ const FixRequestSchema = z.strictObject({
   errors: ValidationErrorsSchema.default([]),
 });
 
+const AdminExperienceRequestSchema = z.discriminatedUnion('mode', [
+  z.strictObject({ mode: z.literal('normal') }),
+  z.strictObject({ mode: z.literal('sleep') }),
+  z.strictObject({
+    mode: z.literal('interview'),
+    durationHours: z.union([z.literal(1), z.literal(4), z.literal(8)]),
+  }),
+]);
+
 const ApiRequestSchemas = {
+  adminExperience: AdminExperienceRequestSchema,
   ask: AskRequestSchema,
   check: CheckRequestSchema,
   generate: GenerateRequestSchema,
@@ -73,6 +83,7 @@ const ApiRequestSchemas = {
 type ApiRoute = keyof typeof ApiRequestSchemas;
 
 interface ApiRequestMap {
+  adminExperience: z.infer<typeof AdminExperienceRequestSchema>;
   ask: z.infer<typeof AskRequestSchema>;
   check: z.infer<typeof CheckRequestSchema>;
   generate: z.infer<typeof GenerateRequestSchema>;
@@ -80,6 +91,7 @@ interface ApiRequestMap {
 }
 
 const API_BODY_LIMITS = {
+  adminExperience: 1024,
   ask: GLOBAL_MAX_BODY_BYTES,
   check: 144 * 1024,
   generate: 72 * 1024,

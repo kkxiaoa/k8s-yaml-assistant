@@ -1,7 +1,9 @@
 import { RuntimeConfigFault } from './runtime-config';
+import { ModelInputBudgetError } from './model-request-policy';
 
 export type SafeUpstreamErrorCode =
   | 'runtime_config_invalid'
+  | 'model_input_too_large'
   | 'deepseek_unavailable'
   | 'voyage_unavailable'
   | 'upstream_timeout'
@@ -13,7 +15,7 @@ export type SafeUpstreamErrorCode =
   | 'upstream_error';
 
 export interface SafeUpstreamFailure {
-  status: 502 | 503;
+  status: 413 | 502 | 503;
   code: SafeUpstreamErrorCode;
 }
 
@@ -57,6 +59,9 @@ function errorCode(error: unknown): unknown {
 }
 
 export function classifyUpstreamError(error: unknown): SafeUpstreamFailure {
+  if (error instanceof ModelInputBudgetError) {
+    return { status: 413, code: 'model_input_too_large' };
+  }
   if (error instanceof RuntimeConfigFault) {
     return { status: 503, code: error.code };
   }

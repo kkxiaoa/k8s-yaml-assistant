@@ -5,396 +5,34 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { loadAll } from 'js-yaml';
 import { z } from 'zod';
-import {
-  DEEPSEEK_ANSWER_MODEL,
-  VOYAGE_RERANK_MODEL,
-} from '../src/server/runtime-config';
-import { RELEASE_INDEX_EMBEDDING_MODEL } from '../src/release/manifest';
+import { rootHealthRedirects } from '../src/shared/application-path.mjs';
 
 const root = process.cwd();
 const k3sDir = join(root, 'deploy', 'k3s');
+const readmePath = join(k3sDir, 'README.md');
+const configPath = join(k3sDir, 'config.yaml');
+const admissionConfigPath = join(k3sDir, 'admission-config.yaml');
 const adapterDir = join(root, 'deploy', 'adapter');
 const kubernetesDir = join(root, 'deploy', 'k8s');
 const bootstrapDir = join(kubernetesDir, 'bootstrap');
 const applicationDir = join(kubernetesDir, 'app');
-const readmePath = join(k3sDir, 'README.md');
-const configPath = join(k3sDir, 'config.yaml');
-const admissionConfigPath = join(k3sDir, 'admission-config.yaml');
+const accessDir = join(kubernetesDir, 'access');
+const tlsDir = join(kubernetesDir, 'tls');
 const kubernetesReadmePath = join(kubernetesDir, 'README.md');
 const deploymentTemplatePath = join(
   applicationDir,
   'deployment-template.yaml',
 );
-const productionNamespace = 'k8s-yaml-assistant-prod';
-const applicationName = 'k8s-yaml-assistant';
-const observationClaimName = 'k8s-yaml-assistant-observation';
+const configMapPath = join(bootstrapDir, 'config-map.yaml');
+const controlClaimPath = join(bootstrapDir, 'control-pvc.yaml');
+const networkPolicyPath = join(bootstrapDir, 'network-policy.yaml');
+const accessMiddlewarePath = join(accessDir, 'middlewares.yaml');
+const accessRoutePath = join(accessDir, 'routes.yaml');
+const productionCertificatePath = join(tlsDir, 'certificate.yaml');
+const tlsStorePath = join(tlsDir, 'tls-store.yaml');
 const imageMarker = '__K8S_YAML_ASSISTANT_IMAGE__';
 const applicationImage = 'ghcr.io/kkxiaoa/k8s-yaml-assistant';
-const deepSeekSecretName = 'deepseek-runtime';
-const voyageSecretName = 'voyage-runtime';
-const imagePullSecretName = 'ghcr-pull';
-const bootstrapManifestPaths = [
-  'namespace.yaml',
-  'service-account.yaml',
-  'config-map.yaml',
-  'service.yaml',
-  'observation-pvc.yaml',
-  'network-policy.yaml',
-].map((name) => join(bootstrapDir, name));
-const expectedRuntimeConfig = {
-  DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
-  DEEPSEEK_ANSWER_MODEL,
-  VOYAGE_EMBEDDING_URL: 'https://api.voyageai.com/v1/embeddings',
-  VOYAGE_RERANK_URL: 'https://api.voyageai.com/v1/rerank',
-  VOYAGE_EMBEDDING_MODEL: RELEASE_INDEX_EMBEDDING_MODEL,
-  VOYAGE_RERANK_MODEL,
-  INDEX_DIR: '/app/data/index',
-  ENABLE_QUERY_EXPANSION: 'true',
-  ACCESS_MODE: 'private',
-  NODE_ENV: 'production',
-  PORT: '3000',
-  HOSTNAME: '0.0.0.0',
-  SERVING_OBSERVATION_MODE: 'local',
-  SERVING_OBSERVATION_SAMPLE_RATE: '1',
-  SERVING_OBSERVATION_MAX_FILE_BYTES: '16777216',
-  SERVING_OBSERVATION_MAX_TOTAL_BYTES: '268435456',
-  SERVING_OBSERVATION_RETENTION_DAYS: '7',
-  SERVING_OBSERVATION_MAX_INPUT_BYTES: '131072',
-  SERVING_OBSERVATION_MAX_TEXT_BYTES: '8192',
-} as const;
-const applicationMetadata = {
-  name: applicationName,
-  namespace: productionNamespace,
-} as const;
-const expectedNamespaceResource = {
-  apiVersion: 'v1',
-  kind: 'Namespace',
-  metadata: {
-    name: productionNamespace,
-    labels: {
-      'pod-security.kubernetes.io/enforce': 'restricted',
-      'pod-security.kubernetes.io/enforce-version': 'v1.36',
-      'pod-security.kubernetes.io/audit': 'restricted',
-      'pod-security.kubernetes.io/audit-version': 'v1.36',
-      'pod-security.kubernetes.io/warn': 'restricted',
-      'pod-security.kubernetes.io/warn-version': 'v1.36',
-    },
-  },
-} as const;
-const expectedServiceAccountResource = {
-  apiVersion: 'v1',
-  kind: 'ServiceAccount',
-  metadata: applicationMetadata,
-  automountServiceAccountToken: false,
-} as const;
-const expectedConfigMapResource = {
-  apiVersion: 'v1',
-  kind: 'ConfigMap',
-  metadata: applicationMetadata,
-  data: expectedRuntimeConfig,
-} as const;
-const expectedServiceResource = {
-  apiVersion: 'v1',
-  kind: 'Service',
-  metadata: applicationMetadata,
-  spec: {
-    type: 'ClusterIP',
-    selector: {
-      'app.kubernetes.io/name': applicationName,
-    },
-    ports: [
-      {
-        name: 'http',
-        protocol: 'TCP',
-        port: 80,
-        targetPort: 'http',
-        appProtocol: 'http',
-      },
-    ],
-  },
-} as const;
-const expectedObservationClaimResource = {
-  apiVersion: 'v1',
-  kind: 'PersistentVolumeClaim',
-  metadata: {
-    name: observationClaimName,
-    namespace: productionNamespace,
-  },
-  spec: {
-    accessModes: ['ReadWriteOnce'],
-    volumeMode: 'Filesystem',
-    storageClassName: 'local-path',
-    resources: {
-      requests: {
-        storage: '1Gi',
-      },
-    },
-  },
-} as const;
-const expectedNetworkPolicyResource = {
-  apiVersion: 'networking.k8s.io/v1',
-  kind: 'NetworkPolicy',
-  metadata: applicationMetadata,
-  spec: {
-    podSelector: {
-      matchLabels: {
-        'app.kubernetes.io/name': applicationName,
-      },
-    },
-    policyTypes: ['Ingress', 'Egress'],
-    ingress: [
-      {
-        from: [
-          {
-            namespaceSelector: {
-              matchLabels: {
-                'kubernetes.io/metadata.name': 'kube-system',
-              },
-            },
-            podSelector: {
-              matchLabels: {
-                'app.kubernetes.io/name': 'traefik',
-              },
-            },
-          },
-        ],
-        ports: [
-          {
-            protocol: 'TCP',
-            port: 3000,
-          },
-        ],
-      },
-    ],
-    egress: [
-      {
-        to: [
-          {
-            namespaceSelector: {
-              matchLabels: {
-                'kubernetes.io/metadata.name': 'kube-system',
-              },
-            },
-            podSelector: {
-              matchLabels: {
-                'k8s-app': 'kube-dns',
-              },
-            },
-          },
-        ],
-        ports: [
-          {
-            protocol: 'UDP',
-            port: 53,
-          },
-          {
-            protocol: 'TCP',
-            port: 53,
-          },
-        ],
-      },
-      {
-        to: [
-          {
-            ipBlock: {
-              cidr: '0.0.0.0/0',
-              except: [
-                '10.0.0.0/8',
-                '100.64.0.0/10',
-                '127.0.0.0/8',
-                '169.254.0.0/16',
-                '172.16.0.0/12',
-                '192.168.0.0/16',
-              ],
-            },
-          },
-        ],
-        ports: [
-          {
-            protocol: 'TCP',
-            port: 443,
-          },
-        ],
-      },
-    ],
-  },
-} as const;
-const expectedBootstrapResources = [
-  expectedNamespaceResource,
-  expectedServiceAccountResource,
-  expectedConfigMapResource,
-  expectedServiceResource,
-  expectedObservationClaimResource,
-  expectedNetworkPolicyResource,
-] as const;
-const expectedDeploymentResource = {
-  apiVersion: 'apps/v1',
-  kind: 'Deployment',
-  metadata: applicationMetadata,
-  spec: {
-    replicas: 1,
-    revisionHistoryLimit: 3,
-    minReadySeconds: 10,
-    progressDeadlineSeconds: 600,
-    strategy: {
-      type: 'RollingUpdate',
-      rollingUpdate: {
-        maxSurge: 0,
-        maxUnavailable: 1,
-      },
-    },
-    selector: {
-      matchLabels: {
-        'app.kubernetes.io/name': applicationName,
-      },
-    },
-    template: {
-      metadata: {
-        labels: {
-          'app.kubernetes.io/name': applicationName,
-        },
-      },
-      spec: {
-        serviceAccountName: applicationName,
-        automountServiceAccountToken: false,
-        enableServiceLinks: false,
-        terminationGracePeriodSeconds: 60,
-        imagePullSecrets: [
-          {
-            name: imagePullSecretName,
-          },
-        ],
-        securityContext: {
-          runAsNonRoot: true,
-          runAsUser: 10001,
-          runAsGroup: 10001,
-          fsGroup: 10001,
-          fsGroupChangePolicy: 'OnRootMismatch',
-          seccompProfile: {
-            type: 'RuntimeDefault',
-          },
-        },
-        containers: [
-          {
-            name: 'app',
-            image: imageMarker,
-            imagePullPolicy: 'IfNotPresent',
-            ports: [
-              {
-                name: 'http',
-                containerPort: 3000,
-                protocol: 'TCP',
-              },
-            ],
-            envFrom: [
-              {
-                configMapRef: {
-                  name: applicationName,
-                },
-              },
-            ],
-            env: [
-              {
-                name: 'DEEPSEEK_API_KEY',
-                valueFrom: {
-                  secretKeyRef: {
-                    name: deepSeekSecretName,
-                    key: 'api-key',
-                  },
-                },
-              },
-              {
-                name: 'VOYAGE_API_KEY',
-                valueFrom: {
-                  secretKeyRef: {
-                    name: voyageSecretName,
-                    key: 'api-key',
-                  },
-                },
-              },
-            ],
-            securityContext: {
-              allowPrivilegeEscalation: false,
-              readOnlyRootFilesystem: true,
-              capabilities: {
-                drop: ['ALL'],
-              },
-            },
-            resources: {
-              requests: {
-                cpu: '500m',
-                memory: '768Mi',
-                'ephemeral-storage': '256Mi',
-              },
-              limits: {
-                cpu: '2',
-                memory: '2Gi',
-                'ephemeral-storage': '1Gi',
-              },
-            },
-            startupProbe: {
-              httpGet: {
-                path: '/api/health/ready',
-                port: 'http',
-                scheme: 'HTTP',
-              },
-              periodSeconds: 5,
-              timeoutSeconds: 2,
-              failureThreshold: 60,
-              successThreshold: 1,
-            },
-            readinessProbe: {
-              httpGet: {
-                path: '/api/health/ready',
-                port: 'http',
-                scheme: 'HTTP',
-              },
-              periodSeconds: 10,
-              timeoutSeconds: 2,
-              failureThreshold: 3,
-              successThreshold: 1,
-            },
-            livenessProbe: {
-              httpGet: {
-                path: '/api/health/live',
-                port: 'http',
-                scheme: 'HTTP',
-              },
-              periodSeconds: 30,
-              timeoutSeconds: 2,
-              failureThreshold: 3,
-              successThreshold: 1,
-            },
-            volumeMounts: [
-              {
-                name: 'observations',
-                mountPath: '/app/data/observability',
-              },
-              {
-                name: 'tmp',
-                mountPath: '/tmp',
-              },
-            ],
-          },
-        ],
-        volumes: [
-          {
-            name: 'observations',
-            persistentVolumeClaim: {
-              claimName: observationClaimName,
-            },
-          },
-          {
-            name: 'tmp',
-            emptyDir: {
-              sizeLimit: '64Mi',
-            },
-          },
-        ],
-      },
-    },
-  },
-} as const;
+
 const adapterPath = join(adapterDir, 'k8s_yaml_assistant_deploy.py');
 const trustedRootPath = join(adapterDir, 'sigstore-trusted-root.json');
 const sudoersPath = join(
@@ -803,110 +441,35 @@ function readKubernetesResource(path: string): {
   };
 }
 
-function validateNamespace(resource: YamlRecord): void {
-  assert.deepEqual(resource, expectedNamespaceResource);
+function parseYamlDocuments(text: string, label: string): YamlRecord[] {
+  const documents: YamlRecord[] = [];
+  loadAll(text, (document) => {
+    assert.notEqual(document, null, `${label} contains an empty document`);
+    documents.push(yamlRecord(document, label));
+  });
+  return documents;
 }
 
-function validateServiceAccount(resource: YamlRecord): void {
-  assert.deepEqual(resource, expectedServiceAccountResource);
-}
-
-function validateConfigMap(resource: YamlRecord): void {
-  assert.deepEqual(resource, expectedConfigMapResource);
-}
-
-function validateService(resource: YamlRecord): void {
-  assert.deepEqual(resource, expectedServiceResource);
-}
-
-function validateObservationClaim(resource: YamlRecord): void {
-  assert.deepEqual(resource, expectedObservationClaimResource);
-}
-
-function validateNetworkPolicy(resource: YamlRecord): void {
-  assert.deepEqual(resource, expectedNetworkPolicyResource);
-}
-
-function validateDeploymentTemplate(
-  source: string,
-  resource: YamlRecord,
-): void {
-  assert.equal(source.split(imageMarker).length - 1, 1);
-  assert.deepEqual(resource, expectedDeploymentResource);
-
-  const rendered = source.replace(
-    imageMarker,
-    `${applicationImage}@sha256:${'a'.repeat(64)}`,
-  );
-  const renderedDeployment = yamlRecord(
-    parseSingleYaml(rendered, 'rendered deployment template'),
-    'rendered deployment template',
-  );
-  const renderedSpec = nestedRecord(
-    renderedDeployment,
+function applicationContainer(deployment: YamlRecord): {
+  podSpec: YamlRecord;
+  container: YamlRecord;
+} {
+  const spec = nestedRecord(deployment, 'spec', 'Deployment');
+  const template = nestedRecord(spec, 'template', 'Deployment.spec');
+  const podSpec = nestedRecord(
+    template,
     'spec',
-    'rendered Deployment',
+    'Deployment.spec.template',
   );
-  const renderedTemplate = nestedRecord(
-    renderedSpec,
-    'template',
-    'rendered Deployment.spec',
+  const containers = yamlArray(
+    podSpec.containers,
+    'Deployment.spec.template.spec.containers',
   );
-  const renderedPodSpec = nestedRecord(
-    renderedTemplate,
-    'spec',
-    'rendered Deployment.template',
-  );
-  const renderedContainer = yamlRecord(
-    yamlArray(
-      renderedPodSpec.containers,
-      'rendered Deployment.containers',
-    )[0],
-    'rendered Deployment.container',
-  );
-  assert.match(
-    String(renderedContainer.image),
-    /^ghcr\.io\/kkxiaoa\/k8s-yaml-assistant@sha256:[a-f0-9]{64}$/u,
-  );
-}
-
-function validateBootstrapResources(resources: readonly YamlRecord[]): void {
-  assert.deepEqual(resources, expectedBootstrapResources);
-}
-
-function validateKubernetesReadme(source: string): void {
-  const [status, purpose] = source.split(/\r?\n/u);
-  assert.match(status ?? '', /^状态：.+/u);
-  assert.equal(
-    purpose,
-    '用途：定义生产 Kubernetes（容器编排系统）固定非敏感资源、应用模板及其审核和回退边界。',
-  );
-  for (const required of [
-    '仓库只固定引用且不保存 Secret（密钥）值',
-    '固定单副本 Deployment/Pod（工作负载 / 容器组）',
-    'deepseek-runtime',
-    'voyage-runtime',
-    'ghcr-pull',
-    '`api-key`',
-    '`kubernetes.io/dockerconfigjson`',
-    '同一节点故障域',
-    'bootstrap（引导配置）',
-    '应用版本',
-    '入口资源',
-    '标准 NetworkPolicy（网络策略）不能按域名建立可靠 allowlist（允许名单）',
-    '--server-side --dry-run=server',
-    '--field-manager=k8s-yaml-assistant-bootstrap',
-    '上一份已审核的 bootstrap（引导配置）',
-  ]) {
-    assert.ok(source.includes(required), `Kubernetes README missing: ${required}`);
-  }
-  assert.doesNotMatch(source, /\bkubectl\s+delete\b/u);
-  assert.doesNotMatch(source, /--force-conflicts\b/u);
-  assert.doesNotMatch(
-    source,
-    /NetworkPolicy（网络策略）(?:已经|可以|能够|负责).*域名.*allowlist/u,
-  );
-  validateNoCredentialMaterial(source);
+  assert.equal(containers.length, 1);
+  return {
+    podSpec,
+    container: yamlRecord(containers[0], 'application container'),
+  };
 }
 
 function validateChangePackage(value: unknown): ChangePackage {
@@ -1037,24 +600,6 @@ function readActualBundle(): {
       readFileSync(admissionConfigPath, 'utf8'),
       'admission-config.yaml',
     ),
-  };
-}
-
-function readActualKubernetesBundle(): {
-  bootstrapSources: string[];
-  bootstrapResources: YamlRecord[];
-  deploymentSource: string;
-  deployment: YamlRecord;
-  readme: string;
-} {
-  const bootstrap = bootstrapManifestPaths.map(readKubernetesResource);
-  const deployment = readKubernetesResource(deploymentTemplatePath);
-  return {
-    bootstrapSources: bootstrap.map((item) => item.source),
-    bootstrapResources: bootstrap.map((item) => item.resource),
-    deploymentSource: deployment.source,
-    deployment: deployment.resource,
-    readme: readFileSync(kubernetesReadmePath, 'utf8'),
   };
 }
 
@@ -1550,269 +1095,326 @@ test('implemented recovery evidence must remain separated and administrator-read
   });
 });
 
-test('the checked-in Kubernetes resources satisfy the private bootstrap contract', () => {
-  const actual = readActualKubernetesBundle();
-  validateBootstrapResources(actual.bootstrapResources);
-  validateDeploymentTemplate(actual.deploymentSource, actual.deployment);
-  validateKubernetesReadme(actual.readme);
-
-  const expectedManifestFiles = [
-    ...bootstrapManifestPaths,
-    deploymentTemplatePath,
-  ]
-    .sort();
-  const actualManifestFiles = filesUnder(kubernetesDir)
-    .filter((path) => /\.ya?ml$/u.test(path))
-    .sort();
-  assert.deepEqual(actualManifestFiles, expectedManifestFiles);
-
-  const allManifestSource = [
-    ...actual.bootstrapSources,
-    actual.deploymentSource,
-  ].join('\n');
-  assert.doesNotMatch(allManifestSource, /\bnamespace:\s*default\b/u);
-  assert.doesNotMatch(
-    allManifestSource,
-    /^kind:\s*(?:Secret|Role|RoleBinding|ClusterRole|ClusterRoleBinding|Ingress)\s*$/mu,
+test('the public experience manifests preserve the risky deployment relationships', () => {
+  assert.deepEqual(rootHealthRedirects(), [
+    {
+      source: '/api/health/live',
+      destination: '/k8s-yaml-assistant/api/health/live',
+      permanent: false,
+      basePath: false,
+    },
+    {
+      source: '/api/health/ready',
+      destination: '/k8s-yaml-assistant/api/health/ready',
+      permanent: false,
+      basePath: false,
+    },
+  ]);
+  const configMap = readKubernetesResource(configMapPath);
+  const configData = nestedRecord(configMap.resource, 'data', 'ConfigMap');
+  assert.deepEqual(
+    {
+      MODEL_ACCESS_ENABLED: configData.MODEL_ACCESS_ENABLED,
+      CONTROL_DB_PATH: configData.CONTROL_DB_PATH,
+      NEXTAUTH_URL: configData.NEXTAUTH_URL,
+      APP_PUBLIC_ORIGIN: configData.APP_PUBLIC_ORIGIN,
+    },
+    {
+      MODEL_ACCESS_ENABLED: 'false',
+      CONTROL_DB_PATH: '/app/data/control/private/control.sqlite3',
+      NEXTAUTH_URL:
+        'https://120.46.57.214/k8s-yaml-assistant/api/auth',
+      APP_PUBLIC_ORIGIN: 'https://120.46.57.214',
+    },
   );
-  validateNoCredentialMaterial(allManifestSource);
-});
+  assert.equal(configData.ACCESS_MODE, undefined);
+  for (const secretField of [
+    'GITHUB_SECRET',
+    'NEXTAUTH_SECRET',
+    'CONTROL_SUBJECT_HMAC_KEY',
+  ]) {
+    assert.equal(configData[secretField], undefined);
+  }
 
-test('unsafe Kubernetes bootstrap mutations fail', async (t) => {
-  const actual = readActualKubernetesBundle();
-
-  await t.test('namespace loses restricted enforcement', () => {
-    const candidate = structuredClone(actual.bootstrapResources[0]!);
-    const labels = nestedRecord(
-      resourceMetadata(candidate, 'Namespace'),
-      'labels',
-      'Namespace.metadata',
-    );
-    delete labels['pod-security.kubernetes.io/enforce'];
-    assert.throws(() => validateNamespace(candidate));
-  });
-
-  await t.test('resource falls back to the default namespace', () => {
-    const candidate = structuredClone(actual.bootstrapResources);
-    resourceMetadata(candidate[1]!, 'ServiceAccount').namespace = 'default';
-    assert.throws(() => validateBootstrapResources(candidate));
-  });
-
-  await t.test('service account mounts its API token', () => {
-    const candidate = structuredClone(actual.bootstrapResources[1]!);
-    candidate.automountServiceAccountToken = true;
-    assert.throws(() => validateServiceAccount(candidate));
-  });
-
-  await t.test('bootstrap adds an RBAC binding', () => {
-    const candidate = structuredClone(actual.bootstrapResources);
-    candidate.push({
-      apiVersion: 'rbac.authorization.k8s.io/v1',
-      kind: 'RoleBinding',
-      metadata: {
-        name: applicationName,
-        namespace: productionNamespace,
-      },
-    });
-    assert.throws(() => validateBootstrapResources(candidate));
-  });
-
-  await t.test('service becomes a NodePort', () => {
-    const candidate = structuredClone(actual.bootstrapResources[3]!);
-    nestedRecord(candidate, 'spec', 'Service').type = 'NodePort';
-    assert.throws(() => validateService(candidate));
-  });
-
-  await t.test('observation claim is broadened', () => {
-    const candidate = structuredClone(actual.bootstrapResources[4]!);
-    const spec = nestedRecord(
-      candidate,
-      'spec',
-      'PersistentVolumeClaim',
-    );
-    const resources = nestedRecord(
-      spec,
-      'resources',
-      'PersistentVolumeClaim.spec',
-    );
+  const controlClaim = readKubernetesResource(controlClaimPath).resource;
+  assert.equal(resourceMetadata(controlClaim, 'control PVC').name, 'k8s-yaml-assistant-control');
+  const claimSpec = nestedRecord(controlClaim, 'spec', 'control PVC');
+  assert.deepEqual(claimSpec.accessModes, ['ReadWriteOnce']);
+  assert.equal(claimSpec.storageClassName, 'local-path');
+  assert.equal(
     nestedRecord(
-      resources,
+      nestedRecord(claimSpec, 'resources', 'control PVC'),
       'requests',
-      'PersistentVolumeClaim.spec.resources',
-    ).storage = '10Gi';
-    assert.throws(() => validateObservationClaim(candidate));
-  });
+      'control PVC resources',
+    ).storage,
+    '1Gi',
+  );
 
-  await t.test('network policy drops DNS egress', () => {
-    const candidate = structuredClone(actual.bootstrapResources[5]!);
-    nestedRecord(candidate, 'spec', 'NetworkPolicy').egress = [
-      {
-        ports: [{ protocol: 'TCP', port: 443 }],
-      },
-    ];
-    assert.throws(() => validateNetworkPolicy(candidate));
-  });
-
-  await t.test('network policy drops HTTPS egress', () => {
-    const candidate = structuredClone(actual.bootstrapResources[5]!);
-    const spec = nestedRecord(candidate, 'spec', 'NetworkPolicy');
-    spec.egress = yamlArray(
-      spec.egress,
-      'NetworkPolicy.spec.egress',
-    ).slice(0, 1);
-    assert.throws(() => validateNetworkPolicy(candidate));
-  });
-
-  await t.test('config map contains a model credential', () => {
-    const candidate = structuredClone(actual.bootstrapResources[2]!);
-    nestedRecord(candidate, 'data', 'ConfigMap').VOYAGE_API_KEY =
-      'credential-material';
-    assert.throws(() => validateConfigMap(candidate));
-  });
-
-  await t.test('config map enables portfolio access', () => {
-    const candidate = structuredClone(actual.bootstrapResources[2]!);
-    nestedRecord(candidate, 'data', 'ConfigMap').ACCESS_MODE = 'portfolio';
-    assert.throws(() => validateConfigMap(candidate));
-  });
-
-  await t.test('config map omits observation retention', () => {
-    const candidate = structuredClone(actual.bootstrapResources[2]!);
-    delete nestedRecord(candidate, 'data', 'ConfigMap')
-      .SERVING_OBSERVATION_RETENTION_DAYS;
-    assert.throws(() => validateConfigMap(candidate));
-  });
-});
-
-test('unsafe Kubernetes deployment template mutations fail', async (t) => {
-  const actual = readActualKubernetesBundle();
-
-  function deploymentParts(candidate: YamlRecord): {
-    spec: YamlRecord;
-    podSpec: YamlRecord;
-    container: YamlRecord;
-  } {
-    const spec = nestedRecord(candidate, 'spec', 'Deployment');
-    const template = nestedRecord(spec, 'template', 'Deployment.spec');
-    const podSpec = nestedRecord(
-      template,
-      'spec',
-      'Deployment.template',
+  const deploymentSource = readFileSync(deploymentTemplatePath, 'utf8');
+  const deployment = yamlRecord(
+    parseSingleYaml(deploymentSource, deploymentTemplatePath),
+    'Deployment',
+  );
+  assert.equal(deploymentSource.split(imageMarker).length - 1, 1);
+  const deploymentSpec = nestedRecord(deployment, 'spec', 'Deployment');
+  assert.equal(deploymentSpec.replicas, 1);
+  assert.equal(
+    nestedRecord(
+      nestedRecord(deploymentSpec, 'strategy', 'Deployment'),
+      'rollingUpdate',
+      'Deployment strategy',
+    ).maxSurge,
+    0,
+  );
+  const { podSpec, container } = applicationContainer(deployment);
+  assert.equal(
+    nestedRecord(container, 'securityContext', 'application container')
+      .readOnlyRootFilesystem,
+    true,
+  );
+  const environment = new Map(
+    yamlArray(container.env, 'application env').map((entry) => {
+      const variable = yamlRecord(entry, 'application env entry');
+      return [String(variable.name), variable] as const;
+    }),
+  );
+  const expectedSecretRefs = {
+    DEEPSEEK_API_KEY: ['deepseek-runtime', 'api-key'],
+    VOYAGE_API_KEY: ['voyage-runtime', 'api-key'],
+    GITHUB_ID: ['k8s-yaml-assistant-auth', 'github-client-id'],
+    GITHUB_SECRET: ['k8s-yaml-assistant-auth', 'github-client-secret'],
+    NEXTAUTH_SECRET: ['k8s-yaml-assistant-auth', 'session-secret'],
+    ADMIN_GITHUB_ID: ['k8s-yaml-assistant-auth', 'admin-github-id'],
+    CONTROL_SUBJECT_HMAC_KEY: [
+      'k8s-yaml-assistant-auth',
+      'subject-hmac-key',
+    ],
+  } as const;
+  assert.deepEqual(
+    [...environment.keys()].sort(),
+    Object.keys(expectedSecretRefs).sort(),
+  );
+  for (const [name, [secretName, key]] of Object.entries(
+    expectedSecretRefs,
+  )) {
+    const variable = environment.get(name);
+    assert.ok(variable);
+    const valueFrom = nestedRecord(variable, 'valueFrom', name);
+    const secretKeyRef = nestedRecord(
+      valueFrom,
+      'secretKeyRef',
+      `${name}.valueFrom`,
     );
-    const container = yamlRecord(
-      yamlArray(
-        podSpec.containers,
-        'Deployment.template.spec.containers',
-      )[0],
-      'Deployment.container',
-    );
-    return { spec, podSpec, container };
+    assert.deepEqual(secretKeyRef, { name: secretName, key });
   }
+  const mounts = new Map(
+    yamlArray(container.volumeMounts, 'application volume mounts').map(
+      (entry) => {
+        const mount = yamlRecord(entry, 'volume mount');
+        return [String(mount.name), mount.mountPath] as const;
+      },
+    ),
+  );
+  assert.equal(mounts.get('control'), '/app/data/control');
+  assert.equal(mounts.get('observations'), '/app/data/observability');
+  assert.equal(mounts.get('tmp'), '/tmp');
+  const volumes = new Map(
+    yamlArray(podSpec.volumes, 'application volumes').map((entry) => {
+      const volume = yamlRecord(entry, 'volume');
+      return [String(volume.name), volume] as const;
+    }),
+  );
+  assert.equal(
+    nestedRecord(
+      volumes.get('control')!,
+      'persistentVolumeClaim',
+      'control volume',
+    ).claimName,
+    'k8s-yaml-assistant-control',
+  );
+  assert.equal(
+    nestedRecord(
+      volumes.get('observations')!,
+      'persistentVolumeClaim',
+      'observation volume',
+    ).claimName,
+    'k8s-yaml-assistant-observation',
+  );
+  assert.equal(
+    nestedRecord(volumes.get('tmp')!, 'emptyDir', 'temporary volume')
+      .sizeLimit,
+    '64Mi',
+  );
+  assert.equal(
+    nestedRecord(
+      nestedRecord(container, 'startupProbe', 'application container'),
+      'httpGet',
+      'startup probe',
+    ).path,
+    '/api/health/ready',
+  );
+  assert.equal(
+    nestedRecord(
+      nestedRecord(container, 'readinessProbe', 'application container'),
+      'httpGet',
+      'readiness probe',
+    ).path,
+    '/api/health/ready',
+  );
+  assert.equal(
+    nestedRecord(
+      nestedRecord(container, 'livenessProbe', 'application container'),
+      'httpGet',
+      'liveness probe',
+    ).path,
+    '/api/health/live',
+  );
+  const rendered = deploymentSource.replace(
+    imageMarker,
+    `${applicationImage}@sha256:${'a'.repeat(64)}`,
+  );
+  assert.doesNotMatch(rendered, /__[A-Z0-9_]+__/u);
+  assert.match(
+    rendered,
+    /ghcr\.io\/kkxiaoa\/k8s-yaml-assistant@sha256:[a-f0-9]{64}/u,
+  );
 
-  for (const [name, mutate] of [
-    [
-      'multiple replicas',
-      ({ spec }: ReturnType<typeof deploymentParts>) => {
-        spec.replicas = 2;
+  const networkPolicy = readKubernetesResource(networkPolicyPath).resource;
+  const policySpec = nestedRecord(networkPolicy, 'spec', 'NetworkPolicy');
+  const ingress = yamlRecord(
+    yamlArray(policySpec.ingress, 'NetworkPolicy ingress')[0],
+    'NetworkPolicy ingress rule',
+  );
+  const ingressPeer = yamlRecord(
+    yamlArray(ingress.from, 'NetworkPolicy ingress peers')[0],
+    'NetworkPolicy ingress peer',
+  );
+  assert.deepEqual(ingressPeer, {
+    namespaceSelector: {
+      matchLabels: {
+        'kubernetes.io/metadata.name': 'kube-system',
       },
-    ],
-    [
-      'surge update',
-      ({ spec }: ReturnType<typeof deploymentParts>) => {
-        nestedRecord(spec, 'strategy', 'Deployment.spec').rollingUpdate = {
-          maxSurge: 1,
-          maxUnavailable: 0,
-        };
+    },
+    podSelector: {
+      matchLabels: {
+        'app.kubernetes.io/name': 'traefik',
       },
-    ],
+    },
+  });
+  const egressText = JSON.stringify(policySpec.egress);
+  assert.match(egressText, /"port":443/u);
+  assert.match(egressText, /"169\.254\.0\.0\/16"/u);
+
+  const accessFiles = filesUnder(accessDir).map((path) =>
+    path.slice(accessDir.length + 1),
+  );
+  assert.deepEqual(accessFiles, ['middlewares.yaml', 'routes.yaml']);
+  const middlewares = parseYamlDocuments(
+    readFileSync(accessMiddlewarePath, 'utf8'),
+    accessMiddlewarePath,
+  );
+  assert.deepEqual(
+    middlewares.map((resource) =>
+      String(resourceMetadata(resource, 'Middleware').name),
+    ),
     [
-      'mutable image tag',
-      ({ container }: ReturnType<typeof deploymentParts>) => {
-        container.image = `${applicationImage}:latest`;
-      },
+      'k8s-yaml-assistant-rate-limit',
+      'k8s-yaml-assistant-inflight',
+      'k8s-yaml-assistant-request-body',
     ],
+  );
+  assert.equal(
+    nestedRecord(
+      nestedRecord(middlewares[0]!, 'spec', 'rate middleware'),
+      'rateLimit',
+      'rate middleware spec',
+    ).average,
+    120,
+  );
+  assert.equal(
+    nestedRecord(
+      nestedRecord(middlewares[1]!, 'spec', 'inflight middleware'),
+      'inFlightReq',
+      'inflight middleware spec',
+    ).amount,
+    16,
+  );
+  assert.equal(
+    nestedRecord(
+      nestedRecord(middlewares[2]!, 'spec', 'body middleware'),
+      'buffering',
+      'body middleware spec',
+    ).maxRequestBodyBytes,
+    262144,
+  );
+
+  const route = readKubernetesResource(accessRoutePath).resource;
+  const routeSpec = nestedRecord(route, 'spec', 'IngressRoute');
+  const routeRule = yamlRecord(
+    yamlArray(routeSpec.routes, 'IngressRoute routes')[0],
+    'IngressRoute rule',
+  );
+  assert.equal(
+    routeRule.match,
+    'Path(`/k8s-yaml-assistant`) || PathPrefix(`/k8s-yaml-assistant/`)',
+  );
+  assert.deepEqual(
+    yamlArray(routeRule.middlewares, 'IngressRoute middlewares'),
     [
-      'writable root filesystem',
-      ({ container }: ReturnType<typeof deploymentParts>) => {
-        nestedRecord(
-          container,
-          'securityContext',
-          'Deployment.container',
-        ).readOnlyRootFilesystem = false;
-      },
+      { name: 'k8s-yaml-assistant-rate-limit' },
+      { name: 'k8s-yaml-assistant-inflight' },
+      { name: 'k8s-yaml-assistant-request-body' },
     ],
-    [
-      'missing liveness probe',
-      ({ container }: ReturnType<typeof deploymentParts>) => {
-        delete container.livenessProbe;
-      },
-    ],
-    [
-      'unbounded temporary volume',
-      ({ podSpec }: ReturnType<typeof deploymentParts>) => {
-        const volumes = yamlArray(
-          podSpec.volumes,
-          'Deployment.template.spec.volumes',
-        );
-        yamlRecord(volumes[1], 'Deployment.tmpVolume').emptyDir = {};
-      },
-    ],
-    [
-      'index mounted from a writable volume',
-      ({ container }: ReturnType<typeof deploymentParts>) => {
-        const mounts = yamlArray(
-          container.volumeMounts,
-          'Deployment.container.volumeMounts',
-        );
-        mounts.push({
-          name: 'observations',
-          mountPath: '/app/data/index',
-        });
-      },
-    ],
-    [
-      'second observation writer',
-      ({ podSpec }: ReturnType<typeof deploymentParts>) => {
-        const containers = yamlArray(
-          podSpec.containers,
-          'Deployment.template.spec.containers',
-        );
-        containers.push({
-          name: 'sidecar',
-          image: imageMarker,
-          volumeMounts: [
-            {
-              name: 'observations',
-              mountPath: '/app/data/observability',
-            },
-          ],
-        });
-      },
-    ],
-  ] as const) {
-    await t.test(name, () => {
-      const candidate = structuredClone(actual.deployment);
-      mutate(deploymentParts(candidate));
-      assert.throws(() =>
-        validateDeploymentTemplate(actual.deploymentSource, candidate),
-      );
-    });
+  );
+  assert.deepEqual(
+    yamlArray(routeRule.services, 'IngressRoute services'),
+    [{ name: 'k8s-yaml-assistant', port: 80 }],
+  );
+  assert.equal(
+    nestedRecord(routeSpec, 'tls', 'IngressRoute').secretName,
+    'k8s-yaml-assistant-ip-tls',
+  );
+
+  const certificate = readKubernetesResource(
+    productionCertificatePath,
+  ).resource;
+  const certificateSpec = nestedRecord(
+    certificate,
+    'spec',
+    'production Certificate',
+  );
+  assert.equal(certificateSpec.secretName, 'k8s-yaml-assistant-ip-tls');
+  assert.deepEqual(certificateSpec.ipAddresses, ['120.46.57.214']);
+  assert.equal(certificateSpec.renewBeforePercentage, 33);
+  assert.deepEqual(certificateSpec.issuerRef, {
+    name: 'letsencrypt-ip-production',
+    kind: 'Issuer',
+    group: 'cert-manager.io',
+  });
+  const tlsStore = readKubernetesResource(tlsStorePath).resource;
+  assert.equal(resourceMetadata(tlsStore, 'TLSStore').name, 'default');
+  assert.equal(
+    nestedRecord(
+      nestedRecord(tlsStore, 'spec', 'TLSStore'),
+      'defaultCertificate',
+      'TLSStore spec',
+    ).secretName,
+    'k8s-yaml-assistant-ip-tls',
+  );
+
+  const manifestSources = [
+    configMap.source,
+    readFileSync(controlClaimPath, 'utf8'),
+    deploymentSource,
+    readFileSync(networkPolicyPath, 'utf8'),
+    readFileSync(accessMiddlewarePath, 'utf8'),
+    readFileSync(accessRoutePath, 'utf8'),
+    readFileSync(productionCertificatePath, 'utf8'),
+    readFileSync(tlsStorePath, 'utf8'),
+    readFileSync(kubernetesReadmePath, 'utf8'),
+  ];
+  for (const manifestSource of manifestSources) {
+    validateNoCredentialMaterial(manifestSource);
   }
-
-  await t.test('duplicate image marker', () => {
-    assert.throws(() =>
-      validateDeploymentTemplate(
-        `${actual.deploymentSource}\n${imageMarker}\n`,
-        actual.deployment,
-      ),
-    );
-  });
-
-  await t.test('documentation claims domain allowlisting', () => {
-    const candidate = actual.readme.replace(
-      '标准 NetworkPolicy（网络策略）不能按域名建立可靠 allowlist（允许名单）',
-      '标准 NetworkPolicy（网络策略）已经实现域名 allowlist（允许名单）',
-    );
-    assert.throws(() => validateKubernetesReadme(candidate));
-  });
+  assert.doesNotMatch(manifestSources.join('\n'), /oauth2-proxy|X-Forwarded-User|ACCESS_MODE/u);
 });

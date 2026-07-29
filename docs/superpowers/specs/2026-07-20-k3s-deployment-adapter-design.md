@@ -1,6 +1,6 @@
 # K3s 特权部署适配器设计
 
-> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）和 Task 7（任务 7）已完成实现、真实验收或明确延期收敛。经逐项明确授权，`v0.1.1` 已通过运行 `30296287472` Attempt 1（第 1 次尝试）部署并完成 Step 5（步骤 5）的非模型验收和 1 个有限 Ask（询问）模型冒烟；人工回滚 Release（发布版本）`360812512` 随后通过运行 `30325880287` Attempt 1（第 1 次尝试）把生产切换到 `v0.1.0`，恢复 Release（发布版本）`360824879` 又通过运行 `30327301138` Attempt 1（第 1 次尝试）把生产恢复到 `v0.1.1`。重启前的新鲜数据库与服务端令牌分离备份已上传私有 OBS（对象存储服务）并核对摘要，节点重启后应用、运行器、适配器运行时目录、台账、观测分段和索引身份均按设计恢复。2026-07-28 独立审核接受 Step 5（步骤 5）的部分验收边界和 Step 6（步骤 6）的明确延期风险，Step 9（步骤 9）事实状态同步完成；两项仍保持未完成，不冒充生产实证。没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已经清退。
+> 状态：设计及实施计划已通过 review（审核）；Task 1-6（任务 1-6）和 Task 7（任务 7）已完成实现、真实验收或明确延期收敛。经逐项明确授权，`v0.1.1` 已通过运行 `30296287472` Attempt 1（第 1 次尝试）部署并完成 Step 5（步骤 5）的非模型验收和 1 个有限 Ask（询问）模型冒烟；人工回滚 Release（发布版本）`360812512` 随后通过运行 `30325880287` Attempt 1（第 1 次尝试）把生产切换到 `v0.1.0`，恢复 Release（发布版本）`360824879` 又通过运行 `30327301138` Attempt 1（第 1 次尝试）把生产恢复到 `v0.1.1`。重启前的新鲜数据库与服务端令牌分离备份已上传私有 OBS（对象存储服务）并核对摘要，节点重启后应用、运行器、适配器运行时目录、台账、观测分段和索引身份均按设计恢复。2026-07-28 独立审核接受 Step 5（步骤 5）的部分验收边界和 Step 6（步骤 6）的明确延期风险，Step 9（步骤 9）事实状态同步完成；两项仍保持未完成，不冒充生产实证。没有独立身份价值的 runtime-specific（运行时特有）`imageID` 门禁及夹具模拟已经清退。同日第 17 节 Phase 4（阶段 4）`set-access-mode`（设置访问模式）扩展通过独立 review（审核）并完成本地反例与实现；服务器只读核对通过，但尚未安装或写入集群。
 > 用途：定义华为云单机 K3s（轻量 Kubernetes）中固定应用发布的 deployment adapter（部署适配器）协议、信任边界、权限、并发、回滚和测试门禁。
 > 当前仓库和服务器已有固定适配器、信任根与权限配置，生产集群已有固定 bootstrap/Secret（引导配置 / 密钥）；仓库级 self-hosted runner（自托管运行器）已经注册并通过真实隔离、服务重启和节点重启验证。生产当前固定在 `v0.1.1` 镜像摘要，单副本 Deployment（工作负载）为 `1/1` 可用、Pod（容器组）重启为预期的 `1` 且没有继续增加，成功台账仍有四个事件和两个不同摘要，公网 80/443/6443 仍不可达。生产运行器在线空闲，`root:root 0700` 适配器运行时目录已在节点重启后重新创建，操作标记不存在，没有重复部署。
 > 对应总计划：`docs/superpowers/plans/2026-07-19-k3s-production-deployment.md` 的 Task 12（任务 12）。独立实施计划位于 `docs/superpowers/plans/2026-07-20-k3s-deployment-adapter.md`。
@@ -118,7 +118,7 @@ GitHub 的 label（标签）只负责把任务路由到匹配运行器，不是�
 - 不实现通用 Kubernetes（容器编排系统）部署工具、GitOps（拉取式部署管理）控制器或任意清单执行器。
 - 不接受 Namespace、Deployment、container、registry 或 repository（命名空间 / 工作负载 / 容器 / 镜像仓库 / 仓库）作为调用参数。
 - 不管理 Secret、ConfigMap、Service、Ingress、PVC 或 NetworkPolicy（密钥 / 普通配置 / 服务 / 入口 / 持久卷声明 / 网络策略）。
-- 不实现 `set-access-mode`，该动作必须等待 Phase 4（阶段 4）审核。
+- 当前已安装版本不实现 `set-access-mode`；Phase 4（阶段 4）的候选边界单独定义在第 17 节，审核通过前不实现或安装。
 - 不提供任意历史镜像选择；rollback（回滚）只能指向本机成功台账中的内容摘要。
 - 不在生产节点重新下载 GitHub Release（GitHub 发布版本）附件，不在生产运行器执行 `gh`、`curl`、`docker`、`npm` 或仓库脚本。
 - 不借本设计创建应用资源、注册运行器、正式发布或调用模型。
@@ -572,7 +572,107 @@ Task 13（任务 13）必须先写失败测试，再实现生产代码。测试�
 - 固定适配器无法在不接受任意路径、清单或 `kubectl` 参数的前提下完成首次部署和恢复；
 - 不能证明失败后最多一个 observation writer（观测写入端）存在。
 
-## 17. 官方依据
+## 17. Phase 4 `set-access-mode`（设置访问模式）扩展候选
+
+> 状态：该扩展只形成本地候选且从未安装，已被 2026-07-29 应用内三态控制设计替代。以下内容仅保留历史审核背景，不再是适配器能力或生产协议。
+
+### 17.1 调用与权限边界
+
+复用现有 Python（Python 运行时）适配器、固定路径、进程锁、签名验证、子进程封装和原子文件能力，不创建第二套通用 Kubernetes（容器编排系统）执行器。新增的逻辑动作只有：
+
+```text
+set-access-mode private
+set-access-mode portfolio
+```
+
+实际 sudoers（提权规则）和可执行入口继续保持现有无参数命令：
+
+```text
+sudo -n /usr/local/sbin/k8s-yaml-assistant-deploy
+```
+
+适配器根据标准输入的严格顶层字段集合区分现有 deployment envelope（部署信封）和新增 access-mode envelope（访问模式信封），不增加命令行参数。访问模式信封只包含 `schemaVersion/accessAuthorization/authorizationBundle`；其中 canonical accessAuthorization（规范访问授权）固定字段为：
+
+```text
+schemaVersion
+action
+mode
+repository
+releaseId
+releaseTag
+sourceCommit
+publishedAt
+imageDigest
+accessBundleSha256
+actor
+workflowRunId
+workflowRunAttempt
+```
+
+每个字段都有直接消费者：`action/mode` 只选择两个固定状态机，`repository/sourceCommit/accessBundleSha256` 绑定受保护仓库提交与已安装固定模式清单，`imageDigest` 必须等于适配器成功台账和集群当前镜像，Release（发布版本）字段证明管理员已经 Publish（正式发布）对应 operational Release（运维发布版本），`actor` 必须等于唯一管理员并写入审计，workflow run（流水线运行）字段用于审计关联。任何未知字段、错误顺序、错误枚举、身份不一致或重放都失败。
+
+固定 access-mode workflow（访问模式流水线）的手工候选入口只接受 mode（模式）枚举，在受保护 `main` 上创建以 `access-mode-<mode>-r<workflowRunId>` 为 tag name（标签名）的 draft pre-release（草稿预发布版本），并绑定当前镜像、源码提交和模式清单摘要；它不创建实际标签、不签名、不调度生产运行器。该预发布版本不标记 `Latest`（最新版本），应用发布工作流遇到 `access-mode-*` 标签只安全跳过。private/portfolio（私有 / 作品集展示）的正常变更都必须由唯一管理员手工 Publish（正式发布）对应草稿后，固定流水线的 `release.published`（发布版本已发布）路径才在 GitHub-hosted runner（GitHub 托管运行器）验证发布者、预发布标记、标签语法和绑定字段，生成 accessAuthorization（访问授权）并使用固定 workflow identity（流水线身份）签名。
+
+production runner job（生产运行器任务）继续不检出代码、没有有效仓库权限，只传递签名信封；生产节点重新验证签名、`release` 触发器、发布身份、当前镜像和固定模式清单摘要。应用、ServiceAccount（服务账户）、公共 API（应用程序接口）、未持有有效签名的 workflow（流水线）和普通允许用户均不能修改模式。
+
+固定来源 SSH（安全远程登录）的 break-glass（紧急处置）只允许调用同一实现的 private（私有）收敛函数，不能开启 portfolio（作品集展示）；该 root-only（仅 root）入口不进入 production runner（生产运行器）sudoers（提权规则），执行后必须补录审计。访问模式协议不接受路径、URL（统一资源定位符）、Namespace、资源名、清单、field manager（字段管理者）或额外 `kubectl` 参数。
+
+### 17.2 固定资源与状态
+
+适配器只消费安装时一并审核、由 `root:root 0644` 持有的两组固定清单：
+
+```text
+/etc/k8s-yaml-assistant-deployer/access/private.yaml
+/etc/k8s-yaml-assistant-deployer/access/portfolio.yaml
+```
+
+两组清单必须使用相同且固定的 ConfigMap、Deployment、IngressRoute（入口路由）和 NetworkPolicy（网络策略）身份，只允许 `ACCESS_MODE`、Pod template annotation（容器组模板注解）、路由后端和最小入站来源按审核差异变化。模式调用不管理 cert-manager（证书管理器）、Certificate、TLSStore、OAuth/cookie Secret（证书 / 传输层安全证书仓库 / OAuth / 浏览器会话密钥）或安全组；这些资源必须在首次 portfolio（作品集展示）切换前独立就绪。
+
+复用现有 `deploy.lock`，使发布、回滚和模式切换互斥，不增加平行锁。新增持久审计文件：
+
+```text
+/var/lib/k8s-yaml-assistant-deployer/access-mode-ledger.json
+/var/lib/k8s-yaml-assistant-deployer/access-operation.json
+```
+
+访问模式台账只记录 `previousMode/requestedMode/operator/requestedAt/completedAt/result/reasonCode/releaseId/workflowRunId`。`reasonCode` 由方向和结果确定为固定枚举，不接收用户文本；正常路径的 `operator` 来自已验证授权中的 `actor`，break-glass（紧急处置）固定为本机 root（超级用户）身份。`access-operation.json` 在第一次 Kubernetes（容器编排系统）写入前原子创建，成功或已经验证收敛到 private（私有）后才删除。台账、操作标记或集群模式状态损坏、超限、权限错误、符号链接或彼此漂移时失败关闭，不猜测当前模式。
+
+### 17.3 有序切换
+
+private → portfolio（私有 → 作品集展示）固定顺序：
+
+1. 获取同一进程锁，严格回读当前 ConfigMap、Deployment、IngressRoute（入口路由）、NetworkPolicy（网络策略）和访问模式台账；
+2. 验证公网 IP 证书、唯一 `default` TLSStore（默认传输层安全证书仓库）、oauth2-proxy（认证代理）、允许名单、请求保护、固定路径资源均就绪，且 `MODEL_ACCESS_ENABLED=false`；任一条件不满足时不写集群；
+3. 在入口仍全部经过 oauth2-proxy reverse proxy（认证代理反向代理）时，把应用策略切到 portfolio（作品集展示）并等待单副本 rollout（滚动发布）就绪；
+4. 应用 portfolio（作品集展示）NetworkPolicy（网络策略），只增加 Traefik（入口控制器）到应用的固定端口来源；
+5. 最后原子应用 portfolio（作品集展示）IngressRoute（入口路由），只匿名开放 `/k8s-yaml-assistant` 页面、该前缀下的静态资源和 `/k8s-yaml-assistant/api/check`；
+6. 从受限验证来源证明匿名固定路径可达、匿名模型/健康/管理路径拒绝后写入成功审计。
+
+portfolio → private（作品集展示 → 私有）固定顺序：
+
+1. 第一步把同一固定 IngressRoute（入口路由）恢复为全部业务路径经过 oauth2-proxy reverse proxy（认证代理反向代理），立即停止匿名旁路；
+2. 恢复 private（私有）NetworkPolicy（网络策略）并证明 Traefik（入口控制器）不能直达应用；
+3. 把应用策略切回 private（私有），等待 rollout（滚动发布）并验证未认证请求拒绝；
+4. 写入成功审计。
+
+任一步失败都使用固定 private（私有）清单收敛；无法证明 private（私有）时删除固定应用 IngressRoute（入口路由），保留 `access-operation.json` 并返回 `access_recovery_required`。审计预检或最终写入失败不能留下 portfolio（作品集展示）入口。完全相同且集群状态一致的重复请求返回 `unchanged`，不产生 Kubernetes（容器编排系统）写入或重复成功事件。
+
+### 17.4 实现前反例
+
+实现前必须先覆盖：
+
+- 空输入、访问模式信封超限、未知/重复字段、非法模式、错误签名/工作流身份/`release` 触发器、未发布 operational Release（运维发布版本）、标准输入夹带清单和固定文件被替换；
+- production runner（生产运行器）带参数调用、未签名模式调用和 SSH break-glass（SSH 紧急处置）尝试开启 portfolio（作品集展示）；
+- 缺少 IP 证书、证书临近过期、第二个 `default` TLSStore（默认传输层安全证书仓库）、oauth2-proxy（认证代理）未就绪、`MODEL_ACCESS_ENABLED` 未关闭或入口契约不一致时拒绝 portfolio（作品集展示）；
+- 发布/回滚与模式切换并发、遗留操作标记、台账/集群漂移和重复执行；
+- private → portfolio（私有 → 作品集展示）在最后一步前始终匿名拒绝；
+- portfolio → private（作品集展示 → 私有）在第一步后立即匿名拒绝；
+- ConfigMap、rollout、NetworkPolicy、IngressRoute（普通配置 / 滚动发布 / 网络策略 / 入口路由）和审计写入分别失败时都收敛到 private（私有）或删除固定入口；
+- stdout（标准输出）、journald（系统日志）和访问模式台账不包含 Secret（密钥）、YAML（配置文件）正文、OAuth token（OAuth 令牌）或请求内容。
+
+本节已于 2026-07-28 通过独立 review（审核），允许进入仓库内反例与实现；适配器安装、服务器文件和 Kubernetes（容器编排系统）资源写入仍须单独授权。
+
+## 18. 官方依据
 
 - [GitHub secure use reference（GitHub 安全使用参考）](https://docs.github.com/en/actions/reference/security/secure-use)
 - [GitHub self-hosted runners reference（GitHub 自托管运行器参考）](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)

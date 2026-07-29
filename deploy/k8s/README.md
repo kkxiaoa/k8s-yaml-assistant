@@ -1,9 +1,9 @@
-状态：Task 4-5（任务 4-5）已完成实施和 review（审核）；Task 7 Step 7（任务 7 步骤 7）的真实人工回滚与恢复及 Step 8（步骤 8）的节点重启恢复均已完成。私有 K3s（轻量 Kubernetes）先从 `v0.1.1` 切换到 `v0.1.0`，再恢复到 `v0.1.1`，随后在新鲜分离备份和独立授权下完成节点重启。2026-07-28 独立审核接受 Step 5（步骤 5）的部分验收边界和 Step 6（步骤 6）的明确延期风险，Step 9（步骤 9）事实状态同步完成；两项仍保持未完成，不冒充真实观测生命周期或自动恢复生产实证。
+状态：Task 4-7（任务 4-7）的既有生产实施证据保持不变。Task 16（任务 16）正在形成公开体验、应用内 GitHub OAuth 2.0（GitHub 开放授权 2.0）、三态体验控制及持久额度与费用门禁候选；本目录只保存候选清单，尚未发布、部署或修改生产。
 用途：定义生产 Kubernetes（容器编排系统）固定非敏感资源、应用模板及其审核和回退边界。
 
 # K3s 生产资源边界
 
-2026-07-27 在单独获得 bootstrap/Secret（引导配置 / 密钥）授权后，生产集群已创建本目录的固定 bootstrap（引导配置）和三类运行时 Secret（密钥）。2026-07-28 经逐项授权，`app/deployment-template.yaml` 已由固定部署适配器先应用 `v0.1.1`，再通过人工确认回滚切换到 `v0.1.0`，最后通过同一受信链恢复到 `v0.1.1`；节点重启后当前固定单副本 Deployment/Pod（工作负载 / 容器组）为 `1/1` 可用，Pod（容器组）重启为预期的 `1` 且没有继续增加。集群仍没有 Ingress（入口），公网 80/443/6443 不可达。
+2026-07-27 至 2026-07-28 已完成既有私有生产基线与 `v0.1.1` 部署、回滚、恢复及节点重启验证；当前固定单副本 Deployment/Pod（工作负载 / 容器组）稳定运行 `v0.1.1`。Task 16（任务 16）候选将新增入口、身份和控制库，但当前生产仍没有 Ingress（入口），公网 80/443/6443 不可达。
 
 同日已把 GitHub Actions runner `v2.336.0`（GitHub 自动化流水线运行器版本 2.336.0）安装并注册为 `huawei-k3s-prod-1`。首次真实隔离验证发现旧 drop-in（附加配置）的 `ReadWritePaths` 会遮蔽工作/诊断目录的有界 tmpfs（内存文件系统），且 `RuntimeDirectory`（运行时目录）最终把适配器运行时目录交给服务账号；首次修正又证明 `ExecStartPre`（启动前命令）无法修改下一执行阶段的私有挂载。最终配置由 tmpfs 挂载直接使用固定 `UID 996 / GID 988`（用户 / 组数字标识），已通过真实启动、写入和第二次服务重启验证。当前服务为 `active/enabled`（运行中 / 开机自启），GitHub 状态在线空闲。
 
@@ -30,27 +30,31 @@
 | --- | --- | --- |
 | `bootstrap/namespace.yaml` | 创建 `k8s-yaml-assistant-prod`，固定 restricted Pod Security（受限容器组安全）策略及 Kubernetes 1.36 版本 | `k8s-yaml-assistant-bootstrap` |
 | `bootstrap/service-account.yaml` | 提供不创建额外 RBAC（基于角色的访问控制）、不自动挂载令牌的应用身份 | `k8s-yaml-assistant-bootstrap` |
-| `bootstrap/config-map.yaml` | 提供模型身份、供应商地址、镜像内索引路径、私有访问模式和安全在线观测参数 | `k8s-yaml-assistant-bootstrap` |
+| `bootstrap/config-map.yaml` | 提供模型身份、供应商地址、镜像内索引路径、首次关闭模型的运维开关、控制库路径及安全在线观测参数 | `k8s-yaml-assistant-bootstrap` |
 | `bootstrap/service.yaml` | 只用 ClusterIP Service（集群内服务）把 80 转发到应用 3000 | `k8s-yaml-assistant-bootstrap` |
 | `bootstrap/observation-pvc.yaml` | 为脱敏后的安全 observation segment（观测分段）申请 1 GiB local-path PVC（本地路径持久卷声明） | `k8s-yaml-assistant-bootstrap` |
+| `bootstrap/control-pvc.yaml` | 为模式、额度、费用与请求预留状态申请独立 1 GiB local-path PVC（本地路径持久卷声明） | `k8s-yaml-assistant-bootstrap` |
 | `bootstrap/network-policy.yaml` | 限制应用入站，并只显式放行 DNS（域名系统）和公网 IPv4 的 443/TCP 出站 | `k8s-yaml-assistant-bootstrap` |
 | `app/deployment-template.yaml` | 固定应用的副本、资源、安全上下文、探针、卷和凭据引用，只允许部署适配器替换镜像摘要 | `k8s-yaml-assistant-deployer` |
+| `access/middlewares.yaml` / `access/routes.yaml` | 由 Traefik（入口控制器）直接暴露唯一语义化基础路径，并限制请求体、速率和并发 | Task 16（任务 16）入口实施 |
+| `tls/` | 固定公网 IP 证书签发、自动续期和唯一默认 TLSStore（传输层安全证书仓库）候选 | Task 16（任务 16）入口实施 |
 
-bootstrap（引导配置）只管理不随应用版本变化的固定资源。应用版本只能由 root-owned adapter（超级用户所有的适配器）把模板中的唯一镜像标记替换成 `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:<64-hex>` 后应用。Ingress（入口）、TLS（传输层安全）和认证等入口资源属于 Phase 4（阶段 4），不放进当前 bootstrap（引导配置）或应用版本模板。
+bootstrap（引导配置）只管理不随应用版本变化的固定资源。应用版本只能由 root-owned adapter（超级用户所有的适配器）把模板中的唯一镜像标记替换成 `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:<64-hex>` 后应用。入口和证书是独立候选资源，不由镜像替换适配器隐式修改。
 
-`ACCESS_MODE=private` 是后续入口治理的固定部署契约；当前应用尚未消费该值，所以它本身不构成认证或授权。当前私有边界仍依靠“没有入口资源、80/443 不公开”和受限验证路径。完成应用侧 fail-safe authorization（失败时安全关闭的授权）、认证与限流前，不得公开服务。
+应用内 NextAuth.js（身份认证库）直接处理 GitHub 登录，任何有效 GitHub 用户均可登录；只有固定数字 GitHub 用户编号可进入 `/k8s-yaml-assistant/admin`。匿名浏览器使用服务端签名 Cookie（浏览器标识）获得 30 天 7 点体验包，登录后获得独立每日额度，`check` 不扣产品点数；清除 Cookie 可以重置匿名身份，因此该机制不作为机器人防护。模型能力由持久控制库的 `normal | interview | sleep`、主体点数、全局费用和最高优先级 `MODEL_ACCESS_ENABLED` 共同决定；协议值 `interview` 的页面名称为“开放展示模式”。首次配置固定 `MODEL_ACCESS_ENABLED=false`，新建控制库固定为 `sleep`，公开前必须分别验证匿名体验、登录、管理员身份和模型开关。
 
 ## Secret 职责与轮换
 
-仓库只固定引用且不保存 Secret（密钥）值；生产集群当前存在以下三个按职责拆分的对象：
+仓库只固定引用且不保存 Secret（密钥）值；前三项已存在于生产，后一项仅为 Task 16（任务 16）候选引用：
 
 | 名称 | 类型与 key | 职责 |
 | --- | --- | --- |
 | `deepseek-runtime` | Opaque（不透明密钥），`api-key` | 只注入 `DEEPSEEK_API_KEY` |
 | `voyage-runtime` | Opaque（不透明密钥），`api-key` | 只注入 `VOYAGE_API_KEY` |
 | `ghcr-pull` | `kubernetes.io/dockerconfigjson` | 只用具有 `read:packages` 权限的 GHCR（GitHub 容器镜像仓库）凭据拉取私有镜像 |
+| `k8s-yaml-assistant-auth` | Opaque（不透明密钥），`github-client-id`、`github-client-secret`、`session-secret`、`admin-github-id`、`subject-hmac-key` | 应用内 GitHub OAuth 2.0（GitHub 开放授权 2.0）、管理员数字身份、会话签名、账本匿名化和匿名体验 Cookie（浏览器标识）签名 |
 
-创建或轮换时，从仓库外的密码管理器把每项内容分别写入权限为 `0600` 的受控临时输入。DeepSeek 和 Voyage 通过 `--from-file=api-key=/dev/stdin` 创建；GHCR（GitHub 容器镜像仓库）凭据在本机内存中转换为 `.dockerconfigjson` 后通过标准输入创建。值不进入命令参数、仓库、日志或持久 YAML（配置文件），字段所有者固定为 `k8s-yaml-assistant-secrets`。
+创建或轮换时，从仓库外的密码管理器把每项内容分别写入权限为 `0600` 的受控临时输入。值不进入命令参数、仓库、日志或持久 YAML（配置文件），字段所有者固定为 `k8s-yaml-assistant-secrets`。GitHub OAuth App（GitHub 开放授权应用）的 callback（回调）固定为 `https://120.46.57.214/k8s-yaml-assistant/api/auth/callback/github`，权限范围固定为 `read:user`。轮换 `NEXTAUTH_SECRET` 会使现有会话失效；轮换主体 HMAC（带密钥安全哈希）密钥会使现有登录额度主体和匿名体验 Cookie（浏览器标识）失效，但全局费用预算仍保留。
 
 更新同名 Secret（密钥）后，环境变量不会自动进入现有 Pod（容器组）。管理员必须在受限 SSH（安全远程登录）路径执行受审核的 `rollout restart`（滚动重启），等待就绪并核对仍运行原授权镜像摘要。轮换完成后先列出临时文件的精确路径并再次确认范围，再删除；泄露时立即吊销供应商或 GHCR 凭据、生成最小权限替代项、更新对应 Secret（密钥）并完成滚动重启。任何核对命令都不得输出 `.data`、完整环境或镜像仓库认证内容。
 
@@ -58,13 +62,15 @@ bootstrap（引导配置）只管理不随应用版本变化的固定资源。�
 
 `k8s-yaml-assistant-observation` 只挂载到 `/app/data/observability`，应用只把 `/app/data/observability/segments` 作为 local sink（本地写入端）根目录。应用配置定义 7 天、单文件 16 MiB、总量 256 MiB 的轮转和删除边界；1 GiB PVC（持久卷声明）不是应用可无限使用的配额。2026-07-28 的首次真实验收发现 local-path PV（本地路径持久卷）的挂载根目录为 `0777 root:10001`，不符合旧 `0700` 根目录契约，`v0.1.0` 因此以 `root_unsafe` 安全关闭观测。`v0.1.1` 已在相同挂载中由 UID/GID（用户 / 组标识）`10001/10001` 创建 `0700` 私有子目录，且日志不再出现 `root_unsafe`；经单独授权的有限模型冒烟已创建 1 条 `0600 10001:10001` 真实分段并验证安全投影。回滚到 `v0.1.0` 后 `root_unsafe` 按预期再次出现，观测写入关闭；恢复到 `v0.1.1` 后私有子目录和正常写入边界重新生效，启动日志不再出现 `root_unsafe`。既有分段在整个往返过程中保持 1,170 字节、1 行、`0600 10001:10001` 且不是符号链接。单条记录不能证明 16 MiB 轮转、7 天 / 256 MiB 清理、人工删除或符号链接攻击拒绝，因此仍不得声称这些边界已经完成生产验收。
 
-索引固定在镜像 `/app/data/index` 中，依靠只读根文件系统读取，不挂载 PVC（持久卷声明），Pod（容器组）重启也不会重建索引。`/tmp` 使用上限为 64 MiB 的 emptyDir（临时卷）。不得把索引、原始 YAML、模型回答、Secret（密钥）或未来计量状态写入 observation PVC（观测持久卷声明）。
+`k8s-yaml-assistant-control` 只挂载到 `/app/data/control`，应用在卷内创建自己持有的 `0700` 私有子目录，并把 SQLite（嵌入式数据库）放在 `/app/data/control/private/control.sqlite3`，不修改可能由 `root` 持有的挂载根目录权限。数据库只保存模式、匿名化额度、费用账本和请求预留状态，不保存用户名、网络地址、YAML、问题、回答或 OAuth（开放授权）令牌。新库从 `sleep` 开始，账本保留 35 天。
 
-K3s local-path（K3s 本地路径）卷与当前单节点处于同一节点故障域：PVC（持久卷声明）可以跨 Pod（容器组）重启保留，但不能抵御节点或系统盘故障，也不构成异地备份。Phase 3（阶段 3）必须验证 `fsGroup=10001` 的写权限、轮转、磁盘增长和滚动更新期间的单写入端不变量。
+索引固定在镜像 `/app/data/index` 中，依靠只读根文件系统读取，不挂载 PVC（持久卷声明），Pod（容器组）重启也不会重建索引。`/tmp` 保持既有上限为 64 MiB 的 emptyDir（临时卷），作为只读根文件系统下唯一有界可写临时路径。不得把索引、原始 YAML、模型回答或 Secret（密钥）写入 observation/control PVC（观测／控制持久卷声明）。
+
+K3s local-path（K3s 本地路径）卷与当前单节点处于同一节点故障域：PVC（持久卷声明）可以跨 Pod（容器组）重启保留，但不能抵御节点或系统盘故障。控制库不做异地备份；节点磁盘完全损坏时允许丢失这些低价值控制状态，历史额度和费用累计也会在新库内从零开始。新库从 `sleep` 开始，管理员必须显式恢复 `normal` 或限时开放展示后才会重新产生模型费用。Phase 3（阶段 3）必须验证 `fsGroup=10001` 的写权限、磁盘增长和滚动更新期间的单写入端不变量。
 
 ## 网络策略的实际能力
 
-应用只接受 `kube-system` 中带 Traefik（入口控制器）标签的 Pod（容器组）访问 3000/TCP；当前没有 Ingress（入口），所以该许可不会自行产生公开路由。出站只显式放行 CoreDNS（集群域名服务）的 53/UDP、53/TCP，以及排除私网和链路本地地址后的公网 IPv4 443/TCP。
+应用只接受 `kube-system` 中带 Traefik（入口控制器）标签的 Pod（容器组）访问 3000/TCP；候选 IngressRoute（入口路由）只匹配 `/k8s-yaml-assistant`，并直接转发到应用 Service（服务）。根健康路径仅供集群探针使用，新镜像以单次同主机 HTTP `307` 临时重定向连接基础路径健康处理器；kubelet（节点代理）按官方契约跟随同主机重定向，入口仍不匹配根健康路径。出站只显式放行 CoreDNS（集群域名服务）的 53/UDP、53/TCP，以及排除私网和链路本地地址后的公网 IPv4 443/TCP。
 
 标准 NetworkPolicy（网络策略）不能按域名建立可靠 allowlist（允许名单）；当前 443 规则比 DeepSeek/Voyage 两个供应商域名更宽。它也不能保证阻止到所在节点的流量，策略是否实际执行取决于 K3s（轻量 Kubernetes）的网络插件。后续若必须按域名约束，应单独审核 egress proxy（出站代理），不能把当前规则描述成域名隔离。
 
