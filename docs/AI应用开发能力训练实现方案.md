@@ -62,8 +62,9 @@
 - Task 18（任务 18）先删除已确认的旧 8,127 条索引和 `.next` 构建产物，再从当前生产镜像摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37` 提取并校验 8,410 条候选索引；没有调用 `index:build`。五类成功运行依次为 retrieval（检索）`2026-07-29T10-27-35-327Z`、faith（忠实度）`2026-07-29T10-38-42-300Z-full`、judge（裁判）`2026-07-29T11-04-44-208Z-judge`、generation（生成）`2026-07-29T11-22-41-770Z-generation` 和 fix（修复）`2026-07-29T11-24-08-465Z-fix`；首次 faith（忠实度）运行 `2026-07-29T10-29-48-748Z-full` 因内部 embedding（向量）字段越过 trace（轨迹）边界失败，最小边界修复通过 317 项完整测试后重新运行成功，失败产物按协议保留且未复用。
 - Task 18（任务 18）首次人工审核确认：83/88/20/27/9 条成功运行与 trace（轨迹）可对账，Holdout（留出集）未进入校准或自动回灌，两条错误解释正确且完整，85 个带回答来源的用例引用编号均与 source snapshot（来源快照）一致，未发现真实凭据或生产敏感 YAML（配置文件）。当次阻断项为：retrieval（检索）仍有 `policy-conflict-privileged` 失召回；faith（忠实度）仅 64/82，另有 18 条有来源幻觉和 6 条裁判不可判定；judge（裁判）100 次投票含 19 次无效、4 个不可判定、2 个不稳定及 `rolebinding-roleref` 标签/判定歧义；Generation/Fix（生成 / 修复）虽机器指标全通过，但 `job-basic`、`hard-cronjob-full` 在命令未定义时自行补出命令，`fix-missing-provisioner` 只验证字段存在且输出值无法从输入确定。运行协议尚未贯通 raw usage/cost（原始用量 / 费用），只能对账请求次数，不能给出实际费用。Faith bad case（忠实度问题用例）只完成无写入预览；现有 retrieval bad case（检索问题用例）的复发证据作为工作区差异等待 review（审核），没有自动回灌、提交或 baseline（基线）晋升。当时决定先审核并修正上述评估用例/裁判边界，再另行授权必要的模型复测；不得直接进入公开发布。
 - 2026-07-29 经本次明确授权修复 `policy-conflict-privileged`：既有 reviewed alias（已审核别名）只增加真实复发短语，唯一匹配字段路径复用现有软加权；dense retrieval（稠密检索）继续使用扩展问题，alias 命中的 rerank（重排）改用原始问题、命中路径及既有标题。82 条 tuning A/B（调优集对照评估）为 Recall@3 `100.0%`、MRR `0.927`、零 Recall lost case（召回损失用例）。正式 full retrieval（完整检索）运行 `2026-07-29T12-20-24-990Z` 使用相同 8,410 条索引和模型身份，83 条 trace（轨迹）完整，Recall@3 从 `82/83` 提升为 `83/83`，MRR@3 保持 `77/83`；目标策略位于第 2，Holdout（留出集）仍为第 1，harness error（评估框架错误）为 0，未新增 bad case（问题用例）。对应既有问题用例已人工标记为 `fixed`，回答来源契约同步收紧为 schema + policy（结构定义与组织策略）均必需。该运行尚未晋升 retrieval baseline（检索基线）；faith、judge、generation、fix（忠实度、裁判、生成、修复）的既有阻断不变，仍不得进入公开发布。
+- 2026-07-29 新增五条跨资源检索契约，覆盖 Ingress 到 Service/Secret、RoleBinding 到 Role/ClusterRole/ServiceAccount、HPA 到 Deployment、Pod 到 PVC/ConfigMap/Secret，以及 PVC 到 StorageClass。Control（对照组）完整运行 `2026-07-29T13-08-18-747Z` 复用同一 8,410 条索引，88 条 trace（轨迹）完整，Recall@3 为 `97.0%`（`85.333/88`）、MRR@3 为 `0.915`（`80.5/88`）、harness error（评估框架错误）为 0；原有 83 条全部通过，新契约中 Ingress 通过，其余四条形成真实 bad case（问题用例）。随后仅对五条目标契约执行 Candidate（候选组）定向 A/B Test（对照实验）：Ingress、HPA 通过，Pod、RoleBinding、PVC 仍分别只命中 `1/3`、`1/2`、`1/2`。该候选已触发“任一目标失败即舍弃”的门禁，多资源软提示、规范资源名补词和直接父 schema（结构定义）补候选代码及专用测试均已撤销；没有继续执行 88 条 Candidate（候选组）完整运行，也没有晋升 baseline（基线）。五条评估契约、Control（对照组）运行证据及四条问题账本保留，用于证明单一路由不是唯一缺口，父子字段粒度和 rerank（重排）选择仍需先澄清。
 
-以下语料、索引和评估数字已于 2026-07-29 按 Task 18（任务 18）重新核对；它们都不是永久规格，若与命令输出冲突，以命令输出为准。
+以下语料、索引和评估数字已于 2026-07-29 按最新本地契约重新核对；它们都不是永久规格，若与命令输出冲突，以命令输出为准。
 
 ### 3.1 Corpus
 
@@ -91,7 +92,7 @@ npm run corpus:stats
 
 | 数据集 | 数量 | task（任务） | origin（来源） | role（角色） |
 |---|---:|---|---|---|
-| Semantic Retrieval（语义检索） | 83 | field_explanation=74，policy_explanation=9 | human=83 | development=71，regression=11，holdout=1 |
+| Semantic Retrieval（语义检索） | 88 | field_explanation=79，policy_explanation=9 | human=88 | development=76，regression=11，holdout=1 |
 | Grounded Answer（有依据回答） | 88 | field_explanation=74，policy_explanation=9，error_explanation=2，refusal=3 | human=88 | development=76，regression=11，holdout=1 |
 | Judge Calibration（裁判校准） | 20 | field_explanation=9，policy_explanation=9，refusal=2 | human=20 | development=18，regression=2 |
 | Generation（生成） | 27 | generation=27 | human=27 | development=26，holdout=1 |
@@ -109,7 +110,7 @@ npm run corpus:stats
 |---|---|---|
 | Monaco YAML 工作流与 `ask/check/gen/fix` | 已完成基础闭环 | 继续以编辑器 YAML authoring 为唯一产品场景 |
 | schema ingestion、`$ref` registry、curated corpus | provenance、targets、版本化 ID 和 corpus/index identity 已纠偏 | 尚未接入 docs/example provider，真实 CRD 样本不足 |
-| dense retrieval、rerank、query expansion serving | 候选 full run 下 Recall@3 为 83/83、MRR@3 为 77/83 | 唯一失召回已关闭，运行 `2026-07-29T12-20-24-990Z` 等待 retrieval baseline 人工审核 |
+| dense retrieval、rerank、query expansion serving | 原有 83 条保持全通过；新增五条跨资源契约的 Control（对照组）通过一条 | 多资源提示与父 schema 补候选方案未通过定向门禁并已撤销；四条跨资源问题待重新设计 |
 | run/trace/baseline/bad case | runtime protocol、metric registry、compare/promote 门禁已实现并完成首次正式运行 | 本轮 baseline 全部拒绝；usage/cost 尚未贯通 |
 | Generation/Fix repair loop | full run 的结构、值、关系、保留项和副作用机器指标全通过 | 人工审核发现用例/断言有效性缺口，需修尺子后复测 |
 | `[S]` 引用、schema/policy 分层 | 85 个带来源回答的引用编号和快照结构均对齐 | Faithfulness（忠实度）为 64/82，另有 18 条有来源幻觉、6 条不可判定；answer correctness 与 claim-level verification 未完成 |
@@ -300,7 +301,7 @@ Stage 是能力分类，不代表执行时序。
 | 0 | Scope 与评估代表性 | curated 28 resources、治理分层、首批 Holdout 和新版本 full run 已落地 | 修正人工审核发现的用例有效性缺口后复测 |
 | 1 | YAML Copilot 工作流 | 基础闭环完成 | 持续保持 editor-context 场景，不扩张产品叙事 |
 | 2 | 质量工程底座 | artifact/metric/evaluator/provenance/governance 契约已纠偏并完成首次正式运行 | 修正审核阻断后重建正式 baseline；贯通 usage/cost |
-| 3 | 检索优化 | query expansion 已落地，Hybrid 未触发 | 新 baseline 下复测 rerank；证据触发后再选方案 |
+| 3 | 检索优化 | query expansion 已落地；跨资源多提示与父 schema 补候选方案已实测淘汰；Hybrid 未触发 | 先解释四条跨资源 bad case 的字段粒度与重排契约，再选择新方案 |
 | 4 | Generate/Fix | case contract、关系断言、fixture preflight、指标语义和首次 full run 已完成 | 修正命令未定义与目标值不可判定用例，再复测并审核 baseline |
 | 5 | Grounding/Judge | `[S]` 引用和 policy judge 基础已有，首次 full run 已暴露稳定性缺口 | 修正 18 条有来源幻觉与 judge 不可判定/歧义；answer quality 分维度；Claim-level Grounding |
 | 6.1 | Policy | Ask 侧已完成 | Generate/Fix policy lint 需独立设计 |
@@ -329,14 +330,14 @@ Stage 是能力分类，不代表执行时序。
 5. 已完成：补入 2 条真实错误解释、2 个真实 CRD（自定义资源定义）主题和 Retrieval/Grounded Answer、Generation、Fix 的首批 Holdout（留出集）。
 6. 已完成：清理确认范围内的 ignored artifacts（被忽略产物），复用与发布候选完全一致的 8,410 条 index（索引），并依次运行 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）评估；没有重建索引。
 7. 已完成首次 full（完整集）评估的 metrics/trace/bad case（指标 / 轨迹 / 问题用例）人工审核。错误解释、引用编号、Holdout（留出集）隔离和敏感信息检查通过；检索、忠实度、裁判稳定性和 Generation/Fix（生成 / 修复）用例有效性存在阻断，明确拒绝本轮所有 baseline（基线）晋升。
-8. 当前边界：retrieval（检索）唯一失召回已修复并完成新的 full run（完整集运行），候选指标为 Recall@3 `83/83`、MRR@3 `77/83`，尚未人工晋升 baseline（基线）；下一步继续修正 faith/judge 与 Generation/Fix（忠实度 / 裁判与生成 / 修复）已确认的尺子和质量阻断。
+8. 当前边界：原有 83 条 retrieval（检索）用例保持全通过；五条新增跨资源契约的 Control（对照组）暴露四条问题用例，多资源提示与直接父 schema 补候选方案未通过定向 A/B Test（对照实验）并已完整撤销。当前没有 retrieval baseline（检索基线）晋升，下一步仍须先修跨资源检索尺子，同时继续处理 faith/judge 与 Generation/Fix（忠实度 / 裁判与生成 / 修复）已确认的质量阻断。
 
 ### Production Deployment（生产部署，当前优先插入主线）
 
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md` 的 Phase 0-3（阶段 0-3）明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引和安全 observation（观测）边界；其中未部署的 Phase 4-5（阶段 4-5）双访问模式候选已被 2026-07-29 公共体验控制设计替代。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
 3. Phase 0-2（阶段 0-2）、特权 deployment adapter（部署适配器）Task 1-7（任务 1-7）和 Task 14（任务 14）的私有发布、部署、人工回滚、恢复及节点重启证据已经完成实现与审核；Step 5（步骤 5）的长期观测生命周期保持部分验收，Step 6（步骤 6）的真实自动恢复演练因没有合格候选明确延期。在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。
-4. 新 Task 16-17（任务 16-17）的本地身份、三态控制、额度/费用、统一页面和直接入口候选已经按 `superpowers/specs/2026-07-29-public-experience-control-design.md` 与对应计划完成并通过 review（审核），控制库 OBS（对象存储服务）备份已在部署前清退，三项模型操作状态也已按 DeepSeek（回答模型）与 Voyage（向量服务）的真实依赖拆分。Task 18（任务 18）正式质量审核未通过，后续只关闭了 retrieval（检索）失召回；其新 baseline（基线）尚未晋升，其他质量阻断仍未修复。全部质量阻断复测通过或形成显式风险接受记录前不进入公开发布。OAuth App（开放授权应用）、真实 GitHub callback（开放授权回调）、候选发布、安全组、证书管理器安装、Kubernetes（容器编排系统）写入、后续模型调用和节点重启仍须分别获得授权。
+4. 新 Task 16-17（任务 16-17）的本地身份、三态控制、额度/费用、统一页面和直接入口候选已经按 `superpowers/specs/2026-07-29-public-experience-control-design.md` 与对应计划完成并通过 review（审核），控制库 OBS（对象存储服务）备份已在部署前清退，三项模型操作状态也已按 DeepSeek（回答模型）与 Voyage（向量服务）的真实依赖拆分。Task 18（任务 18）正式质量审核未通过；后续关闭了当时唯一的 retrieval（检索）失召回，但新增跨资源尺子又暴露四条问题用例，首个候选方案已经按门禁淘汰，仍未晋升新 baseline（基线）。全部质量阻断复测通过或形成显式风险接受记录前不进入公开发布。OAuth App（开放授权应用）、真实 GitHub callback（开放授权回调）、候选发布、安全组、证书管理器安装、Kubernetes（容器编排系统）写入、后续模型调用和节点重启仍须分别获得授权。
 5. 部署完成后返回 AI 应用训练主线；部署不把项目扩张为通用 Kubernetes 运维平台。
 
 ### Phase C：剩余质量债

@@ -489,7 +489,7 @@ expectInvalid(() =>
   ),
 );
 
-assert.equal(RETRIEVAL_CASES.length, 83);
+assert.equal(RETRIEVAL_CASES.length, 88);
 assert.equal(GROUNDED_ANSWER_CASES.length, 88);
 assert.deepEqual(
   GROUNDED_ANSWER_CASES.filter(
@@ -676,7 +676,7 @@ assert.equal(
   RETRIEVAL_CASES.filter(
     (evalCase) => evalCase.governance.task === 'field_explanation',
   ).length,
-  74,
+  79,
 );
 assert.equal(
   RETRIEVAL_CASES.filter(

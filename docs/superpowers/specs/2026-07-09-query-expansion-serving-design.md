@@ -1,6 +1,6 @@
 # Alias-aware Query Expansion Serving 接入设计
 
-> 状态：已实施；2026-07-29 根据 `policy-conflict-privileged` 的正式评估证据修订粗召回与重排边界。
+> 状态：已实施；2026-07-29 根据 `policy-conflict-privileged` 的正式评估证据修订粗召回与重排边界。同日跨资源多提示与父 schema（结构定义）补候选实验未通过门禁并已撤销，不属于现行实现。
 
 ## 1. 背景与证据
 
@@ -301,3 +301,22 @@ Task 1-4 只验证 expansion 接入，不改 exact/leaf 行为。Task 5 才修�
 - 单元测试、全量 A/B、retrieval eval 和 policy faith 验证结果。
 
 每个 implementation task 完成后停下汇报结果，待人工 review 后再执行下一 task。未经明确指示不提交 commit，也不晋升 baseline。
+
+## 13. 2026-07-29 跨资源候选淘汰记录
+
+为避免把“问题里出现某个资源名”直接固化成单资源路由，本次先增加五条真实评估契约，再复用共享检索入口和固定 8,410 条索引建立 Control（对照组）。
+
+Control（对照组）完整运行 `2026-07-29T13-08-18-747Z` 的结果为：
+
+- 88 条 trace（轨迹）完整，Recall@3 为 `97.0%`（`85.333/88`），MRR@3 为 `0.915`（`80.5/88`），harness error（评估框架错误）为 0。
+- 原有 83 条全部通过。
+- Ingress 到 Service/Secret 通过；Pod 到 PVC/ConfigMap/Secret、HPA 到 Deployment、RoleBinding 到 Role/ClusterRole/ServiceAccount、PVC 到 StorageClass 四条失败。
+
+Candidate（候选组）同时尝试多资源软提示、规范资源名补词和直接父 schema（结构定义）补候选。五条目标契约的定向 A/B Test（对照实验）中，Ingress、HPA 通过，Pod、RoleBinding、PVC 仍分别只命中 `1/3`、`1/2`、`1/2`。该结果已触发预先约定的淘汰门禁，因此：
+
+- 候选生产代码和候选专用测试已撤销。
+- 不继续执行 88 条 Candidate（候选组）完整运行，不以更多调参覆盖失败。
+- 不重建索引，不晋升 baseline（基线）。
+- 保留五条评估契约、Control（对照组）运行证据和四条 bad case（问题用例）。
+
+现有证据表明缺口不只来自单值资源路由：HPA 与 RoleBinding 已召回子字段但漏掉预期父字段，PVC 的父字段进入候选后仍未进入 top 3（前三名），Pod 的 PVC 父字段没有进入粗召回。下一轮必须先明确跨资源问题所需的字段粒度和 rerank（重排）目标，再提出新候选；不得恢复本次已淘汰方案或增加单资源特判。
