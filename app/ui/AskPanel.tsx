@@ -103,6 +103,8 @@ interface Props {
   sources: SourceHit[];
   asking: boolean;
   disabled: boolean;
+  loginRequired: boolean;
+  actionHint?: string;
   canExplainField: boolean;
   canExplainError: boolean;
   onChange: (v: string) => void;
@@ -115,6 +117,8 @@ export function AskPanel({
   sources,
   asking,
   disabled,
+  loginRequired,
+  actionHint,
   canExplainField,
   canExplainError,
   onChange,
@@ -131,7 +135,7 @@ export function AskPanel({
         <span className={LABEL}>解释当前配置</span>
       </div>
       <div className="px-4 py-3">
-        <div className="mb-2 flex flex-wrap gap-2">
+        <div className="mb-2 flex flex-wrap gap-2" title={actionHint}>
           <button
             className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg/80 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
             onClick={() => onAsk('explain_field', '解释当前字段')}
@@ -154,13 +158,18 @@ export function AskPanel({
           placeholder="问一个关于当前配置的问题,例如某字段能填哪些值、怎么配某项"
           className="w-full resize-none rounded border border-line bg-ink px-3 py-2 text-sm text-fg outline-none transition focus:border-brand/50 placeholder:text-muted"
         />
-        <button
-          className={`mt-2 ${PRIMARY_BTN}`}
-          onClick={() => onAsk('free')}
-          disabled={disabled || !question.trim()}
+        <span
+          className="mt-2 inline-block"
+          title={actionHint}
         >
-          {asking ? '分析中…' : '解释'}
-        </button>
+          <button
+            className={PRIMARY_BTN}
+            onClick={() => onAsk('free')}
+            disabled={disabled || !question.trim()}
+          >
+            {asking ? '分析中…' : loginRequired ? '登录后解释' : '解释'}
+          </button>
+        </span>
         {answer && <MarkdownText text={answer} streaming={asking} />}
         {cited.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">

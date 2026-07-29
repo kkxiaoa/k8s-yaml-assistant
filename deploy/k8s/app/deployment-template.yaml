@@ -57,6 +57,31 @@ spec:
                 secretKeyRef:
                   name: voyage-runtime
                   key: api-key
+            - name: GITHUB_ID
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-yaml-assistant-auth
+                  key: github-client-id
+            - name: GITHUB_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-yaml-assistant-auth
+                  key: github-client-secret
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-yaml-assistant-auth
+                  key: session-secret
+            - name: ADMIN_GITHUB_ID
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-yaml-assistant-auth
+                  key: admin-github-id
+            - name: CONTROL_SUBJECT_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-yaml-assistant-auth
+                  key: subject-hmac-key
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -100,11 +125,16 @@ spec:
             failureThreshold: 3
             successThreshold: 1
           volumeMounts:
+            - name: control
+              mountPath: /app/data/control
             - name: observations
               mountPath: /app/data/observability
             - name: tmp
               mountPath: /tmp
       volumes:
+        - name: control
+          persistentVolumeClaim:
+            claimName: k8s-yaml-assistant-control
         - name: observations
           persistentVolumeClaim:
             claimName: k8s-yaml-assistant-observation

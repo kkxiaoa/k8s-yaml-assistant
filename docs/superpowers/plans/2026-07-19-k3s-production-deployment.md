@@ -62,7 +62,7 @@ clean source（干净源码）
 | Phase 1（阶段 1） | Task 3-4（任务 3-4） | 固定版本 K3s 安装、加固与备份边界通过审核 |
 | Phase 2（阶段 2） | Task 5-11（任务 5-11） | 可复现容器、有效索引、GHCR 候选镜像与草稿发布版本通过审核，不部署 |
 | Phase 3（阶段 3） | Task 12-14（任务 12-14） | 固定部署适配器、生产 runner（运行器）和私有发布/回滚通过审核 |
-| Phase 4（阶段 4） | Task 15-17（任务 15-17） | 域名、TLS（传输层安全）、认证、保护和双访问模式在受限来源通过审核 |
+| Phase 4（阶段 4） | Task 15-17（任务 15-17） | 公网入口身份、TLS（传输层安全）、认证、保护和双访问模式在受限来源通过审核 |
 | 公开前质量闸 | Task 18（任务 18） | 正式评估人工审核通过，或形成显式风险接受记录 |
 | Phase 5（阶段 5） | Task 19-20（任务 19-20） | 公开发布、恢复演练和观察期通过审核 |
 
@@ -851,14 +851,14 @@ design（设计）先审核，确认后再完成实施 plan（计划）的文件
 - Deployment（工作负载）不是单副本、不是 digest（内容摘要）、缺 non-root/read-only/seccomp/drop capabilities（非 root / 只读 / 系统调用限制 / 删除能力）、资源边界、探针或 `revisionHistoryLimit=3` 时失败；
 - 索引目录/PVC（持久卷声明）可写、observation PVC（观测持久卷声明）被用于索引/计量/Secret（密钥）或 `/tmp` 没有 size limit（大小上限）时失败；
 - `maxSurge` 非 0、`maxUnavailable` 非 1，或出现第二个 observation writer（观测写入端）时失败；
-- ConfigMap（普通配置）包含 Secret（密钥）、非法 `ACCESS_MODE`、未显式索引/模型/observation（观测）配置时失败；
+- bootstrap ConfigMap（引导普通配置）包含 Secret（密钥）、越权保存访问模式字段、未显式索引/模型/observation（观测）配置时失败；
 - 仓库出现 base64 Secret（Base64 编码密钥）、完整 kubeconfig（客户端配置）或真实 pull token（拉取令牌）时失败。
 
 - [x] **Step 2（步骤 2）：实现固定非敏感资源和模板**
 
 bootstrap（引导配置）只包含 Namespace（命名空间）、安全标签、ServiceAccount（服务账户）、ConfigMap（普通配置）、ClusterIP Service（集群内服务）、NetworkPolicy（网络策略）和 observation PVC（观测持久卷声明）等固定非版本资源；不提前创建已运行应用版本。
 
-root-owned deployment template（root 所有工作负载模板）固定 replicas/resources/probes/securityContext/volumes（副本 / 资源 / 探针 / 安全上下文 / 卷）和目标名称，只留由适配器注入且严格校验的 image digest（镜像内容摘要）。`ACCESS_MODE=private` 显式配置，缺失/非法仍由应用解释为 private（私有）。
+root-owned deployment template（root 所有工作负载模板）固定 replicas/resources/probes/securityContext/volumes（副本 / 资源 / 探针 / 安全上下文 / 卷）和目标名称，只留由适配器注入且严格校验的 image digest（镜像内容摘要）。Task 16 Step 2（任务 16 步骤 2）把 `ACCESS_MODE` 和 `MODEL_ACCESS_ENABLED` 收敛到独立固定访问模式 ConfigMap（普通配置），避免 bootstrap（引导配置）保存第二份事实；缺失或非法 `ACCESS_MODE` 仍由应用解释为 private（私有）。
 
 第一轮资源候选沿用已审核设计：CPU requests/limits（处理器请求 / 上限）为 500m/2，memory requests/limits（内存请求 / 上限）为 768 MiB/2 GiB，ephemeral-storage requests/limits（临时存储请求 / 上限）为 256 MiB/1 GiB；`fsGroup=10001`、`fsGroupChangePolicy=OnRootMismatch`。这些只是私有压测候选值，不能在 Task 20（任务 20）实测前写成容量承诺。
 
@@ -950,7 +950,9 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 
 **Phase 3 Stop（阶段 3 停止点）：** 草稿不部署、人工发布、实际 digest（内容摘要）、runner/workflow（运行器 / 流水线）权限、私有功能与安全边界、有限模型调用、RSS（常驻内存）、observation（观测）部分生命周期、单写入端、人工回滚和节点重启证据已于 2026-07-28 通过独立 review（审核）。Step 5/6（步骤 5/6）的未完成项保留为明确延期风险；本结论只满足 Phase 4 Task 15（阶段 4 任务 15）的本地实现前置条件，不授权 Task 16（任务 16）的 DNS（域名系统）、公开端口或生产部署。
 
-## Phase 4（阶段 4）：域名、TLS、认证与保护
+## Phase 4（阶段 4）：公网入口身份、TLS、认证与保护
+
+> 状态：Task 15-17（任务 15-17）的 oauth2-proxy（认证代理）、身份头、private/portfolio（私有 / 作品集展示）和访问模式发布候选从未部署，已由 `2026-07-29-public-experience-control.md` 替代。本节保留历史实现与审核记录，不再作为后续执行入口；Task 18（任务 18）公开前质量闸继续有效。
 
 ## Task 15（任务 15）：实现应用侧访问策略、请求解码与费用前置保护
 
@@ -966,13 +968,29 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 - Create（创建）：`src/server/access-policy.test.ts`
 - Create（创建）：`src/server/request-limiter.ts`
 - Create（创建）：`src/server/request-limiter.test.ts`
+- Create（创建）：`src/server/model-request-policy.ts`
+- Create（创建）：`deploy/k8s/access/oauth2-proxy.yaml`
+- Create（创建）：`scripts/oauth2-proxy-integration.ts`
 - Modify（修改）：`app/api/ask/route.ts`
 - Modify（修改）：`app/api/check/route.ts`
 - Modify（修改）：`app/api/generate/route.ts`
 - Modify（修改）：`app/api/fix/route.ts`
+- Modify（修改）：`app/page.tsx`
+- Modify（修改）：`src/server/agent.ts`
+- Modify（修改）：`src/server/pipeline.ts`
+- Modify（修改）：`src/server/pipeline-retrieval.test.ts`
+- Modify（修改）：`src/server/upstream-error.ts`
+- Modify（修改）：`src/server/upstream-error.test.ts`
 - Modify（修改）：`src/server/runtime-config.ts`
 - Modify（修改）：`src/server/runtime-config.test.ts`
-- Modify（修改）：页面/面板中的最小隐私与费用提示，具体文件按当前 UI（用户界面）复核
+- Modify（修改）：`src/retrieval/embeddings.ts`
+- Modify（修改）：`src/retrieval/rerank.ts`
+- Modify（修改）：`src/retrieval/retrieve.ts`
+- Modify（修改）：`deploy/k8s/bootstrap/config-map.yaml`
+- Modify（修改）：`deploy/k8s/bootstrap/network-policy.yaml`
+- Modify（修改）：`deploy/k8s/README.md`
+- Modify（修改）：`scripts/deployment-contract.test.ts`
+- Modify（修改）：`package.json`
 
 - [x] **Step 1（步骤 1）：先写 API contract（应用程序接口契约）与字节上限反例**
 
@@ -986,15 +1004,21 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 
 2026-07-28 已新增统一的有界流读取和四条业务路由 strict runtime decoder（严格运行时解码器）：总上限固定为 256 KiB，各路由使用不超过总上限的独立预算；合法超限 `Content-Length` 在读取前拒绝，缺失、非法或伪小值仍按实际字节拒绝。四条路由不再直接调用 `Request.json()`，未知字段、错误类型、空白必填值和超预算输入统一返回不回显请求内容的稳定 400/413 响应。反例、完整本地测试和 TypeScript（类型系统）检查均通过，没有模型调用。
 
-- [ ] **Step 2（步骤 2）：先证明认证 identity header（身份头）信任链**
+- [x] **Step 2（步骤 2）：先证明认证 identity header（身份头）信任链**
 
-在实现应用授权前，明确 Traefik → oauth2-proxy ForwardAuth → application（入口控制器 → 认证代理前置认证 → 应用）的头清理和注入顺序：所有客户端可提交的身份头必须先删除，只有成功认证结果可以重新注入；NetworkPolicy（网络策略）只允许审核后的入口/认证组件访问应用 Service（服务）。
+在实现应用授权前，明确并验证 Traefik → oauth2-proxy reverse proxy → application（入口控制器 → 认证代理反向代理 → 应用）的 private（私有）链路。应用当前只接受 `X-Forwarded-User` 作为主体输入；认证代理必须先删除它负责注入的客户端同名头及大小写/下划线变体，只有成功认证会话可以重新注入。private（私有）NetworkPolicy（网络策略）只允许 oauth2-proxy（认证代理）访问应用，只允许生产实际 Traefik（入口控制器）访问认证代理。
 
 如果不能通过实际版本配置、集成反例和网络策略证明应用收到的主体不可由公网客户端伪造，立即停止，重新选择 oauth2-proxy reverse proxy（认证代理反向代理）或带签名的内部身份契约；不得仅凭 `X-Auth-Request-User` 字符串存在就宣称认证。
 
 2026-07-28 只读前置核对确认仓库中没有 Ingress（入口）、ForwardAuth（前置认证）或 oauth2-proxy（认证代理）配置，也没有身份头先清理后注入的实际链路；现有 `deploy/k8s/bootstrap/network-policy.yaml` 仍允许 `kube-system` 中的 Traefik（入口控制器）直接访问应用。当前无法证明应用收到的主体不可由客户端伪造，因此按本步骤停止条件停在 Step 2（步骤 2），没有开始访问策略、限流、费用保护、隐私提示或部署。恢复前必须先审核入口认证拓扑及其与 Task 16（任务 16）的执行顺序。
 
-- [ ] **Step 3（步骤 3）：实现 fail-safe ACCESS_MODE（安全失败访问模式）**
+同日恢复核对确认生产实际为 Traefik `3.7.4`、镜像摘要 `sha256:fcdef599e6259359833dd2e1d49f9e964f66825d69bd3dd468f51102ce013d03`，Pod（容器组）地址为 `10.42.0.20`，节点 PodCIDR（容器组网段）为 `10.42.0.0/24`；集群尚无 oauth2-proxy（认证代理）。Traefik `3.7.4` 已弃用 ForwardAuth（前置认证）的 `trustForwardHeader`，当前 EntryPoint（入口点）也没有可信代理地址配置；继续采用原 ForwardAuth（前置认证）会把 Task 15/16（任务 15/16）锁成循环前置条件。
+
+本步骤因此选择固定 `linux/amd64` 镜像 `quay.io/oauth2-proxy/oauth2-proxy@sha256:7c25fd50e1998798b79d051bd7d98ebac8dc4c6c1e54c99f4cb06f3e7d117dbd`，实际二进制为 `v7.15.2`。该版本修复了 2026-04 公布的认证旁路，并会在请求转发前规范化、删除它负责注入的 `X-Forwarded-*` 身份头，再从已验证会话设置主体。仓库只固化 private（私有）入口身份无关资源和实际镜像反例；OAuth callback/IngressRoute/Certificate（OAuth 回调 / 入口路由 / 证书）的统一身份由 Task 16（任务 16）验证，当前候选已改为公网 IP `120.46.57.214` 和 `/k8s-yaml-assistant`。本步骤不部署这些资源。
+
+本地实现已固定 oauth2-proxy ServiceAccount/Service/Deployment/NetworkPolicy（认证代理服务账户 / 服务 / 工作负载 / 网络策略），并把应用入站从 Traefik（入口控制器）直连收紧为只接受认证代理。`npm run deploy:check` 的 76 项契约全部通过，反例证明 mutable tag（可变标签）、公网可信代理、关闭身份头清理、关闭会话主体注入、入口绕过认证代理及整个 `kube-system` 命名空间放行都会被拒绝。`npm run auth-proxy:integration` 使用固定摘要的真实镜像验证：未认证伪造头返回 HTTP `403` 且未到达上游，认证请求返回 HTTP `200`，上游主体来自会话，客户端下划线头变体已删除。一次性容器和临时密码文件已清理；生产仍无 oauth2-proxy（认证代理）或 Ingress（入口），本步骤没有发布、部署、模型调用、索引重建或节点重启。
+
+- [x] **Step 3（步骤 3）：实现 fail-safe ACCESS_MODE（安全失败访问模式）**
 
 只接受 `private|portfolio`；缺失、空白、大小写错误和未知值一律解释为 private（私有）。不创建管理 API（应用程序接口）、隐藏页面、特殊 header（请求头）或 URL（网址）参数修改模式。
 
@@ -1009,17 +1033,27 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 
 应用业务 API（应用程序接口）再次执行同一策略，使 Ingress（入口）路由误配时模型路由仍拒绝匿名请求。页面级认证由入口承担，不能把前端隐藏按钮当作授权。
 
+2026-07-28 四条业务路由已在读取请求体或检查模型配置前执行应用授权。`ACCESS_MODE` 只有精确 `portfolio` 才开放匿名 `/api/check`，其余值均收敛为 private（私有）；Ask/Generate/Fix（询问 / 生成 / 修复）在两种模式下都只接受允许名单主体 `kkxiaoa`。应用只读取 `X-Forwarded-User`，拒绝缺失、非允许名单、空白、多值主体，并忽略 `Authorization`、`X-Auth-Request-User` 和下划线变体。7 项访问策略反例全部通过；页面和静态资源仍由 Task 16（任务 16）的入口认证承担。
+
 - [ ] **Step 4（步骤 4）：实现私有阶段限速、并发与费用保护**
 
-单副本内存 token bucket/semaphore（令牌桶 / 信号量）只承担短窗口削峰和并发，不作为跨重启费用事实源。实现有限主体/路由 key（键）、过期清理、容量上限和可信代理来源；不能无界积累任意 IP（互联网协议地址）。候选速率使用设计中的 allowlist（允许名单）测试值，生产值由 Phase 4（阶段 4）受限测试确认。
+单副本内存 token bucket/semaphore（令牌桶 / 信号量）只承担短窗口削峰和并发，不作为跨重启费用事实源。应用授权先把主体收敛为唯一允许用户 `kkxiaoa` 或固定匿名主体，限流器不得从 IP（互联网协议地址）或任意客户端头创建键；因此主体/路由键空间由真实授权契约直接限定，不另设生产不可达的容量拒绝和定时回收分支。候选速率使用设计中的 allowlist（允许名单）测试值，生产值由 Phase 4（阶段 4）受限测试确认。
 
 Ask/Generate/Fix（询问 / 生成 / 修复）还必须设置单请求输入/输出 token（令牌）、上游超时、有限重试、并发和 emergency stop（紧急停止）。全局日费用在计量模块前依赖供应商侧硬额度和人工预算；代码/文档不得把请求次数限流描述成 token/cost metering（令牌 / 成本计量）。
 
-- [ ] **Step 5（步骤 5）：添加隐私提示**
+2026-07-28 已实现当前可证明的保护子集：单副本内存 token bucket/semaphore（令牌桶 / 信号量）按已授权主体和路由执行候选速率，全局与单主体并发分别限制本地检查和共享模型能力；生产调用方只可能传入 `kkxiaoa` 或固定匿名主体，不信任客户端来源头。`MODEL_ACCESS_ENABLED` 只有精确 `true` 才启用模型路由，其他值以稳定 503 关闭；DeepSeek（回答模型）单次上游调用固定 `max_tokens=2048`、60 秒超时和 1 次重试，Voyage（向量与重排模型）固定 30 秒超时；构造后的模型请求另受 256 KiB 序列化字节上限，超限在上游调用前返回安全 413。运行时配置和所需密钥在每个路由请求边界只解码一次并沿调用链传递。
+
+本步骤仍保持未完成：256 KiB 是字节保护，不是 DeepSeek V4（深度求索第 4 代模型）的精确输入 token（令牌）上限；供应商文档说明不同模型分词不同，实际 token（令牌）以返回的 usage（用量）为准，当前没有经验证的 V4 调用前精确计数契约。供应商侧费用硬额度和人工预算也尚未获得可核对证据。当前实现不记录累计 usage/cost（用量 / 成本），不能描述为费用计量；本步骤没有调用模型。
+
+2026-07-28 用户 review（审核）接受上述边界为显式延期风险，Step 4（步骤 4）继续保持未勾选，匿名模型能力继续关闭。该接受只允许完成 Task 15（任务 15）的本地交接，不授权模型调用、发布或生产部署；进入受限入口前仍须核对供应商费用硬额度和人工预算。
+
+- [x] **Step 5（步骤 5）：添加隐私提示**
 
 页面明确区分本地 `/api/check` 与会向 DeepSeek/Voyage 发送必要输入的模型能力；首次模型操作附近提示不要提交 Secret（密钥）、私钥或生产集群敏感配置。当前不接入 Turnstile（人机验证）或匿名 cookie（浏览器会话）。
 
-- [ ] **Step 6（步骤 6）：验证**
+2026-07-28 页面编辑区已明确标注本地 schema（结构模式）检查不调用外部模型，模型操作区持续展示 DeepSeek/Voyage（回答模型 / 向量与重排模型）的必要输入、费用和敏感配置边界。匿名模型、Turnstile（人机验证）和浏览器会话均未引入；面向公开访问的完整隐私说明仍按 Task 16/17（任务 16/17）的匿名能力门禁审核。
+
+- [x] **Step 6（步骤 6）：验证**
 
 ```bash
 node --import tsx --test src/server/api-contract.test.ts
@@ -1033,33 +1067,63 @@ npm run build
 git diff --check
 ```
 
-- [ ] **Step 7（步骤 7）：通过既有发布链私有部署本次应用变更**
+2026-07-28 当前工作树的 `npm test` 为 344/344 通过，`npm run deploy:check` 为 76/76 通过，TypeScript（类型系统）检查、Next.js（网页应用框架）生产构建和 `git diff --check` 均通过。固定 oauth2-proxy（认证代理）镜像集成反例此前已在同一未变更清单和脚本上通过；本轮没有模型调用或索引重建。
 
-Task 15（任务 15）的代码不能通过 SSH 手工替换。按 Task 10-14（任务 10-14）已经验收的同一流程生成新候选镜像、draft Release（草稿发布版本）和人工发布记录，在 443 仍受限时部署并重复私有访问/回滚验证。模型 smoke test（冒烟测试）仍需单独费用授权。
+- [x] **Step 7（步骤 7）：固化与 Task 16（任务 16）的部署交接**
+
+Task 15（任务 15）只完成本地实现、测试和 review（审核），不在认证代理、最终入口身份和 OAuth callback（OAuth 回调）尚未就绪时单独部署一个会拒绝现有私有直连的应用镜像。Task 16（任务 16）获得各项当次授权后，必须先准备认证代理、Secret（密钥）、受限路由和 private（私有）NetworkPolicy（网络策略），再按 Task 10-14（任务 10-14）已经验收的发布链生成、人工 Publish（正式发布）并部署 Task 15（任务 15）应用镜像，完成联合私有访问和回滚验证。代码不能通过 SSH（安全远程登录）手工替换；模型 smoke test（冒烟测试）仍需单独费用授权。
+
+2026-07-28 用户 review（审核）确认本地实现、验证结果及 Step 4（步骤 4）的显式延期边界。Task 15（任务 15）交接因此完成：应用镜像、认证代理、Secret（密钥）、受限路由和 NetworkPolicy（网络策略）必须作为 Task 16（任务 16）的同一审核变更集进入发布链；本步骤没有提交、推送、发布、部署、模型调用、索引重建或节点重启。
 
 **Rollback（回滚）：** 安全异常时回滚到 Phase 3（阶段 3）镜像并保持 80/443 非公开；不能通过默认 portfolio（作品集展示）、关闭 body limit（请求体上限）或信任客户端头恢复功能。
 
-**Stop and report（停止并汇报）：** API（应用程序接口）模式、字节读取、身份信任链、访问矩阵、限流/并发/费用边界、隐私提示和全部安全反例。等待 review（审核）。
+**Stop and report（停止并汇报）：** API（应用程序接口）模式、字节读取、身份信任链、访问矩阵、限流/并发/费用边界、隐私提示和全部安全反例已于 2026-07-28 完成 review（审核）。下一执行入口为 Task 16（任务 16）的前置条件核对，不自动授权任何外部变更。
 
-## Task 16（任务 16）：部署 DNS、TLS、oauth2-proxy 与受限双模式入口
+## Task 16（任务 16）：部署公网 IP TLS、oauth2-proxy 与受限语义路径入口
 
-**Precondition（前置条件）：** Task 15（任务 15）通过且对应新 digest（内容摘要）已经沿既有发布链完成私有部署/回滚验证；用户确定最终域名和 DNS（域名系统）控制权；GitHub OAuth App（GitHub OAuth 应用）、安全组 80/443 变更和 Kubernetes（容器编排系统）资源写入分别获得当次授权。
+**Precondition（前置条件）：** Task 15 Step 1-7（任务 15 步骤 1-7）的本地实现与交接通过 review（审核），但尚未部署。当前入口身份固定为公网 IPv4 `120.46.57.214` 和基础路径 `/k8s-yaml-assistant`，目标地址为 `https://120.46.57.214/k8s-yaml-assistant`；域名和 DNS（域名系统）不是当前前置条件，未来如采用域名必须形成单独审核变更。GitHub OAuth App（GitHub OAuth 应用）、应用候选 Publish（正式发布）、安全组 80/443 变更、cert-manager（证书管理器）安装和 Kubernetes（容器编排系统）资源写入仍须分别获得当次授权。
 
 **Files（文件）：**
 
-- Create（创建）：`deploy/k8s/access/oauth2-proxy.yaml`
 - Create（创建）：`deploy/k8s/access/private-routes.yaml`
 - Create（创建）：`deploy/k8s/access/portfolio-routes.yaml`
 - Create（创建）：`deploy/k8s/access/middlewares.yaml`
-- Create（创建）：`deploy/k8s/access/network-policy.yaml`
+- Modify（修改）：`deploy/k8s/access/oauth2-proxy.yaml`
+- Modify（修改）：`deploy/k8s/bootstrap/config-map.yaml`
+- Modify（修改）：`deploy/k8s/bootstrap/network-policy.yaml`
+- Modify（修改）：`deploy/k8s/app/deployment-template.yaml`
 - Create（创建）：`deploy/k8s/tls/issuer-staging.yaml`
 - Create（创建）：`deploy/k8s/tls/issuer-production.yaml`
+- Create（创建）：`deploy/k8s/tls/certificate-staging.yaml`
 - Create（创建）：`deploy/k8s/tls/certificate.yaml`
+- Create（创建）：`deploy/k8s/tls/tls-store.yaml`
+- Create（创建）：`deploy/k8s/tls/cert-manager-install.json`
+- Modify（修改）：`next.config.mjs`
+- Modify（修改）：`app/lib/api.ts`
+- Create（创建）：`app/lib/api.test.ts`
+- Modify（修改）：`app/page.tsx`
+- Modify（修改）：`app/ui/GeneratePanel.tsx`
+- Modify（修改）：`app/ui/ValidatePanel.tsx`
+- Create（创建）：`src/shared/application-path.mjs`
 - Modify（修改）：`deploy/k8s/README.md`
 - Modify（修改）：`scripts/deployment-contract.test.ts`
+- Modify（修改）：`scripts/workflow-contract.test.ts`
+- Create（创建）：`.github/workflows/access-mode.yml`
+- Create（创建）：`.github/workflows/access-mode-apply.yml`
+- Create（创建）：`scripts/access-mode-authorization.ts`
+- Create（创建）：`scripts/authorization-cli-io.ts`
+- Modify（修改）：`scripts/deployment-authorization.ts`
+- Create（创建）：`src/release/access-mode-authorization.ts`
+- Create（创建）：`src/release/access-mode-authorization.test.ts`
+- Create（创建）：`src/release/authorization-codec.ts`
+- Modify（修改）：`src/release/deployment-authorization.ts`
+- Modify（修改）：`src/server/request-limiter.ts`
+- Modify（修改）：`src/server/request-limiter.test.ts`
+- Modify（修改）：`deploy/adapter/k8s_yaml_assistant_deploy.py`
+- Modify（修改）：`deploy/adapter/test_k8s_yaml_assistant_deploy.py`
 - Modify（修改）：Task 12（任务 12）的适配器 design/plan（设计 / 计划），增加单独审核的访问模式动作
 
-- [ ] **Step 1（步骤 1）：先设计并审核 `set-access-mode` 扩展**
+- [x] **Step 1（步骤 1）：先设计并审核 `set-access-mode` 扩展**
 
 在适配器 design/plan（设计 / 计划）中增加且只增加：
 
@@ -1068,37 +1132,51 @@ set-access-mode private
 set-access-mode portfolio
 ```
 
-输入仍是固定枚举，不能接受任意 ConfigMap/Ingress/kubectl（普通配置 / 入口 / Kubernetes 命令行工具）内容。设计并先写反例：未满足 portfolio（作品集展示）门禁、非法模式、并发切换、开启顺序错误、关闭顺序错误、部分失败、审计写入失败和重复执行。该扩展通过独立 review（审核）后才实现/安装。
+mode（模式）仍是固定枚举，不能接受任意 ConfigMap/Ingress/kubectl（普通配置 / 入口 / Kubernetes 命令行工具）内容。实际生产运行器继续使用现有无参数 sudoers（提权规则）；固定 workflow（流水线）的候选入口只创建 `access-mode-<mode>-r<workflowRunId>` draft pre-release（草稿预发布版本），正常双向切换必须由管理员 Publish（正式发布）该 operational Release（运维发布版本）后，签名授权绑定当前镜像、受保护提交和固定模式清单摘要才进入适配器。应用发布链对 `access-mode-*` 标签安全跳过。固定来源 SSH（安全远程登录）break-glass（紧急处置）只能收敛到 private（私有）。设计并先写反例：未满足 portfolio（作品集展示）门禁、非法模式、错误签名/发布身份、并发切换、开启顺序错误、关闭顺序错误、部分失败、审计写入失败和重复执行。该扩展通过独立 review（审核）后才实现/安装。
 
-- [ ] **Step 2（步骤 2）：先写入口与认证资源反例**
+入口设计同时固定以下生产契约，不新增没有当前消费者的通用 host（主机名）配置：
+
+- Next.js（前端框架）在构建时固定 `basePath=/k8s-yaml-assistant`，前端四条请求显式复用同一构建值；探针、oauth2-proxy（认证代理）上游、回调和入口路由使用相同前缀；
+- 当前证书身份只包含 `ipAddresses: [120.46.57.214]`，ACME（自动证书管理环境）使用 `shortlived`（短期证书）profile（配置档）；不创建 DNS 记录或伪造域名；
+- IP 客户端可能不发送 SNI（服务器名称指示），因此 Traefik（入口控制器）必须把该 IP 证书设为唯一 `default` TLSStore（默认传输层安全证书仓库）证书；若集群已有其他 `default` TLSStore（默认传输层安全证书仓库）立即停止；
+- `/`、其他路径、健康端点和管理动作不因 IP 入口而公开；当前唯一应用前缀是 `/k8s-yaml-assistant`。
+
+2026-07-28 用户确认不注册域名并要求公网 IP + 语义路径；上述设计随后通过独立 review（审核），允许进入本地反例与实现。该审核不授权安装、发布、部署或任何生产写入。
+
+- [x] **Step 2（步骤 2）：先写入口与认证资源反例**
 
 覆盖：
 
 - oauth2-proxy/cert-manager（认证代理 / 证书管理器）镜像或安装资源未固定 digest/version（内容摘要 / 版本）失败；
-- OAuth callback/Ingress host/Certificate DNS name（OAuth 回调 / 入口主机名 / 证书域名）不一致失败；
+- 应用 `basePath`（基础路径）、前端请求、探针、oauth2-proxy upstream/proxy prefix/callback（认证代理上游 / 代理前缀 / 回调）或 IngressRoute path（入口路由路径）不一致失败；
+- Certificate（证书）缺少精确 IPv4、Issuer（签发器）不是 `shortlived`（短期证书）profile（配置档）、TLSStore（传输层安全证书仓库）未引用同一证书 Secret（密钥）或仓库出现第二个 `default` TLSStore（默认传输层安全证书仓库）失败；
 - private（私有）存在匿名业务旁路、portfolio（作品集展示）公开模型路由/健康端点/管理操作失败；
-- 客户端身份头未清理、ForwardAuth（前置认证）顺序错误、非 allowlist（允许名单）身份可达应用失败；
+- private（私有）路由绕过 oauth2-proxy reverse proxy（认证代理反向代理）、认证代理未清理应用认可的身份头、非 allowlist（允许名单）身份可达应用失败；
 - 请求体/速率/并发 middleware（中间件）缺失或顺序错误失败；
 - 80 除 ACME challenge（证书挑战）/固定跳转外代理应用、6443/NodePort（Kubernetes API / 节点端口）公开失败；
 - Git 仓库包含 OAuth/cookie/TLS/Turnstile secret（OAuth / 浏览器会话 / TLS / 人机验证密钥）失败。
+- 固定 oauth2-proxy `v7.15.2`（认证代理 7.15.2 版）的 GitHub scope（GitHub 授权范围）缺少 `read:org` 失败；本地 htpasswd（密码文件）会话不能代替真实 GitHub callback（GitHub 回调）。
+- 前端忽略非成功 HTTP（超文本传输协议）状态、认证代理 HTML（网页文本）拒绝、模型关闭错误或缺少 GitHub 登录入口失败。
 
-- [ ] **Step 3（步骤 3）：创建 DNS 与受限证书入口**
+2026-07-28 已按真实候选资源完成反例、实现和 review（审核）修正。固定 oauth2-proxy `v7.15.2`（认证代理 7.15.2 版）的源码确认其在 `--github-user` 生效前读取 `/user/orgs` 和 `/user/teams`，GitHub（代码托管平台）接口要求 OAuth App token（OAuth 应用令牌）至少具备 `user` 或 `read:org`；候选因此显式固定 `--scope=user:email read:org`，并新增缺少组织读取范围的失败反例。前端四条请求统一检查 HTTP（超文本传输协议）结果，安全解码稳定 JSON（数据交换格式）错误和认证代理 HTML（网页文本）拒绝；页面提供 GitHub 登录入口，模型关闭会显示明确状态并禁用后续模型动作。限流器删除当前授权主体空间不可达的 128 键容量与十分钟回收；两套发布授权只共享有双消费者的纯编解码和命令行文件工具，领域身份保持分离；TypeScript（类型系统）部署测试只断言 OAuth（开放授权）关键不变量，特权 Python（Python 语言）适配器继续独立冻结完整清单。`npm test` 为 376/376，`npm run deploy:check` 为 90/90，`npm run workflow:check` 为 11/11，`npm run adapter:check` 的 Pyright（Python 静态类型检查器）为零错误且适配器测试为 76/76；`npm run typecheck`、`npm run build`、固定 oauth2-proxy（认证代理）镜像集成和 `git diff --check` 均通过。集成结果证明未认证伪造身份返回 `403`，认证后的应用根路径与 `/api/check` 保留原语义路径且只转发已验证主体；该 htpasswd（密码文件）测试不访问 GitHub，不能作为真实 callback（回调）证据。消费者收敛检查还删除了重复请求解码入口、仅供测试导出的内部身份，以及 bootstrap ConfigMap（引导普通配置）中无消费者的访问模式副本。GitHub（代码托管平台）与服务器只读 preflight（前置核对）确认没有 `access-mode-*` Release（访问模式发布版本）、cert-manager（证书管理器）、入口资源、已安装模式清单或访问台账，生产仍是 `v0.1.1` 既定镜像摘要且单副本 `1/1` 可用。Step 3-6（步骤 3-6）保持未勾选；上述结果不代表证书签发、自动续期、真实 OAuth callback（开放授权回调）、公网入口或访问矩阵已完成生产验收。
 
-创建最终域名 A record（A 记录），不在未确认 IPv6 时创建 AAAA record（AAAA 记录）。安装实施日仍受支持的固定 cert-manager（证书管理器），先用 ACME staging issuer（ACME 预发布签发器）。
+- [ ] **Step 3（步骤 3）：创建公网 IP 短期证书与受限入口**
 
-80/TCP 只为 HTTP-01（HTTP 验证）向公网开放，其他路径固定拒绝；443/TCP 只允许当前固定来源或另行审核的测试来源。staging（预发布）证书、续期和路由通过后，单独切换 production issuer（生产签发器）。不开放 6443。
+不创建 DNS（域名系统）记录。安装实施日仍受支持且固定版本与安装清单 SHA-256（安全哈希算法）的 cert-manager（证书管理器），以 `shortlived`（短期证书）profile（配置档）和 `ipAddresses: [120.46.57.214]` 先请求 ACME staging（ACME 预发布）证书。验证签发、约 6 天有效期、自动续期窗口和 IP SAN（IP 主题备用名称）后，单独切换 production issuer（生产签发器）。
+
+80/TCP 只为 HTTP-01（HTTP 验证）向公网开放，其他路径固定拒绝；443/TCP 只允许当前固定来源或另行审核的测试来源。Traefik（入口控制器）用唯一 `default` TLSStore（默认传输层安全证书仓库）为无 SNI（服务器名称指示）的 IP 客户端提供同一证书，不开放 6443。
 
 - [ ] **Step 4（步骤 4）：部署 oauth2-proxy（认证代理）和 allowlist（允许名单）**
 
-OAuth client secret/cookie secret（OAuth 客户端密钥 / 浏览器会话密钥）从密码管理器创建为独立 Kubernetes Secret（Kubernetes 密钥），不提交 YAML（配置文件）。allowlist（允许名单）只包含明确审核身份；当前唯一维护者是管理员，普通允许用户没有模式修改能力。
+OAuth client secret/cookie secret（OAuth 客户端密钥 / 浏览器会话密钥）从密码管理器创建为独立 Kubernetes Secret（Kubernetes 密钥），不提交 YAML（配置文件）。GitHub OAuth callback（GitHub OAuth 回调）固定为 `https://120.46.57.214/k8s-yaml-assistant/oauth2/callback`，oauth2-proxy（认证代理）的 `proxy-prefix` 固定为 `/k8s-yaml-assistant/oauth2`，GitHub scope（GitHub 授权范围）固定为 `user:email read:org`；allowlist（允许名单）只包含明确审核身份。当前唯一维护者是管理员，普通允许用户没有模式修改能力。
 
-Traefik（入口控制器）删除客户端身份头后调用 ForwardAuth（前置认证），只把认证成功的受控字段传给应用。用 NetworkPolicy（网络策略）证明应用 Service（服务）不能从未经审核的 Pod（容器组）直接访问。
+先创建 OAuth client secret/cookie secret（OAuth 客户端密钥 / 浏览器会话密钥）并部署 Task 15（任务 15）已固定 digest（内容摘要）的 oauth2-proxy reverse proxy（认证代理反向代理）。在安装应用公开候选前，必须用真实 GitHub OAuth App（GitHub 开放授权应用）完成一次 callback（回调），确认组织/团队和邮箱读取没有 403、`kkxiaoa` 会话成功建立且非允许用户仍被拒绝；本地 htpasswd（密码文件）集成不满足该门禁。Traefik（入口控制器）的 private（私有）路由只指向认证代理；认证代理只把成功认证会话派生的 `X-Forwarded-User` 传给应用。用 NetworkPolicy（网络策略）证明 Traefik（入口控制器）不能在 private（私有）模式直达应用，其他 Pod（容器组）也不能访问应用或认证代理。
 
 - [ ] **Step 5（步骤 5）：部署两个固定访问模式并做有序切换**
 
-private → portfolio（私有 → 作品集展示）：先部署/验证应用策略，保持全部 ForwardAuth（前置认证），最后一步才开放页面和 `/api/check`；Ask/Generate/Fix（询问 / 生成 / 修复）仍要求 allowlist（允许名单）。
+private → portfolio（私有 → 作品集展示）：先部署/验证应用策略，保持全部业务路由经过 oauth2-proxy reverse proxy（认证代理反向代理），最后一步才同时开放删除身份头的 `/k8s-yaml-assistant` 页面、该前缀下静态资源和 `/k8s-yaml-assistant/api/check` 路由及对应 Traefik（入口控制器）到应用的最小 NetworkPolicy（网络策略）；Ask/Generate/Fix（询问 / 生成 / 修复）仍要求 allowlist（允许名单）。
 
-portfolio → private（作品集展示 → 私有）：第一步恢复全部业务路由 ForwardAuth（前置认证），验证匿名拒绝，再更新应用配置/rollout（滚动发布）。任一步失败必须收敛到 private（私有）；模式变更写操作者、时间、前后状态、原因和结果，不记录 Secret（密钥）。
+portfolio → private（作品集展示 → 私有）：第一步恢复全部业务路由到 oauth2-proxy reverse proxy（认证代理反向代理）并收紧应用 NetworkPolicy（网络策略），验证匿名拒绝，再更新应用配置/rollout（滚动发布）。任一步失败必须收敛到 private（私有）；模式变更写操作者、时间、前后状态、原因和结果，不记录 Secret（密钥）。
 
 - [ ] **Step 6（步骤 6）：在受限来源执行安全矩阵**
 
@@ -1106,23 +1184,22 @@ portfolio → private（作品集展示 → 私有）：第一步恢复全部业
 
 - 缺失/非法模式默认 private（私有）；
 - 未登录、非 allowlist（允许名单）、伪造身份头/cookie/URL/header（浏览器会话 / 网址 / 请求头）、直接 Service（服务）访问无法调用业务能力；
-- portfolio（作品集展示）仅页面、静态资源和 `/api/check` 匿名；匿名模型路由全部拒绝；
+- portfolio（作品集展示）仅固定语义路径下的页面、静态资源和 `/api/check` 匿名；根路径、健康端点和匿名模型路由全部拒绝；
 - 公共请求、ServiceAccount（服务账户）、非管理员 workflow（流水线）不能改模式；
 - 超大/分块请求 413，超速/超并发 429，供应商错误为封闭 502/503；
-- HTTP（超文本传输协议）仅证书挑战/跳转，TLS（传输层安全）证书链和 SNI（服务器名称指示）正确；
+- HTTP（超文本传输协议）仅证书挑战/跳转，TLS（传输层安全）证书链、IP SAN（IP 主题备用名称）和无 SNI（服务器名称指示）证书选择正确；
 - Turnstile（人机验证）、匿名额度和 Interview Pass（面试临时通行证）均不存在占位旁路。
 
 ```bash
-dig +short <app-host> A
 sudo k3s kubectl -n <namespace> get ingress,certificate,certificaterequest,order,challenge
 sudo k3s kubectl -n <namespace> describe certificate <certificate>
-curl --fail --head https://<app-host>/
-openssl s_client -connect <app-host>:443 -servername <app-host>
+curl --fail --head https://120.46.57.214/k8s-yaml-assistant
+openssl s_client -connect 120.46.57.214:443 -verify_ip 120.46.57.214
 ```
 
-**Rollback（回滚）：** 首先执行 `set-access-mode private` 并验证匿名拒绝；失败时关闭公网 443，必要时关闭 80。回滚入口/认证/证书到上一审核版本，轮换受影响 Secret（密钥），通过 SSH tunnel（SSH 隧道）恢复；不开放 6443、不降级明文。
+**Rollback（回滚）：** 首先执行 `set-access-mode private` 并验证匿名拒绝；失败时删除固定应用入口并关闭公网 443，必要时关闭 80。回滚入口/认证/证书到上一审核版本，轮换受影响 Secret（密钥），通过 SSH tunnel（SSH 隧道）恢复；不开放 6443、不降级明文。
 
-**Stop and report（停止并汇报）：** DNS（域名系统）、证书链/续期、身份头信任、allowlist（允许名单）、双模式矩阵、模式审计、请求保护、异常流量和回滚证据。最终切回 private（私有），443 仍只允许审核来源。等待 review（审核）。
+**Stop and report（停止并汇报）：** 公网 IP 证书链/自动续期、固定语义路径、身份头信任、allowlist（允许名单）、双模式矩阵、模式审计、请求保护、异常流量和回滚证据。最终切回 private（私有），443 仍只允许审核来源。等待 review（审核）。
 
 ## Task 17（任务 17）：匿名模型与 Interview Pass（面试临时通行证）分叉闸
 

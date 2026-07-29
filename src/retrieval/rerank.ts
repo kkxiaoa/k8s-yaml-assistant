@@ -5,11 +5,13 @@
 // 关键:rerank 只能重排"粗召回已经捞到的"候选。COARSE_N 给小了,正确 chunk 没进候选,精排也救不回。
 
 import {
-  getVoyageApiKey,
-  requireRuntimeCapability,
+  requireRetrievalRuntimeAccess,
+  type RetrievalRuntimeAccess,
   VOYAGE_RERANK_MODEL,
 } from '../server/runtime-config';
 import { UpstreamHttpError } from '../server/upstream-error';
+import { voyageRequestSignal } from '../server/model-request-policy';
+import type { ProviderRequestObserver } from '../server/provider-usage';
 
 /** 当前 rerank 模型名。记入 eval run / baseline 元数据。 */
 export const RERANK_MODEL = VOYAGE_RERANK_MODEL;
@@ -30,11 +32,14 @@ export async function rerank(
   query: string,
   documents: string[],
   topK: number,
+  runtimeAccess: RetrievalRuntimeAccess = requireRetrievalRuntimeAccess(),
+  observer?: ProviderRequestObserver,
 ): Promise<Array<{ index: number; score: number }>> {
-  const config = requireRuntimeCapability('voyage');
-  const key = getVoyageApiKey();
+  const config = runtimeAccess.config;
+  const key = runtimeAccess.apiKey();
   if (documents.length === 0) return [];
 
+  observer?.requestStarted('voyage');
   const res = await fetch(config.voyage.rerankUrl, {
     method: 'POST',
     headers: {
@@ -47,11 +52,15 @@ export async function rerank(
       model: config.voyage.rerankModel,
       top_k: topK,
     }),
+    signal: voyageRequestSignal(),
   });
   if (!res.ok) {
     throw new UpstreamHttpError(res.status);
   }
-  const json = (await res.json()) as { data: VoyageRerankResult[] };
+  const json = (await res.json()) as {
+    data: VoyageRerankResult[];
+    usage?: { total_tokens?: unknown };
+  };
   if (
     !Array.isArray(json.data) ||
     json.data.some(
@@ -64,5 +73,9 @@ export async function rerank(
   ) {
     throw new Error('invalid upstream rerank response');
   }
+  observer?.voyageRerankUsage(
+    config.voyage.rerankModel,
+    json.usage?.total_tokens,
+  );
   return json.data.map((r) => ({ index: r.index, score: r.relevance_score }));
 }

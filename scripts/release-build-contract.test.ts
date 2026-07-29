@@ -136,6 +136,24 @@ function validateReleaseBuild(bundle: ReleaseBuildBundle): void {
   assert.match(globalCss, /--font-sans:\s*ui-sans-serif,\s*system-ui,/);
 }
 
+function cloneReleaseBuildBundle(
+  source: ReleaseBuildBundle,
+): ReleaseBuildBundle {
+  return {
+    ...source,
+    packageJson: structuredClone(source.packageJson),
+    lockRoot: structuredClone(source.lockRoot),
+    resolvedJsYaml: structuredClone(source.resolvedJsYaml),
+    resolvedNext: structuredClone(source.resolvedNext),
+    resolvedPostcssVersions: [...source.resolvedPostcssVersions],
+    resolvedSharpVersions: [...source.resolvedSharpVersions],
+    nextConfig: { ...source.nextConfig },
+    tsConfig: structuredClone(source.tsConfig),
+    appSources: { ...source.appSources },
+    fontAssets: [...source.fontAssets],
+  };
+}
+
 test('release build uses the pinned runtime, standalone output, and system fonts', async () => {
   validateReleaseBuild(await readActualBundle());
 });
@@ -144,66 +162,66 @@ test('release build contract rejects version, output, and font regressions', asy
   const source = await readActualBundle();
 
   await t.test('package runtime differs from .nvmrc', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     candidate.packageJson.engines = { node: '24.17.0' };
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('Node types differ from the pinned runtime major', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     const devDependencies = candidate.packageJson.devDependencies as JsonObject;
     devDependencies['@types/node'] = '25.9.2';
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('Next.js returns to the vulnerable release', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     const dependencies = candidate.packageJson.dependencies as JsonObject;
     dependencies.next = '16.2.9';
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('js-yaml returns to the vulnerable release', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     const dependencies = candidate.packageJson.dependencies as JsonObject;
     dependencies['js-yaml'] = '4.2.0';
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('postcss security override is removed', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     const overrides = candidate.packageJson.overrides as JsonObject;
     delete overrides.postcss;
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('lockfile resolves a vulnerable postcss copy', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     candidate.resolvedPostcssVersions = ['8.4.31', expectedPostcssVersion];
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('sharp security override is removed', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     const overrides = candidate.packageJson.overrides as JsonObject;
     delete overrides.sharp;
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('lockfile resolves a vulnerable sharp copy', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     candidate.resolvedSharpVersions = ['0.34.5', expectedSharpVersion];
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('standalone output is disabled', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     delete candidate.nextConfig.output;
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('unused code checks are disabled', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     const compilerOptions = candidate.tsConfig.compilerOptions as JsonObject;
     compilerOptions.noUnusedLocals = false;
     compilerOptions.noUnusedParameters = false;
@@ -211,20 +229,20 @@ test('release build contract rejects version, output, and font regressions', asy
   });
 
   await t.test('Google font import is restored', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     candidate.appSources['app/layout.tsx'] =
       "import { IBM_Plex_Sans } from 'next/font/google';";
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('font binary is added to the application', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     candidate.fontAssets.push('app/fonts/custom.woff2');
     assert.throws(() => validateReleaseBuild(candidate));
   });
 
   await t.test('legacy IBM Plex variable is restored', () => {
-    const candidate = structuredClone(source);
+    const candidate = cloneReleaseBuildBundle(source);
     candidate.appSources['app/globals.css'] =
       '--font-mono: var(--font-plex-mono), ui-monospace, monospace;';
     assert.throws(() => validateReleaseBuild(candidate));

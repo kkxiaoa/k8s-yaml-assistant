@@ -1,0 +1,28 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: k8s-yaml-assistant-rate-limit
+  namespace: k8s-yaml-assistant-prod
+spec:
+  rateLimit:
+    average: 120
+    period: 1m
+    burst: 40
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: k8s-yaml-assistant-inflight
+  namespace: k8s-yaml-assistant-prod
+spec:
+  inFlightReq:
+    amount: 16
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: k8s-yaml-assistant-request-body
+  namespace: k8s-yaml-assistant-prod
+spec:
+  buffering:
+    maxRequestBodyBytes: 262144

@@ -1,0 +1,16 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-ip-staging
+  namespace: k8s-yaml-assistant-prod
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    profile: shortlived
+    privateKeySecretRef:
+      name: letsencrypt-ip-staging-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik
+            serviceType: ClusterIP
