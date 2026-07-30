@@ -24,10 +24,16 @@ const MODE_LABELS = {
   sleep: '休眠模式',
 } as const;
 
+type ShowcaseDurationHours = Extract<
+  AdminExperienceRequest,
+  { mode: 'interview' }
+>['durationHours'];
+
 export default function AdminPage() {
-  const { experience, errorCode, refresh } = useExperience();
+  const { experience, errorCode } = useExperience();
   const [state, setState] = useState<AdminExperienceResponse | null>(null);
-  const [durationHours, setDurationHours] = useState<1 | 4 | 8>(4);
+  const [durationHours, setDurationHours] =
+    useState<ShowcaseDurationHours | null>(4);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -36,6 +42,7 @@ export default function AdminPage() {
     void getAdminExperience()
       .then((next) => {
         setState(next);
+        setDurationHours(next.mode === 'interview' ? null : 4);
         setMessage(null);
       })
       .catch((error: unknown) => {
@@ -47,22 +54,37 @@ export default function AdminPage() {
       });
   }, [experience?.user?.admin]);
 
-  async function update(request: AdminExperienceRequest): Promise<void> {
+  async function update(request: AdminExperienceRequest): Promise<boolean> {
+    const durationUpdate =
+      state?.mode === 'interview' && request.mode === 'interview';
     setBusy(true);
     setMessage(null);
     try {
       const next = await setAdminExperience(request);
       setState(next);
-      await refresh();
-      setMessage('模式已更新。');
+      if (next.mode !== 'interview') setDurationHours(4);
+      setMessage(
+        durationUpdate ? '开放展示时长已更新。' : '模式已更新。',
+      );
+      return true;
     } catch (error) {
       setMessage(
         error instanceof ApiRequestError
           ? error.message
           : '模式更新失败，请稍后重试。',
       );
+      return false;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function changeDuration(value: string): Promise<void> {
+    const next = Number(value) as ShowcaseDurationHours;
+    setDurationHours(next);
+    if (state?.mode !== 'interview') return;
+    if (!(await update({ mode: 'interview', durationHours: next }))) {
+      setDurationHours(null);
     }
   }
 
@@ -205,32 +227,46 @@ export default function AdminPage() {
 
         <div className="mt-6 border-t border-line pt-5">
           <label className="text-sm text-muted" htmlFor="interview-duration">
-            开放展示时长
+            {state?.mode === 'interview'
+              ? '更新开放展示时长'
+              : '开放展示时长'}
           </label>
-          <div className="mt-2 flex gap-3">
+          <div className="mt-2 flex items-center gap-3">
             <select
               id="interview-duration"
-              value={durationHours}
+              value={durationHours ?? ''}
               disabled={busy}
-              onChange={(event) =>
-                setDurationHours(Number(event.target.value) as 1 | 4 | 8)
-              }
+              onChange={(event) => void changeDuration(event.target.value)}
               className="rounded border border-line bg-ink px-3 py-2 text-sm text-fg"
             >
+              {state?.mode === 'interview' && (
+                <option value="" disabled>
+                  选择新时长
+                </option>
+              )}
               <option value={1}>1 小时</option>
               <option value={4}>4 小时</option>
               <option value={8}>8 小时</option>
             </select>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void update({ mode: 'interview', durationHours })
-              }
-              className="rounded border border-ok/40 px-4 py-2 text-sm text-ok transition hover:bg-ok/10 disabled:opacity-50"
-            >
-              开启开放展示模式
-            </button>
+            {state?.mode === 'interview' ? (
+              <span className="text-xs text-muted">
+                选择后自动更新，并从当前时间重新计时
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void update({
+                    mode: 'interview',
+                    durationHours: durationHours ?? 4,
+                  })
+                }
+                className="rounded border border-ok/40 px-4 py-2 text-sm text-ok transition hover:bg-ok/10 disabled:opacity-50"
+              >
+                开启开放展示模式
+              </button>
+            )}
           </div>
         </div>
 

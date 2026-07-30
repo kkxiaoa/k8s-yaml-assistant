@@ -10,7 +10,8 @@ import {
   type EditorT,
   type MonacoT,
 } from './lib/yaml';
-import { LABEL, PRIMARY_BTN } from './ui/styles';
+import { PRIMARY_BTN } from './ui/styles';
+import { AppHeader } from './ui/AppHeader';
 import { GeneratePanel } from './ui/GeneratePanel';
 import { ValidatePanel } from './ui/ValidatePanel';
 import { AskPanel } from './ui/AskPanel';
@@ -29,15 +30,8 @@ import {
   type AskMode,
   type SourceHit,
 } from './lib/api';
-import {
-  APPLICATION_BASE_PATH,
-  applicationPath,
-} from '@/shared/application-path.mjs';
-import {
-  type ExperienceMode,
-  type ExperienceQuota,
-  type ModelRoute,
-} from '@/server/experience-control';
+import { APPLICATION_BASE_PATH } from '@/shared/application-path.mjs';
+import { type ModelRoute } from '@/server/experience-control';
 
 const DEFAULT_YAML = `apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -49,12 +43,6 @@ volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 `;
 
-const LOGOUT_PATH = applicationPath(
-  `/api/auth/signout?callbackUrl=${encodeURIComponent(
-    APPLICATION_BASE_PATH,
-  )}`,
-);
-const ADMIN_PATH = applicationPath('/admin');
 const DRAFT_KEY = 'k8s-yaml-assistant-login-draft';
 const DRAFT_MAX_AGE_MS = 10 * 60_000;
 
@@ -71,95 +59,6 @@ function modelLockMessage(reason: string | null): string {
   return reason === null
     ? '正在确认登录和体验状态…'
     : apiErrorMessage(reason);
-}
-
-function GitHubMark() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="size-3.5 shrink-0"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M12 .7a11.3 11.3 0 0 0-3.6 22c.6.1.8-.2.8-.5v-2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.9 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.3 11.3 0 0 0 12 .7Z" />
-    </svg>
-  );
-}
-
-function ModeStatusIcon({
-  mode,
-}: {
-  mode: Extract<ExperienceMode, 'interview' | 'sleep'>;
-}) {
-  const showcase = mode === 'interview';
-  const label = showcase ? '开放展示模式' : '休眠模式';
-  return (
-    <span
-      className={`group relative inline-flex size-7 items-center justify-center rounded border outline-none ${
-        showcase
-          ? 'border-ok/40 bg-ok/10 text-ok focus:border-ok'
-          : 'border-warn/40 bg-warn/10 text-warn focus:border-warn'
-      }`}
-      role="img"
-      aria-label={label}
-      tabIndex={0}
-    >
-      {showcase ? (
-        <svg
-          viewBox="0 0 24 24"
-          className="size-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          aria-hidden="true"
-        >
-          <path d="M2.8 12s3.3-5 9.2-5 9.2 5 9.2 5-3.3 5-9.2 5-9.2-5-9.2-5Z" />
-          <circle cx="12" cy="12" r="2.3" />
-        </svg>
-      ) : (
-        <svg
-          viewBox="0 0 24 24"
-          className="size-4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          aria-hidden="true"
-        >
-          <path d="M20 15.2A8.5 8.5 0 0 1 8.8 4a8.5 8.5 0 1 0 11.2 11.2Z" />
-        </svg>
-      )}
-      <span
-        role="tooltip"
-        className="pointer-events-none absolute right-0 top-full z-20 mt-2 whitespace-nowrap rounded border border-line bg-surface px-2 py-1 font-mono text-[11px] text-fg opacity-0 shadow-lg transition group-hover:opacity-100 group-focus:opacity-100"
-      >
-        {label}
-      </span>
-    </span>
-  );
-}
-
-function quotaPresentation(
-  quota: ExperienceQuota | null | undefined,
-): { label: string; title: string } | null {
-  if (quota === null || quota === undefined) return null;
-  if (quota.kind === 'unlimited') {
-    return { label: '个人额度不限', title: '管理员不受个人点数限制' };
-  }
-  const timestamp =
-    quota.kind === 'anonymous_trial' ? quota.expiresAt : quota.resetsAt;
-  const timeLabel = new Date(timestamp).toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-  });
-  return {
-    label:
-      quota.kind === 'anonymous_trial'
-        ? `匿名体验 ${quota.remaining}/${quota.limit} 点`
-        : `今日剩余 ${quota.remaining}/${quota.limit} 点`,
-    title:
-      quota.kind === 'anonymous_trial'
-        ? `匿名体验包有效至 ${timeLabel}；登录后获得独立每日额度`
-        : `额度于 ${timeLabel} 重置`,
-  };
 }
 
 export default function Home() {
@@ -179,12 +78,10 @@ export default function Home() {
   );
   const editorRef = useRef<EditorT | null>(null);
   const monacoRef = useRef<MonacoT | null>(null);
-  const { width, onResizeStart } = useResizable(560, 380, 960);
+  const { width, isResizing, onResizeStart } = useResizable(560, 380, 960);
   const { experience, errorCode: experienceError, refresh } = useExperience();
 
   const { kind, apiVersion, count } = detectResource(yaml);
-  const quotaStatus = quotaPresentation(experience?.quota);
-
   function modelReason(route: ModelRoute): string | null {
     return experienceError ?? experience?.model[route].reason ?? null;
   }
@@ -450,75 +347,10 @@ export default function Home() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-4 border-b border-line bg-surface/50 px-5 py-3 backdrop-blur">
-        <span className="text-brand">◆</span>
-        <span className="font-mono text-sm font-semibold tracking-tight text-fg">
-          K8s YAML Assistant
-        </span>
-        <span className={LABEL}>YAML 编写 · Schema 校验 · 答案可追溯</span>
-        <div className="ml-auto flex items-center gap-2">
-          {experience?.mode === 'interview' && (
-            <ModeStatusIcon mode="interview" />
-          )}
-          {experience?.mode === 'sleep' && (
-            <ModeStatusIcon mode="sleep" />
-          )}
-          {quotaStatus && (
-            <span
-              className="rounded border border-line px-2.5 py-1 font-mono text-[11px] text-muted"
-              title={quotaStatus.title}
-            >
-              {quotaStatus.label}
-            </span>
-          )}
-          {experience?.user ? (
-            <div className="flex h-8 min-w-0 items-stretch overflow-hidden rounded-md border border-line bg-surface/70 font-mono text-[11px] shadow-sm">
-              <span
-                className="inline-flex min-w-0 items-center gap-1.5 border-r border-line px-2.5 text-muted"
-                title={`已通过 GitHub 登录：@${experience.user.login}`}
-              >
-                <GitHubMark />
-                <span className="max-w-32 truncate">
-                  @{experience.user.login}
-                </span>
-              </span>
-              {experience.user.admin && (
-                <a
-                  href={ADMIN_PATH}
-                  className="inline-flex items-center border-r border-line px-3 text-fg transition hover:bg-brand/10 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
-                >
-                  管理
-                </a>
-              )}
-              <a
-                href={LOGOUT_PATH}
-                className="inline-flex items-center px-3 text-muted transition hover:bg-white/5 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
-              >
-                退出
-              </a>
-            </div>
-          ) : (
-            <span className="group relative">
-              <button
-                type="button"
-                onClick={() => void beginLogin()}
-                aria-describedby="github-login-hint"
-                className="inline-flex items-center gap-1.5 rounded border border-brand/40 px-2.5 py-1 font-mono text-[11px] text-brand transition hover:border-brand/60 hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-              >
-                <GitHubMark />
-                使用 GitHub 登录
-              </button>
-              <span
-                id="github-login-hint"
-                role="tooltip"
-                className="pointer-events-none absolute right-0 top-full z-30 mt-2 whitespace-nowrap rounded border border-line bg-surface px-2 py-1 font-mono text-[11px] text-fg opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-within:opacity-100"
-              >
-                登录后可解锁更高的每日体验额度
-              </span>
-            </span>
-          )}
-        </div>
-      </header>
+      <AppHeader
+        experience={experience}
+        onLogin={() => void beginLogin()}
+      />
 
       <main className="flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
@@ -582,26 +414,15 @@ export default function Home() {
           </div>
         </section>
 
-        <ResizeHandle onMouseDown={onResizeStart} />
+        <ResizeHandle
+          isResizing={isResizing}
+          onMouseDown={onResizeStart}
+        />
 
         <aside
           style={{ width }}
           className="flex shrink-0 flex-col gap-4 overflow-auto p-4"
         >
-          <div
-            role="note"
-            className="rounded-lg border border-warn/30 bg-warn/10 px-4 py-3"
-          >
-            <p className="font-mono text-[11px] font-semibold text-warn">
-              隐私与费用边界
-            </p>
-            <p className="mt-1.5 text-xs leading-relaxed text-fg/80">
-              「检查」只在本服务内使用 schema（结构模式），不调用外部模型。
-              解释、生成和修复可能把完成任务所需的问题、YAML（配置文件）和编辑上下文发送给
-              DeepSeek（回答模型）与 Voyage（向量与重排模型），并产生费用。请勿提交
-              Secret（密钥）、私钥或生产集群敏感配置。
-            </p>
-          </div>
           {requestError && (
             <div
               role="alert"
