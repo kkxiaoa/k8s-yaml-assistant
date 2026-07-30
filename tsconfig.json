@@ -33,6 +33,7 @@
     "next-env.d.ts",
     "src",
     "app",
+    "instrumentation.ts",
     "scripts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"

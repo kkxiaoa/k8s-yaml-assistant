@@ -8,9 +8,9 @@
 - `AI应用开发训练方案-K8s-YAML-Copilot.md`：当前项目定位与能力地图，不维护动态实现状态。
 - `AI应用开发能力训练实现方案.md`：唯一实施 roadmap（路线图），维护当前事实、质量门禁和执行顺序。
 - `AGENTS.md`：agent 执行规则和工程铁律。
-- `superpowers/specs/2026-07-19-k3s-production-deployment-design.md`：已审核的华为云单机 K3s（轻量 Kubernetes）生产部署设计依据。
-- `superpowers/plans/2026-07-19-k3s-production-deployment.md`：当前生产部署总实施计划；Phase 0-2（阶段 0-2）以及 Task 12-14（任务 12-14）的私有发布、部署、人工回滚和节点重启证据已完成审核，Step 5/6（步骤 5/6）的长期观测生命周期与自动恢复生产演练保留明确延期风险。
-- `superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md` / `superpowers/plans/2026-07-20-k3s-deployment-adapter.md`：Task 12（任务 12）的特权 deployment adapter（部署适配器）设计和独立实施计划；Task 1-6（任务 1-6）已完成实现和审核，Task 7（任务 7）已完成真实发布、部署、人工回滚、恢复、节点重启及事实状态收敛。Step 5/6（步骤 5/6）保持未完成并记录明确延期风险。
+- `superpowers/specs/2026-07-29-public-experience-control-design.md` / `superpowers/plans/2026-07-29-public-experience-control.md`：当前 Task 16-17（任务 16-17）的公共体验、应用内身份、额度/费用和休眠设计及实施入口。
+- `superpowers/specs/2026-07-19-k3s-production-deployment-design.md` / `superpowers/plans/2026-07-19-k3s-production-deployment.md`：Phase 0-3（阶段 0-3）生产部署依据与已完成证据；尚未部署的 Phase 4-5（阶段 4-5）旧双访问模式候选已被 2026-07-29 设计替代。
+- `superpowers/specs/2026-07-20-k3s-deployment-adapter-design.md` / `superpowers/plans/2026-07-20-k3s-deployment-adapter.md`：Task 12（任务 12）的特权 deployment adapter（部署适配器）设计、实现和真实发布/回滚证据；未部署的 `set-access-mode`（设置访问模式）扩展仅保留历史背景，不是当前实现入口。
 - `superpowers/specs/2026-07-17-case-governance-design.md` / `superpowers/plans/2026-07-17-case-governance.md`：Case Governance（评估用例治理）的已实施设计与执行记录。
 - `superpowers/plans/2026-07-16-phase-b-engineering-cleanup.md`：已完成审核的 Phase B（阶段 B）工程清理与 Deferred Risk Closure（延期风险收敛）记录。
 - `doc-inventory.md`：docs lifecycle inventory（文档生命周期清单）。
@@ -31,7 +31,7 @@
 1. Phase B（阶段 B）工程清理与 Deferred Risk Closure（延期风险收敛）第 1-6 项已完成审核。
 2. Case Governance（评估用例治理）已完成实现和本地门禁。
 3. Production Deployment（生产部署）的私有阶段已完成审核：生产当前固定在 `v0.1.1` 镜像摘要，单副本 Deployment（工作负载）为 `1/1` 可用；真实人工回滚、恢复、新鲜分离备份和节点重启均已验证。公网 80/443/6443 仍不可达，没有 Ingress（入口）；Step 5/6（步骤 5/6）的长期观测生命周期和自动恢复生产演练保留明确延期风险。
-4. Production Deployment Phase 4 Task 15（生产部署阶段 4 任务 15）已完成 Step 1（步骤 1）的本地严格请求解码与有界读取；Step 2（步骤 2）因仓库当前没有可证明的 Traefik（入口控制器）→ oauth2-proxy（认证代理）→ 应用身份头信任链而停止。先审核认证拓扑及 Task 15/16（任务 15/16）的执行顺序，不配置 DNS（域名系统）、公开端口或生产入口。Task 16/17（任务 16/17）的受限入口与公开路由选择通过审核后，才进入 Task 18（任务 18）正式质量审核；索引重建、模型调用、正式评估和 baseline（基线）晋升均尚未开始，仍需明确授权。
+4. 尚未部署的认证代理、`private/portfolio`（私有 / 作品集展示）双模式和 `set-access-mode`（设置访问模式）候选已由 2026-07-29 公共体验控制设计替代。新的 Task 16-17（任务 16-17）本地候选已完成统一公开界面、应用内 GitHub OAuth 2.0（开放授权协议）、三态控制、个人额度、全局费用、管理页与直接入口，并通过完整本地门禁，当前停止等待 review（审核）。控制库 OBS（对象存储服务）备份因数据价值低且运维复杂度高，在部署前从候选清退。生产入口和真实 GitHub callback（开放授权回调）尚未创建；Task 18（任务 18）的索引重建、模型调用、正式评估和 baseline（基线）晋升均尚未开始，仍需明确授权。
 5. 当前仍没有新口径 full eval（完整评估）或 baseline（基线），不得根据旧指标调优模型或检索。
 
 完整顺序只维护在 `AI应用开发能力训练实现方案.md` 的“唯一执行顺序”中。每个 Task（任务）完成后停止等待审核；未经明确要求不暂存、不提交、不晋升 baseline（基线）。

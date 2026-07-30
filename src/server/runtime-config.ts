@@ -5,10 +5,13 @@ export type RuntimeEnvironment = Readonly<
 export const DEEPSEEK_ANSWER_MODEL = 'deepseek-v4-flash' as const;
 export const VOYAGE_RERANK_MODEL = 'rerank-2.5' as const;
 
-const RUNTIME_CONFIG_FIELDS = [
+const DEEPSEEK_CONFIG_FIELDS = [
   'DEEPSEEK_BASE_URL',
   'DEEPSEEK_ANSWER_MODEL',
   'DEEPSEEK_API_KEY',
+] as const;
+
+const RETRIEVAL_CONFIG_FIELDS = [
   'VOYAGE_EMBEDDING_URL',
   'VOYAGE_RERANK_URL',
   'VOYAGE_EMBEDDING_MODEL',
@@ -18,7 +21,9 @@ const RUNTIME_CONFIG_FIELDS = [
   'ENABLE_QUERY_EXPANSION',
 ] as const;
 
-type RuntimeConfigField = (typeof RUNTIME_CONFIG_FIELDS)[number];
+type DeepSeekConfigField = (typeof DEEPSEEK_CONFIG_FIELDS)[number];
+type RetrievalConfigField = (typeof RETRIEVAL_CONFIG_FIELDS)[number];
+type RuntimeConfigField = DeepSeekConfigField | RetrievalConfigField;
 
 export type RuntimeConfigErrorCode =
   | 'missing_value'
@@ -30,10 +35,13 @@ export interface RuntimeConfigError {
   field: string;
 }
 
-export interface RuntimeConfig {
+export interface DeepSeekRuntimeConfig {
   deepseek: {
     baseUrl: string;
   };
+}
+
+export interface RetrievalRuntimeConfig {
   voyage: {
     embeddingUrl: string;
     rerankUrl: string;
@@ -44,33 +52,58 @@ export interface RuntimeConfig {
   queryExpansionEnabled: boolean;
 }
 
-export type RuntimeConfigResult =
-  | { ok: true; config: RuntimeConfig }
+export interface RuntimeConfig
+  extends DeepSeekRuntimeConfig,
+    RetrievalRuntimeConfig {}
+
+type RuntimeConfigResultFor<T> =
+  | { ok: true; config: T }
   | { ok: false; error: RuntimeConfigError };
 
-export type RuntimeCapability = 'deepseek' | 'voyage';
+export type RuntimeConfigResult = RuntimeConfigResultFor<RuntimeConfig>;
 export type RuntimeAvailabilityErrorCode =
   | 'runtime_config_invalid'
   | 'deepseek_unavailable'
   | 'voyage_unavailable';
 
-export type RuntimeCapabilityStatus =
-  | { ok: true; config: RuntimeConfig }
+export type RuntimeAvailabilityStatus =
+  | { ok: true }
   | { ok: false; code: RuntimeAvailabilityErrorCode };
 
-const KNOWN_FIELDS = new Set<string>(RUNTIME_CONFIG_FIELDS);
+export interface DeepSeekRuntimeAccess {
+  config: DeepSeekRuntimeConfig;
+  apiKey(): string;
+}
+
+export interface RetrievalRuntimeAccess {
+  config: RetrievalRuntimeConfig;
+  apiKey(): string;
+}
+
+export interface AskRuntimeAccess {
+  deepseek: DeepSeekRuntimeAccess;
+  retrieval: RetrievalRuntimeAccess;
+}
+
+const KNOWN_DEEPSEEK_FIELDS = new Set<string>(DEEPSEEK_CONFIG_FIELDS);
+const KNOWN_RETRIEVAL_FIELDS = new Set<string>(RETRIEVAL_CONFIG_FIELDS);
 const MODEL_NAME = /^[a-z0-9][a-z0-9.-]*$/;
+
+export function resolveModelAccessEnabled(
+  environment: RuntimeEnvironment = process.env,
+): boolean {
+  return environment.MODEL_ACCESS_ENABLED === 'true';
+}
 
 function error(
   code: RuntimeConfigErrorCode,
   field: string,
-): RuntimeConfigResult {
+): RuntimeConfigResultFor<never> {
   return { ok: false, error: { code, field } };
 }
 
-function isRelevantField(field: string): boolean {
+function isRetrievalField(field: string): boolean {
   return (
-    field.startsWith('DEEPSEEK_') ||
     field.startsWith('VOYAGE_') ||
     field === 'INDEX_DIR' ||
     field === 'ENABLE_QUERY_EXPANSION'
@@ -80,7 +113,7 @@ function isRelevantField(field: string): boolean {
 function required(
   environment: RuntimeEnvironment,
   field: RuntimeConfigField,
-): string | RuntimeConfigResult {
+): string | RuntimeConfigResultFor<never> {
   const value = environment[field];
   if (value === undefined || value.length === 0) {
     return error('missing_value', field);
@@ -94,7 +127,7 @@ function required(
 function supplierUrl(
   environment: RuntimeEnvironment,
   field: RuntimeConfigField,
-): string | RuntimeConfigResult {
+): string | RuntimeConfigResultFor<never> {
   const value = required(environment, field);
   if (typeof value !== 'string') return value;
   try {
@@ -118,7 +151,7 @@ function modelName(
   environment: RuntimeEnvironment,
   field: RuntimeConfigField,
   prefix: 'voyage-' | 'rerank-',
-): string | RuntimeConfigResult {
+): string | RuntimeConfigResultFor<never> {
   const value = required(environment, field);
   if (
     typeof value !== 'string' ||
@@ -130,15 +163,32 @@ function modelName(
   return value;
 }
 
-function secretPresent(value: string | undefined): boolean {
+function secretPresent(value: string | undefined): value is string {
   return value !== undefined && value.length > 0 && value.trim() === value;
 }
 
 export function decodeRuntimeConfig(
   environment: RuntimeEnvironment,
 ): RuntimeConfigResult {
+  const deepseek = decodeDeepSeekRuntimeConfig(environment);
+  if (!deepseek.ok) return deepseek;
+  const retrieval = decodeRetrievalRuntimeConfig(environment);
+  if (!retrieval.ok) return retrieval;
+  return {
+    ok: true,
+    config: {
+      ...deepseek.config,
+      ...retrieval.config,
+    },
+  };
+}
+
+function decodeDeepSeekRuntimeConfig(
+  environment: RuntimeEnvironment,
+): RuntimeConfigResultFor<DeepSeekRuntimeConfig> {
   const unknownField = Object.keys(environment).find(
-    (field) => isRelevantField(field) && !KNOWN_FIELDS.has(field),
+    (field) =>
+      field.startsWith('DEEPSEEK_') && !KNOWN_DEEPSEEK_FIELDS.has(field),
   );
   if (unknownField) return error('unknown_field', unknownField);
 
@@ -150,6 +200,25 @@ export function decodeRuntimeConfig(
   if (deepseekAnswerModel !== DEEPSEEK_ANSWER_MODEL) {
     return error('invalid_value', 'DEEPSEEK_ANSWER_MODEL');
   }
+
+  return {
+    ok: true,
+    config: {
+      deepseek: {
+        baseUrl: deepseekBaseUrl,
+      },
+    },
+  };
+}
+
+function decodeRetrievalRuntimeConfig(
+  environment: RuntimeEnvironment,
+): RuntimeConfigResultFor<RetrievalRuntimeConfig> {
+  const unknownField = Object.keys(environment).find(
+    (field) =>
+      isRetrievalField(field) && !KNOWN_RETRIEVAL_FIELDS.has(field),
+  );
+  if (unknownField) return error('unknown_field', unknownField);
 
   const embeddingUrl = supplierUrl(environment, 'VOYAGE_EMBEDDING_URL');
   if (typeof embeddingUrl !== 'string') return embeddingUrl;
@@ -186,9 +255,6 @@ export function decodeRuntimeConfig(
   return {
     ok: true,
     config: {
-      deepseek: {
-        baseUrl: deepseekBaseUrl,
-      },
       voyage: {
         embeddingUrl,
         rerankUrl,
@@ -201,20 +267,32 @@ export function decodeRuntimeConfig(
   };
 }
 
-export function getRuntimeCapabilityStatus(
-  capability: RuntimeCapability,
+export function getDeepSeekRuntimeStatus(
   environment: RuntimeEnvironment = process.env,
-): RuntimeCapabilityStatus {
-  const decoded = decodeRuntimeConfig(environment);
-  if (!decoded.ok) return { ok: false, code: 'runtime_config_invalid' };
-  const secret =
-    capability === 'deepseek'
-      ? environment.DEEPSEEK_API_KEY
-      : environment.VOYAGE_API_KEY;
-  if (!secretPresent(secret)) {
-    return { ok: false, code: `${capability}_unavailable` };
+): RuntimeAvailabilityStatus {
+  try {
+    requireDeepSeekRuntimeAccess(environment);
+    return { ok: true };
+  } catch (fault) {
+    if (fault instanceof RuntimeConfigFault) {
+      return { ok: false, code: fault.code };
+    }
+    throw fault;
   }
-  return { ok: true, config: decoded.config };
+}
+
+export function getRetrievalRuntimeStatus(
+  environment: RuntimeEnvironment = process.env,
+): RuntimeAvailabilityStatus {
+  try {
+    requireRetrievalRuntimeAccess(environment);
+    return { ok: true };
+  } catch (fault) {
+    if (fault instanceof RuntimeConfigFault) {
+      return { ok: false, code: fault.code };
+    }
+    throw fault;
+  }
 }
 
 export class RuntimeConfigFault extends Error {
@@ -235,25 +313,43 @@ export function getRuntimeConfig(
   return decoded.config;
 }
 
-export function requireRuntimeCapability(
-  capability: RuntimeCapability,
+export function getRetrievalRuntimeConfig(
   environment: RuntimeEnvironment = process.env,
-): RuntimeConfig {
-  const status = getRuntimeCapabilityStatus(capability, environment);
-  if (!status.ok) throw new RuntimeConfigFault(status.code);
-  return status.config;
+): RetrievalRuntimeConfig {
+  const decoded = decodeRetrievalRuntimeConfig(environment);
+  if (!decoded.ok) throw new RuntimeConfigFault('runtime_config_invalid');
+  return decoded.config;
 }
 
-export function getDeepSeekApiKey(
+export function requireDeepSeekRuntimeAccess(
   environment: RuntimeEnvironment = process.env,
-): string {
-  requireRuntimeCapability('deepseek', environment);
-  return environment.DEEPSEEK_API_KEY!;
+): DeepSeekRuntimeAccess {
+  const decoded = decodeDeepSeekRuntimeConfig(environment);
+  if (!decoded.ok) throw new RuntimeConfigFault('runtime_config_invalid');
+  const apiKey = environment.DEEPSEEK_API_KEY;
+  if (!secretPresent(apiKey)) {
+    throw new RuntimeConfigFault('deepseek_unavailable');
+  }
+  return { config: decoded.config, apiKey: () => apiKey };
 }
 
-export function getVoyageApiKey(
+export function requireRetrievalRuntimeAccess(
   environment: RuntimeEnvironment = process.env,
-): string {
-  requireRuntimeCapability('voyage', environment);
-  return environment.VOYAGE_API_KEY!;
+): RetrievalRuntimeAccess {
+  const decoded = decodeRetrievalRuntimeConfig(environment);
+  if (!decoded.ok) throw new RuntimeConfigFault('runtime_config_invalid');
+  const apiKey = environment.VOYAGE_API_KEY;
+  if (!secretPresent(apiKey)) {
+    throw new RuntimeConfigFault('voyage_unavailable');
+  }
+  return { config: decoded.config, apiKey: () => apiKey };
+}
+
+export function requireAskRuntimeAccess(
+  environment: RuntimeEnvironment = process.env,
+): AskRuntimeAccess {
+  return {
+    deepseek: requireDeepSeekRuntimeAccess(environment),
+    retrieval: requireRetrievalRuntimeAccess(environment),
+  };
 }

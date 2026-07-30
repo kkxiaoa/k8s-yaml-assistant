@@ -21,6 +21,8 @@ data/eval/runs/
 data/eval/traces/
 # serving 观测数据不属于 eval artifact，不入 Git。
 data/observability/
+# 本地体验控制库含额度与备份状态，不入 Git 或镜像。
+data/control/
 
 # Python 本地缓存
 __pycache__/

@@ -62,7 +62,7 @@ clean source（干净源码）
 | Phase 1（阶段 1） | Task 3-4（任务 3-4） | 固定版本 K3s 安装、加固与备份边界通过审核 |
 | Phase 2（阶段 2） | Task 5-11（任务 5-11） | 可复现容器、有效索引、GHCR 候选镜像与草稿发布版本通过审核，不部署 |
 | Phase 3（阶段 3） | Task 12-14（任务 12-14） | 固定部署适配器、生产 runner（运行器）和私有发布/回滚通过审核 |
-| Phase 4（阶段 4） | Task 15-17（任务 15-17） | 域名、TLS（传输层安全）、认证、保护和双访问模式在受限来源通过审核 |
+| Phase 4（阶段 4） | Task 15-17（任务 15-17） | 公网入口身份、TLS（传输层安全）、认证、保护和双访问模式在受限来源通过审核 |
 | 公开前质量闸 | Task 18（任务 18） | 正式评估人工审核通过，或形成显式风险接受记录 |
 | Phase 5（阶段 5） | Task 19-20（任务 19-20） | 公开发布、恢复演练和观察期通过审核 |
 
@@ -851,14 +851,14 @@ design（设计）先审核，确认后再完成实施 plan（计划）的文件
 - Deployment（工作负载）不是单副本、不是 digest（内容摘要）、缺 non-root/read-only/seccomp/drop capabilities（非 root / 只读 / 系统调用限制 / 删除能力）、资源边界、探针或 `revisionHistoryLimit=3` 时失败；
 - 索引目录/PVC（持久卷声明）可写、observation PVC（观测持久卷声明）被用于索引/计量/Secret（密钥）或 `/tmp` 没有 size limit（大小上限）时失败；
 - `maxSurge` 非 0、`maxUnavailable` 非 1，或出现第二个 observation writer（观测写入端）时失败；
-- ConfigMap（普通配置）包含 Secret（密钥）、非法 `ACCESS_MODE`、未显式索引/模型/observation（观测）配置时失败；
+- bootstrap ConfigMap（引导普通配置）包含 Secret（密钥）、越权保存访问模式字段、未显式索引/模型/observation（观测）配置时失败；
 - 仓库出现 base64 Secret（Base64 编码密钥）、完整 kubeconfig（客户端配置）或真实 pull token（拉取令牌）时失败。
 
 - [x] **Step 2（步骤 2）：实现固定非敏感资源和模板**
 
 bootstrap（引导配置）只包含 Namespace（命名空间）、安全标签、ServiceAccount（服务账户）、ConfigMap（普通配置）、ClusterIP Service（集群内服务）、NetworkPolicy（网络策略）和 observation PVC（观测持久卷声明）等固定非版本资源；不提前创建已运行应用版本。
 
-root-owned deployment template（root 所有工作负载模板）固定 replicas/resources/probes/securityContext/volumes（副本 / 资源 / 探针 / 安全上下文 / 卷）和目标名称，只留由适配器注入且严格校验的 image digest（镜像内容摘要）。`ACCESS_MODE=private` 显式配置，缺失/非法仍由应用解释为 private（私有）。
+root-owned deployment template（root 所有工作负载模板）固定 replicas/resources/probes/securityContext/volumes（副本 / 资源 / 探针 / 安全上下文 / 卷）和目标名称，只留由适配器注入且严格校验的 image digest（镜像内容摘要）。Task 16 Step 2（任务 16 步骤 2）把 `ACCESS_MODE` 和 `MODEL_ACCESS_ENABLED` 收敛到独立固定访问模式 ConfigMap（普通配置），避免 bootstrap（引导配置）保存第二份事实；缺失或非法 `ACCESS_MODE` 仍由应用解释为 private（私有）。
 
 第一轮资源候选沿用已审核设计：CPU requests/limits（处理器请求 / 上限）为 500m/2，memory requests/limits（内存请求 / 上限）为 768 MiB/2 GiB，ephemeral-storage requests/limits（临时存储请求 / 上限）为 256 MiB/1 GiB；`fsGroup=10001`、`fsGroupChangePolicy=OnRootMismatch`。这些只是私有压测候选值，不能在 Task 20（任务 20）实测前写成容量承诺。
 
@@ -950,7 +950,9 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 
 **Phase 3 Stop（阶段 3 停止点）：** 草稿不部署、人工发布、实际 digest（内容摘要）、runner/workflow（运行器 / 流水线）权限、私有功能与安全边界、有限模型调用、RSS（常驻内存）、observation（观测）部分生命周期、单写入端、人工回滚和节点重启证据已于 2026-07-28 通过独立 review（审核）。Step 5/6（步骤 5/6）的未完成项保留为明确延期风险；本结论只满足 Phase 4 Task 15（阶段 4 任务 15）的本地实现前置条件，不授权 Task 16（任务 16）的 DNS（域名系统）、公开端口或生产部署。
 
-## Phase 4（阶段 4）：域名、TLS、认证与保护
+## Phase 4（阶段 4）：公网入口身份、TLS、认证与保护
+
+> 状态：Task 15-17（任务 15-17）的 oauth2-proxy（认证代理）、身份头、private/portfolio（私有 / 作品集展示）和访问模式发布候选从未部署，已由 `2026-07-29-public-experience-control.md` 替代。本节保留历史实现与审核记录，不再作为后续执行入口；Task 18（任务 18）公开前质量闸继续有效。
 
 ## Task 15（任务 15）：实现应用侧访问策略、请求解码与费用前置保护
 
@@ -966,13 +968,29 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 - Create（创建）：`src/server/access-policy.test.ts`
 - Create（创建）：`src/server/request-limiter.ts`
 - Create（创建）：`src/server/request-limiter.test.ts`
+- Create（创建）：`src/server/model-request-policy.ts`
+- Create（创建）：`deploy/k8s/access/oauth2-proxy.yaml`
+- Create（创建）：`scripts/oauth2-proxy-integration.ts`
 - Modify（修改）：`app/api/ask/route.ts`
 - Modify（修改）：`app/api/check/route.ts`
 - Modify（修改）：`app/api/generate/route.ts`
 - Modify（修改）：`app/api/fix/route.ts`
+- Modify（修改）：`app/page.tsx`
+- Modify（修改）：`src/server/agent.ts`
+- Modify（修改）：`src/server/pipeline.ts`
+- Modify（修改）：`src/server/pipeline-retrieval.test.ts`
+- Modify（修改）：`src/server/upstream-error.ts`
+- Modify（修改）：`src/server/upstream-error.test.ts`
 - Modify（修改）：`src/server/runtime-config.ts`
 - Modify（修改）：`src/server/runtime-config.test.ts`
-- Modify（修改）：页面/面板中的最小隐私与费用提示，具体文件按当前 UI（用户界面）复核
+- Modify（修改）：`src/retrieval/embeddings.ts`
+- Modify（修改）：`src/retrieval/rerank.ts`
+- Modify（修改）：`src/retrieval/retrieve.ts`
+- Modify（修改）：`deploy/k8s/bootstrap/config-map.yaml`
+- Modify（修改）：`deploy/k8s/bootstrap/network-policy.yaml`
+- Modify（修改）：`deploy/k8s/README.md`
+- Modify（修改）：`scripts/deployment-contract.test.ts`
+- Modify（修改）：`package.json`
 
 - [x] **Step 1（步骤 1）：先写 API contract（应用程序接口契约）与字节上限反例**
 
@@ -986,15 +1004,21 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 
 2026-07-28 已新增统一的有界流读取和四条业务路由 strict runtime decoder（严格运行时解码器）：总上限固定为 256 KiB，各路由使用不超过总上限的独立预算；合法超限 `Content-Length` 在读取前拒绝，缺失、非法或伪小值仍按实际字节拒绝。四条路由不再直接调用 `Request.json()`，未知字段、错误类型、空白必填值和超预算输入统一返回不回显请求内容的稳定 400/413 响应。反例、完整本地测试和 TypeScript（类型系统）检查均通过，没有模型调用。
 
-- [ ] **Step 2（步骤 2）：先证明认证 identity header（身份头）信任链**
+- [x] **Step 2（步骤 2）：先证明认证 identity header（身份头）信任链**
 
-在实现应用授权前，明确 Traefik → oauth2-proxy ForwardAuth → application（入口控制器 → 认证代理前置认证 → 应用）的头清理和注入顺序：所有客户端可提交的身份头必须先删除，只有成功认证结果可以重新注入；NetworkPolicy（网络策略）只允许审核后的入口/认证组件访问应用 Service（服务）。
+在实现应用授权前，明确并验证 Traefik → oauth2-proxy reverse proxy → application（入口控制器 → 认证代理反向代理 → 应用）的 private（私有）链路。应用当前只接受 `X-Forwarded-User` 作为主体输入；认证代理必须先删除它负责注入的客户端同名头及大小写/下划线变体，只有成功认证会话可以重新注入。private（私有）NetworkPolicy（网络策略）只允许 oauth2-proxy（认证代理）访问应用，只允许生产实际 Traefik（入口控制器）访问认证代理。
 
 如果不能通过实际版本配置、集成反例和网络策略证明应用收到的主体不可由公网客户端伪造，立即停止，重新选择 oauth2-proxy reverse proxy（认证代理反向代理）或带签名的内部身份契约；不得仅凭 `X-Auth-Request-User` 字符串存在就宣称认证。
 
 2026-07-28 只读前置核对确认仓库中没有 Ingress（入口）、ForwardAuth（前置认证）或 oauth2-proxy（认证代理）配置，也没有身份头先清理后注入的实际链路；现有 `deploy/k8s/bootstrap/network-policy.yaml` 仍允许 `kube-system` 中的 Traefik（入口控制器）直接访问应用。当前无法证明应用收到的主体不可由客户端伪造，因此按本步骤停止条件停在 Step 2（步骤 2），没有开始访问策略、限流、费用保护、隐私提示或部署。恢复前必须先审核入口认证拓扑及其与 Task 16（任务 16）的执行顺序。
 
-- [ ] **Step 3（步骤 3）：实现 fail-safe ACCESS_MODE（安全失败访问模式）**
+同日恢复核对确认生产实际为 Traefik `3.7.4`、镜像摘要 `sha256:fcdef599e6259359833dd2e1d49f9e964f66825d69bd3dd468f51102ce013d03`，Pod（容器组）地址为 `10.42.0.20`，节点 PodCIDR（容器组网段）为 `10.42.0.0/24`；集群尚无 oauth2-proxy（认证代理）。Traefik `3.7.4` 已弃用 ForwardAuth（前置认证）的 `trustForwardHeader`，当前 EntryPoint（入口点）也没有可信代理地址配置；继续采用原 ForwardAuth（前置认证）会把 Task 15/16（任务 15/16）锁成循环前置条件。
+
+本步骤因此选择固定 `linux/amd64` 镜像 `quay.io/oauth2-proxy/oauth2-proxy@sha256:7c25fd50e1998798b79d051bd7d98ebac8dc4c6c1e54c99f4cb06f3e7d117dbd`，实际二进制为 `v7.15.2`。该版本修复了 2026-04 公布的认证旁路，并会在请求转发前规范化、删除它负责注入的 `X-Forwarded-*` 身份头，再从已验证会话设置主体。仓库只固化 private（私有）入口身份无关资源和实际镜像反例；OAuth callback/IngressRoute/Certificate（OAuth 回调 / 入口路由 / 证书）的统一身份由 Task 16（任务 16）验证，当前候选已改为公网 IP `120.46.57.214` 和 `/k8s-yaml-assistant`。本步骤不部署这些资源。
+
+本地实现已固定 oauth2-proxy ServiceAccount/Service/Deployment/NetworkPolicy（认证代理服务账户 / 服务 / 工作负载 / 网络策略），并把应用入站从 Traefik（入口控制器）直连收紧为只接受认证代理。`npm run deploy:check` 的 76 项契约全部通过，反例证明 mutable tag（可变标签）、公网可信代理、关闭身份头清理、关闭会话主体注入、入口绕过认证代理及整个 `kube-system` 命名空间放行都会被拒绝。`npm run auth-proxy:integration` 使用固定摘要的真实镜像验证：未认证伪造头返回 HTTP `403` 且未到达上游，认证请求返回 HTTP `200`，上游主体来自会话，客户端下划线头变体已删除。一次性容器和临时密码文件已清理；生产仍无 oauth2-proxy（认证代理）或 Ingress（入口），本步骤没有发布、部署、模型调用、索引重建或节点重启。
+
+- [x] **Step 3（步骤 3）：实现 fail-safe ACCESS_MODE（安全失败访问模式）**
 
 只接受 `private|portfolio`；缺失、空白、大小写错误和未知值一律解释为 private（私有）。不创建管理 API（应用程序接口）、隐藏页面、特殊 header（请求头）或 URL（网址）参数修改模式。
 
@@ -1009,17 +1033,27 @@ GitHub-hosted job（GitHub 托管任务）只做不可变身份验证，成功�
 
 应用业务 API（应用程序接口）再次执行同一策略，使 Ingress（入口）路由误配时模型路由仍拒绝匿名请求。页面级认证由入口承担，不能把前端隐藏按钮当作授权。
 
+2026-07-28 四条业务路由已在读取请求体或检查模型配置前执行应用授权。`ACCESS_MODE` 只有精确 `portfolio` 才开放匿名 `/api/check`，其余值均收敛为 private（私有）；Ask/Generate/Fix（询问 / 生成 / 修复）在两种模式下都只接受允许名单主体 `kkxiaoa`。应用只读取 `X-Forwarded-User`，拒绝缺失、非允许名单、空白、多值主体，并忽略 `Authorization`、`X-Auth-Request-User` 和下划线变体。7 项访问策略反例全部通过；页面和静态资源仍由 Task 16（任务 16）的入口认证承担。
+
 - [ ] **Step 4（步骤 4）：实现私有阶段限速、并发与费用保护**
 
-单副本内存 token bucket/semaphore（令牌桶 / 信号量）只承担短窗口削峰和并发，不作为跨重启费用事实源。实现有限主体/路由 key（键）、过期清理、容量上限和可信代理来源；不能无界积累任意 IP（互联网协议地址）。候选速率使用设计中的 allowlist（允许名单）测试值，生产值由 Phase 4（阶段 4）受限测试确认。
+单副本内存 token bucket/semaphore（令牌桶 / 信号量）只承担短窗口削峰和并发，不作为跨重启费用事实源。应用授权先把主体收敛为唯一允许用户 `kkxiaoa` 或固定匿名主体，限流器不得从 IP（互联网协议地址）或任意客户端头创建键；因此主体/路由键空间由真实授权契约直接限定，不另设生产不可达的容量拒绝和定时回收分支。候选速率使用设计中的 allowlist（允许名单）测试值，生产值由 Phase 4（阶段 4）受限测试确认。
 
 Ask/Generate/Fix（询问 / 生成 / 修复）还必须设置单请求输入/输出 token（令牌）、上游超时、有限重试、并发和 emergency stop（紧急停止）。全局日费用在计量模块前依赖供应商侧硬额度和人工预算；代码/文档不得把请求次数限流描述成 token/cost metering（令牌 / 成本计量）。
 
-- [ ] **Step 5（步骤 5）：添加隐私提示**
+2026-07-28 已实现当前可证明的保护子集：单副本内存 token bucket/semaphore（令牌桶 / 信号量）按已授权主体和路由执行候选速率，全局与单主体并发分别限制本地检查和共享模型能力；生产调用方只可能传入 `kkxiaoa` 或固定匿名主体，不信任客户端来源头。`MODEL_ACCESS_ENABLED` 只有精确 `true` 才启用模型路由，其他值以稳定 503 关闭；DeepSeek（回答模型）单次上游调用固定 `max_tokens=2048`、60 秒超时和 1 次重试，Voyage（向量与重排模型）固定 30 秒超时；构造后的模型请求另受 256 KiB 序列化字节上限，超限在上游调用前返回安全 413。运行时配置和所需密钥在每个路由请求边界只解码一次并沿调用链传递。
+
+本步骤仍保持未完成：256 KiB 是字节保护，不是 DeepSeek V4（深度求索第 4 代模型）的精确输入 token（令牌）上限；供应商文档说明不同模型分词不同，实际 token（令牌）以返回的 usage（用量）为准，当前没有经验证的 V4 调用前精确计数契约。供应商侧费用硬额度和人工预算也尚未获得可核对证据。当前实现不记录累计 usage/cost（用量 / 成本），不能描述为费用计量；本步骤没有调用模型。
+
+2026-07-28 用户 review（审核）接受上述边界为显式延期风险，Step 4（步骤 4）继续保持未勾选，匿名模型能力继续关闭。该接受只允许完成 Task 15（任务 15）的本地交接，不授权模型调用、发布或生产部署；进入受限入口前仍须核对供应商费用硬额度和人工预算。
+
+- [x] **Step 5（步骤 5）：添加隐私提示**
 
 页面明确区分本地 `/api/check` 与会向 DeepSeek/Voyage 发送必要输入的模型能力；首次模型操作附近提示不要提交 Secret（密钥）、私钥或生产集群敏感配置。当前不接入 Turnstile（人机验证）或匿名 cookie（浏览器会话）。
 
-- [ ] **Step 6（步骤 6）：验证**
+2026-07-28 页面编辑区已明确标注本地 schema（结构模式）检查不调用外部模型，模型操作区持续展示 DeepSeek/Voyage（回答模型 / 向量与重排模型）的必要输入、费用和敏感配置边界。匿名模型、Turnstile（人机验证）和浏览器会话均未引入；面向公开访问的完整隐私说明仍按 Task 16/17（任务 16/17）的匿名能力门禁审核。
+
+- [x] **Step 6（步骤 6）：验证**
 
 ```bash
 node --import tsx --test src/server/api-contract.test.ts
@@ -1033,33 +1067,63 @@ npm run build
 git diff --check
 ```
 
-- [ ] **Step 7（步骤 7）：通过既有发布链私有部署本次应用变更**
+2026-07-28 当前工作树的 `npm test` 为 344/344 通过，`npm run deploy:check` 为 76/76 通过，TypeScript（类型系统）检查、Next.js（网页应用框架）生产构建和 `git diff --check` 均通过。固定 oauth2-proxy（认证代理）镜像集成反例此前已在同一未变更清单和脚本上通过；本轮没有模型调用或索引重建。
 
-Task 15（任务 15）的代码不能通过 SSH 手工替换。按 Task 10-14（任务 10-14）已经验收的同一流程生成新候选镜像、draft Release（草稿发布版本）和人工发布记录，在 443 仍受限时部署并重复私有访问/回滚验证。模型 smoke test（冒烟测试）仍需单独费用授权。
+- [x] **Step 7（步骤 7）：固化与 Task 16（任务 16）的部署交接**
+
+Task 15（任务 15）只完成本地实现、测试和 review（审核），不在认证代理、最终入口身份和 OAuth callback（OAuth 回调）尚未就绪时单独部署一个会拒绝现有私有直连的应用镜像。Task 16（任务 16）获得各项当次授权后，必须先准备认证代理、Secret（密钥）、受限路由和 private（私有）NetworkPolicy（网络策略），再按 Task 10-14（任务 10-14）已经验收的发布链生成、人工 Publish（正式发布）并部署 Task 15（任务 15）应用镜像，完成联合私有访问和回滚验证。代码不能通过 SSH（安全远程登录）手工替换；模型 smoke test（冒烟测试）仍需单独费用授权。
+
+2026-07-28 用户 review（审核）确认本地实现、验证结果及 Step 4（步骤 4）的显式延期边界。Task 15（任务 15）交接因此完成：应用镜像、认证代理、Secret（密钥）、受限路由和 NetworkPolicy（网络策略）必须作为 Task 16（任务 16）的同一审核变更集进入发布链；本步骤没有提交、推送、发布、部署、模型调用、索引重建或节点重启。
 
 **Rollback（回滚）：** 安全异常时回滚到 Phase 3（阶段 3）镜像并保持 80/443 非公开；不能通过默认 portfolio（作品集展示）、关闭 body limit（请求体上限）或信任客户端头恢复功能。
 
-**Stop and report（停止并汇报）：** API（应用程序接口）模式、字节读取、身份信任链、访问矩阵、限流/并发/费用边界、隐私提示和全部安全反例。等待 review（审核）。
+**Stop and report（停止并汇报）：** API（应用程序接口）模式、字节读取、身份信任链、访问矩阵、限流/并发/费用边界、隐私提示和全部安全反例已于 2026-07-28 完成 review（审核）。下一执行入口为 Task 16（任务 16）的前置条件核对，不自动授权任何外部变更。
 
-## Task 16（任务 16）：部署 DNS、TLS、oauth2-proxy 与受限双模式入口
+## Task 16（任务 16）：部署公网 IP TLS、oauth2-proxy 与受限语义路径入口
 
-**Precondition（前置条件）：** Task 15（任务 15）通过且对应新 digest（内容摘要）已经沿既有发布链完成私有部署/回滚验证；用户确定最终域名和 DNS（域名系统）控制权；GitHub OAuth App（GitHub OAuth 应用）、安全组 80/443 变更和 Kubernetes（容器编排系统）资源写入分别获得当次授权。
+**Precondition（前置条件）：** Task 15 Step 1-7（任务 15 步骤 1-7）的本地实现与交接通过 review（审核），但尚未部署。当前入口身份固定为公网 IPv4 `120.46.57.214` 和基础路径 `/k8s-yaml-assistant`，目标地址为 `https://120.46.57.214/k8s-yaml-assistant`；域名和 DNS（域名系统）不是当前前置条件，未来如采用域名必须形成单独审核变更。GitHub OAuth App（GitHub OAuth 应用）、应用候选 Publish（正式发布）、安全组 80/443 变更、cert-manager（证书管理器）安装和 Kubernetes（容器编排系统）资源写入仍须分别获得当次授权。
 
 **Files（文件）：**
 
-- Create（创建）：`deploy/k8s/access/oauth2-proxy.yaml`
 - Create（创建）：`deploy/k8s/access/private-routes.yaml`
 - Create（创建）：`deploy/k8s/access/portfolio-routes.yaml`
 - Create（创建）：`deploy/k8s/access/middlewares.yaml`
-- Create（创建）：`deploy/k8s/access/network-policy.yaml`
+- Modify（修改）：`deploy/k8s/access/oauth2-proxy.yaml`
+- Modify（修改）：`deploy/k8s/bootstrap/config-map.yaml`
+- Modify（修改）：`deploy/k8s/bootstrap/network-policy.yaml`
+- Modify（修改）：`deploy/k8s/app/deployment-template.yaml`
 - Create（创建）：`deploy/k8s/tls/issuer-staging.yaml`
 - Create（创建）：`deploy/k8s/tls/issuer-production.yaml`
+- Create（创建）：`deploy/k8s/tls/certificate-staging.yaml`
 - Create（创建）：`deploy/k8s/tls/certificate.yaml`
+- Create（创建）：`deploy/k8s/tls/tls-store.yaml`
+- Create（创建）：`deploy/k8s/tls/cert-manager-install.json`
+- Modify（修改）：`next.config.mjs`
+- Modify（修改）：`app/lib/api.ts`
+- Create（创建）：`app/lib/api.test.ts`
+- Modify（修改）：`app/page.tsx`
+- Modify（修改）：`app/ui/GeneratePanel.tsx`
+- Modify（修改）：`app/ui/ValidatePanel.tsx`
+- Create（创建）：`src/shared/application-path.mjs`
 - Modify（修改）：`deploy/k8s/README.md`
 - Modify（修改）：`scripts/deployment-contract.test.ts`
+- Modify（修改）：`scripts/workflow-contract.test.ts`
+- Create（创建）：`.github/workflows/access-mode.yml`
+- Create（创建）：`.github/workflows/access-mode-apply.yml`
+- Create（创建）：`scripts/access-mode-authorization.ts`
+- Create（创建）：`scripts/authorization-cli-io.ts`
+- Modify（修改）：`scripts/deployment-authorization.ts`
+- Create（创建）：`src/release/access-mode-authorization.ts`
+- Create（创建）：`src/release/access-mode-authorization.test.ts`
+- Create（创建）：`src/release/authorization-codec.ts`
+- Modify（修改）：`src/release/deployment-authorization.ts`
+- Modify（修改）：`src/server/request-limiter.ts`
+- Modify（修改）：`src/server/request-limiter.test.ts`
+- Modify（修改）：`deploy/adapter/k8s_yaml_assistant_deploy.py`
+- Modify（修改）：`deploy/adapter/test_k8s_yaml_assistant_deploy.py`
 - Modify（修改）：Task 12（任务 12）的适配器 design/plan（设计 / 计划），增加单独审核的访问模式动作
 
-- [ ] **Step 1（步骤 1）：先设计并审核 `set-access-mode` 扩展**
+- [x] **Step 1（步骤 1）：先设计并审核 `set-access-mode` 扩展**
 
 在适配器 design/plan（设计 / 计划）中增加且只增加：
 
@@ -1068,37 +1132,51 @@ set-access-mode private
 set-access-mode portfolio
 ```
 
-输入仍是固定枚举，不能接受任意 ConfigMap/Ingress/kubectl（普通配置 / 入口 / Kubernetes 命令行工具）内容。设计并先写反例：未满足 portfolio（作品集展示）门禁、非法模式、并发切换、开启顺序错误、关闭顺序错误、部分失败、审计写入失败和重复执行。该扩展通过独立 review（审核）后才实现/安装。
+mode（模式）仍是固定枚举，不能接受任意 ConfigMap/Ingress/kubectl（普通配置 / 入口 / Kubernetes 命令行工具）内容。实际生产运行器继续使用现有无参数 sudoers（提权规则）；固定 workflow（流水线）的候选入口只创建 `access-mode-<mode>-r<workflowRunId>` draft pre-release（草稿预发布版本），正常双向切换必须由管理员 Publish（正式发布）该 operational Release（运维发布版本）后，签名授权绑定当前镜像、受保护提交和固定模式清单摘要才进入适配器。应用发布链对 `access-mode-*` 标签安全跳过。固定来源 SSH（安全远程登录）break-glass（紧急处置）只能收敛到 private（私有）。设计并先写反例：未满足 portfolio（作品集展示）门禁、非法模式、错误签名/发布身份、并发切换、开启顺序错误、关闭顺序错误、部分失败、审计写入失败和重复执行。该扩展通过独立 review（审核）后才实现/安装。
 
-- [ ] **Step 2（步骤 2）：先写入口与认证资源反例**
+入口设计同时固定以下生产契约，不新增没有当前消费者的通用 host（主机名）配置：
+
+- Next.js（前端框架）在构建时固定 `basePath=/k8s-yaml-assistant`，前端四条请求显式复用同一构建值；探针、oauth2-proxy（认证代理）上游、回调和入口路由使用相同前缀；
+- 当前证书身份只包含 `ipAddresses: [120.46.57.214]`，ACME（自动证书管理环境）使用 `shortlived`（短期证书）profile（配置档）；不创建 DNS 记录或伪造域名；
+- IP 客户端可能不发送 SNI（服务器名称指示），因此 Traefik（入口控制器）必须把该 IP 证书设为唯一 `default` TLSStore（默认传输层安全证书仓库）证书；若集群已有其他 `default` TLSStore（默认传输层安全证书仓库）立即停止；
+- `/`、其他路径、健康端点和管理动作不因 IP 入口而公开；当前唯一应用前缀是 `/k8s-yaml-assistant`。
+
+2026-07-28 用户确认不注册域名并要求公网 IP + 语义路径；上述设计随后通过独立 review（审核），允许进入本地反例与实现。该审核不授权安装、发布、部署或任何生产写入。
+
+- [x] **Step 2（步骤 2）：先写入口与认证资源反例**
 
 覆盖：
 
 - oauth2-proxy/cert-manager（认证代理 / 证书管理器）镜像或安装资源未固定 digest/version（内容摘要 / 版本）失败；
-- OAuth callback/Ingress host/Certificate DNS name（OAuth 回调 / 入口主机名 / 证书域名）不一致失败；
+- 应用 `basePath`（基础路径）、前端请求、探针、oauth2-proxy upstream/proxy prefix/callback（认证代理上游 / 代理前缀 / 回调）或 IngressRoute path（入口路由路径）不一致失败；
+- Certificate（证书）缺少精确 IPv4、Issuer（签发器）不是 `shortlived`（短期证书）profile（配置档）、TLSStore（传输层安全证书仓库）未引用同一证书 Secret（密钥）或仓库出现第二个 `default` TLSStore（默认传输层安全证书仓库）失败；
 - private（私有）存在匿名业务旁路、portfolio（作品集展示）公开模型路由/健康端点/管理操作失败；
-- 客户端身份头未清理、ForwardAuth（前置认证）顺序错误、非 allowlist（允许名单）身份可达应用失败；
+- private（私有）路由绕过 oauth2-proxy reverse proxy（认证代理反向代理）、认证代理未清理应用认可的身份头、非 allowlist（允许名单）身份可达应用失败；
 - 请求体/速率/并发 middleware（中间件）缺失或顺序错误失败；
 - 80 除 ACME challenge（证书挑战）/固定跳转外代理应用、6443/NodePort（Kubernetes API / 节点端口）公开失败；
 - Git 仓库包含 OAuth/cookie/TLS/Turnstile secret（OAuth / 浏览器会话 / TLS / 人机验证密钥）失败。
+- 固定 oauth2-proxy `v7.15.2`（认证代理 7.15.2 版）的 GitHub scope（GitHub 授权范围）缺少 `read:org` 失败；本地 htpasswd（密码文件）会话不能代替真实 GitHub callback（GitHub 回调）。
+- 前端忽略非成功 HTTP（超文本传输协议）状态、认证代理 HTML（网页文本）拒绝、模型关闭错误或缺少 GitHub 登录入口失败。
 
-- [ ] **Step 3（步骤 3）：创建 DNS 与受限证书入口**
+2026-07-28 已按真实候选资源完成反例、实现和 review（审核）修正。固定 oauth2-proxy `v7.15.2`（认证代理 7.15.2 版）的源码确认其在 `--github-user` 生效前读取 `/user/orgs` 和 `/user/teams`，GitHub（代码托管平台）接口要求 OAuth App token（OAuth 应用令牌）至少具备 `user` 或 `read:org`；候选因此显式固定 `--scope=user:email read:org`，并新增缺少组织读取范围的失败反例。前端四条请求统一检查 HTTP（超文本传输协议）结果，安全解码稳定 JSON（数据交换格式）错误和认证代理 HTML（网页文本）拒绝；页面提供 GitHub 登录入口，模型关闭会显示明确状态并禁用后续模型动作。限流器删除当前授权主体空间不可达的 128 键容量与十分钟回收；两套发布授权只共享有双消费者的纯编解码和命令行文件工具，领域身份保持分离；TypeScript（类型系统）部署测试只断言 OAuth（开放授权）关键不变量，特权 Python（Python 语言）适配器继续独立冻结完整清单。`npm test` 为 376/376，`npm run deploy:check` 为 90/90，`npm run workflow:check` 为 11/11，`npm run adapter:check` 的 Pyright（Python 静态类型检查器）为零错误且适配器测试为 76/76；`npm run typecheck`、`npm run build`、固定 oauth2-proxy（认证代理）镜像集成和 `git diff --check` 均通过。集成结果证明未认证伪造身份返回 `403`，认证后的应用根路径与 `/api/check` 保留原语义路径且只转发已验证主体；该 htpasswd（密码文件）测试不访问 GitHub，不能作为真实 callback（回调）证据。消费者收敛检查还删除了重复请求解码入口、仅供测试导出的内部身份，以及 bootstrap ConfigMap（引导普通配置）中无消费者的访问模式副本。GitHub（代码托管平台）与服务器只读 preflight（前置核对）确认没有 `access-mode-*` Release（访问模式发布版本）、cert-manager（证书管理器）、入口资源、已安装模式清单或访问台账，生产仍是 `v0.1.1` 既定镜像摘要且单副本 `1/1` 可用。Step 3-6（步骤 3-6）保持未勾选；上述结果不代表证书签发、自动续期、真实 OAuth callback（开放授权回调）、公网入口或访问矩阵已完成生产验收。
 
-创建最终域名 A record（A 记录），不在未确认 IPv6 时创建 AAAA record（AAAA 记录）。安装实施日仍受支持的固定 cert-manager（证书管理器），先用 ACME staging issuer（ACME 预发布签发器）。
+- [ ] **Step 3（步骤 3）：创建公网 IP 短期证书与受限入口**
 
-80/TCP 只为 HTTP-01（HTTP 验证）向公网开放，其他路径固定拒绝；443/TCP 只允许当前固定来源或另行审核的测试来源。staging（预发布）证书、续期和路由通过后，单独切换 production issuer（生产签发器）。不开放 6443。
+不创建 DNS（域名系统）记录。安装实施日仍受支持且固定版本与安装清单 SHA-256（安全哈希算法）的 cert-manager（证书管理器），以 `shortlived`（短期证书）profile（配置档）和 `ipAddresses: [120.46.57.214]` 先请求 ACME staging（ACME 预发布）证书。验证签发、约 6 天有效期、自动续期窗口和 IP SAN（IP 主题备用名称）后，单独切换 production issuer（生产签发器）。
+
+80/TCP 只为 HTTP-01（HTTP 验证）向公网开放，其他路径固定拒绝；443/TCP 只允许当前固定来源或另行审核的测试来源。Traefik（入口控制器）用唯一 `default` TLSStore（默认传输层安全证书仓库）为无 SNI（服务器名称指示）的 IP 客户端提供同一证书，不开放 6443。
 
 - [ ] **Step 4（步骤 4）：部署 oauth2-proxy（认证代理）和 allowlist（允许名单）**
 
-OAuth client secret/cookie secret（OAuth 客户端密钥 / 浏览器会话密钥）从密码管理器创建为独立 Kubernetes Secret（Kubernetes 密钥），不提交 YAML（配置文件）。allowlist（允许名单）只包含明确审核身份；当前唯一维护者是管理员，普通允许用户没有模式修改能力。
+OAuth client secret/cookie secret（OAuth 客户端密钥 / 浏览器会话密钥）从密码管理器创建为独立 Kubernetes Secret（Kubernetes 密钥），不提交 YAML（配置文件）。GitHub OAuth callback（GitHub OAuth 回调）固定为 `https://120.46.57.214/k8s-yaml-assistant/oauth2/callback`，oauth2-proxy（认证代理）的 `proxy-prefix` 固定为 `/k8s-yaml-assistant/oauth2`，GitHub scope（GitHub 授权范围）固定为 `user:email read:org`；allowlist（允许名单）只包含明确审核身份。当前唯一维护者是管理员，普通允许用户没有模式修改能力。
 
-Traefik（入口控制器）删除客户端身份头后调用 ForwardAuth（前置认证），只把认证成功的受控字段传给应用。用 NetworkPolicy（网络策略）证明应用 Service（服务）不能从未经审核的 Pod（容器组）直接访问。
+先创建 OAuth client secret/cookie secret（OAuth 客户端密钥 / 浏览器会话密钥）并部署 Task 15（任务 15）已固定 digest（内容摘要）的 oauth2-proxy reverse proxy（认证代理反向代理）。在安装应用公开候选前，必须用真实 GitHub OAuth App（GitHub 开放授权应用）完成一次 callback（回调），确认组织/团队和邮箱读取没有 403、`kkxiaoa` 会话成功建立且非允许用户仍被拒绝；本地 htpasswd（密码文件）集成不满足该门禁。Traefik（入口控制器）的 private（私有）路由只指向认证代理；认证代理只把成功认证会话派生的 `X-Forwarded-User` 传给应用。用 NetworkPolicy（网络策略）证明 Traefik（入口控制器）不能在 private（私有）模式直达应用，其他 Pod（容器组）也不能访问应用或认证代理。
 
 - [ ] **Step 5（步骤 5）：部署两个固定访问模式并做有序切换**
 
-private → portfolio（私有 → 作品集展示）：先部署/验证应用策略，保持全部 ForwardAuth（前置认证），最后一步才开放页面和 `/api/check`；Ask/Generate/Fix（询问 / 生成 / 修复）仍要求 allowlist（允许名单）。
+private → portfolio（私有 → 作品集展示）：先部署/验证应用策略，保持全部业务路由经过 oauth2-proxy reverse proxy（认证代理反向代理），最后一步才同时开放删除身份头的 `/k8s-yaml-assistant` 页面、该前缀下静态资源和 `/k8s-yaml-assistant/api/check` 路由及对应 Traefik（入口控制器）到应用的最小 NetworkPolicy（网络策略）；Ask/Generate/Fix（询问 / 生成 / 修复）仍要求 allowlist（允许名单）。
 
-portfolio → private（作品集展示 → 私有）：第一步恢复全部业务路由 ForwardAuth（前置认证），验证匿名拒绝，再更新应用配置/rollout（滚动发布）。任一步失败必须收敛到 private（私有）；模式变更写操作者、时间、前后状态、原因和结果，不记录 Secret（密钥）。
+portfolio → private（作品集展示 → 私有）：第一步恢复全部业务路由到 oauth2-proxy reverse proxy（认证代理反向代理）并收紧应用 NetworkPolicy（网络策略），验证匿名拒绝，再更新应用配置/rollout（滚动发布）。任一步失败必须收敛到 private（私有）；模式变更写操作者、时间、前后状态、原因和结果，不记录 Secret（密钥）。
 
 - [ ] **Step 6（步骤 6）：在受限来源执行安全矩阵**
 
@@ -1106,23 +1184,22 @@ portfolio → private（作品集展示 → 私有）：第一步恢复全部业
 
 - 缺失/非法模式默认 private（私有）；
 - 未登录、非 allowlist（允许名单）、伪造身份头/cookie/URL/header（浏览器会话 / 网址 / 请求头）、直接 Service（服务）访问无法调用业务能力；
-- portfolio（作品集展示）仅页面、静态资源和 `/api/check` 匿名；匿名模型路由全部拒绝；
+- portfolio（作品集展示）仅固定语义路径下的页面、静态资源和 `/api/check` 匿名；根路径、健康端点和匿名模型路由全部拒绝；
 - 公共请求、ServiceAccount（服务账户）、非管理员 workflow（流水线）不能改模式；
 - 超大/分块请求 413，超速/超并发 429，供应商错误为封闭 502/503；
-- HTTP（超文本传输协议）仅证书挑战/跳转，TLS（传输层安全）证书链和 SNI（服务器名称指示）正确；
+- HTTP（超文本传输协议）仅证书挑战/跳转，TLS（传输层安全）证书链、IP SAN（IP 主题备用名称）和无 SNI（服务器名称指示）证书选择正确；
 - Turnstile（人机验证）、匿名额度和 Interview Pass（面试临时通行证）均不存在占位旁路。
 
 ```bash
-dig +short <app-host> A
 sudo k3s kubectl -n <namespace> get ingress,certificate,certificaterequest,order,challenge
 sudo k3s kubectl -n <namespace> describe certificate <certificate>
-curl --fail --head https://<app-host>/
-openssl s_client -connect <app-host>:443 -servername <app-host>
+curl --fail --head https://120.46.57.214/k8s-yaml-assistant
+openssl s_client -connect 120.46.57.214:443 -verify_ip 120.46.57.214
 ```
 
-**Rollback（回滚）：** 首先执行 `set-access-mode private` 并验证匿名拒绝；失败时关闭公网 443，必要时关闭 80。回滚入口/认证/证书到上一审核版本，轮换受影响 Secret（密钥），通过 SSH tunnel（SSH 隧道）恢复；不开放 6443、不降级明文。
+**Rollback（回滚）：** 首先执行 `set-access-mode private` 并验证匿名拒绝；失败时删除固定应用入口并关闭公网 443，必要时关闭 80。回滚入口/认证/证书到上一审核版本，轮换受影响 Secret（密钥），通过 SSH tunnel（SSH 隧道）恢复；不开放 6443、不降级明文。
 
-**Stop and report（停止并汇报）：** DNS（域名系统）、证书链/续期、身份头信任、allowlist（允许名单）、双模式矩阵、模式审计、请求保护、异常流量和回滚证据。最终切回 private（私有），443 仍只允许审核来源。等待 review（审核）。
+**Stop and report（停止并汇报）：** 公网 IP 证书链/自动续期、固定语义路径、身份头信任、allowlist（允许名单）、双模式矩阵、模式审计、请求保护、异常流量和回滚证据。最终切回 private（私有），443 仍只允许审核来源。等待 review（审核）。
 
 ## Task 17（任务 17）：匿名模型与 Interview Pass（面试临时通行证）分叉闸
 
@@ -1165,17 +1242,17 @@ openssl s_client -connect <app-host>:443 -servername <app-host>
 - Read only（只读）：Task 11（任务 11）release manifest（发布清单）与候选镜像内索引
 - Modify（修改）：只有人工审核确认的 bad case/eval case（问题用例 / 评估用例）及对应治理文件；不能自动回灌
 
-- [ ] **Step 1（步骤 1）：列出并确认 ignored artifact（被忽略产物）清理范围**
+- [x] **Step 1（步骤 1）：列出并确认 ignored artifact（被忽略产物）清理范围**
 
 使用只读命令列出旧 schema v1/v2 run/trace（模式 v1/v2 运行 / 轨迹）、旧 calibration（校准）、临时报告和旧索引目录的精确路径、大小和协议版本。移动到受控临时归档或删除属于破坏性操作，必须在列出目标后获得确认；不清理 `.env`、用户文件、当前/上一候选镜像或未知目录。
 
-- [ ] **Step 2（步骤 2）：复用发布候选的精确索引身份**
+- [x] **Step 2（步骤 2）：复用发布候选的精确索引身份**
 
 正式评估必须使用与候选镜像完全相同的 corpus/model/index identity（语料 / 模型 / 索引身份）。优先从固定 image digest（镜像内容摘要）读取/提取并校验索引 artifact（产物），避免为了得到相同索引再次付费构建；如果工具链不能安全复用而必须重新执行 `index:build`，先获得 Voyage 费用授权，并要求新旧 index hash/file hash（索引哈希 / 文件哈希）完全一致，否则停止调查。
 
 不得用当前失效的 8,127 条 `data/index`、运行时在线重建结果或未固定模型生成的索引评估候选发布版本。
 
-- [ ] **Step 3（步骤 3）：按治理顺序运行正式 full evaluation（完整集评估）**
+- [x] **Step 3（步骤 3）：按治理顺序运行正式 full evaluation（完整集评估）**
 
 先运行所有无模型 preflight（预检），再按检索、忠实度、裁判、生成、修复的顺序执行 full（完整集）范围。每类开始前记录 dataset/config/model/corpus/index identity（数据集 / 配置 / 模型 / 语料 / 索引身份）和费用预算；上一类 harness（评估框架）不完整或 identity（身份）不一致时不继续。
 
@@ -1196,7 +1273,7 @@ npm run eval:fix -- --full
 
 不得把 retrieval（检索）通过当作 answer/generation/fix（回答 / 生成 / 修复）通过，也不得用 smoke/tuning/holdout（冒烟 / 调优 / 留出集）替代 full（完整集）。
 
-- [ ] **Step 4（步骤 4）：人工审核 metrics/trace/bad case（指标 / 轨迹 / 问题用例）**
+- [x] **Step 4（步骤 4）：人工审核 metrics/trace/bad case（指标 / 轨迹 / 问题用例）**
 
 逐类核对：
 
@@ -1208,11 +1285,55 @@ npm run eval:fix -- --full
 - trace（轨迹）、日志和报告无 Secret（密钥）或生产敏感 YAML；
 - bad case（问题用例）先形成候选，只有人工脱敏、复现和治理标记后进入提交数据。
 
-- [ ] **Step 5（步骤 5）：人工晋升或明确拒绝 baseline（基线）**
+- [x] **Step 5（步骤 5）：人工晋升或明确拒绝 baseline（基线）**
 
 只有 full run（完整集运行）完成、协议/定义可比较、trace coverage（轨迹覆盖）完整、harness error（评估框架错误）为 0 且人工审核通过时，才逐 kind（类别）显式执行 promotion（晋升）。任何未通过项都记录为阻断，不用 override（覆盖开关）或降低断言强度晋升。
 
 如果用户决定先公开受控作品集而不等待新 baseline（基线），必须形成书面风险接受：明确哪些能力/指标未证实、匿名模型仍关闭、页面展示文案不得宣称生产质量已经验证。
+
+2026-07-29 执行记录：经独立授权，先删除已确认的旧 8,127 条索引和 `.next` 构建产物，再从当前生产镜像固定摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37` 提取并校验 8,410 条 v5 索引；没有调用 `index:build`。成功运行依次为 retrieval（检索）`2026-07-29T10-27-35-327Z`、faith（忠实度）`2026-07-29T10-38-42-300Z-full`、judge（裁判）`2026-07-29T11-04-44-208Z-judge`、generation（生成）`2026-07-29T11-22-41-770Z-generation` 和 fix（修复）`2026-07-29T11-24-08-465Z-fix`。首次 faith（忠实度）运行 `2026-07-29T10-29-48-748Z-full` 因检索结果携带内部 embedding（向量）字段而在 artifact write（产物写入）阶段失败；最小边界修复完成 317 项测试后，使用相同 dataset/config/model/corpus/index identity（数据集 / 配置 / 模型 / 语料 / 索引身份）重新运行成功，失败产物按协议保留且未复用。
+
+人工审核结论：成功运行的 83/88/20/27/9 条用例均有一一对应 trace（轨迹），Holdout（留出集）未进入校准或自动回灌；两条错误解释正确且完整，85 个带来源回答的 `[S]` 编号均与实际 source snapshot（来源快照）一致；12 个本轮正式产物未发现真实凭据或生产敏感 YAML（配置文件），Generation（生成）的 `secret-basic` 只包含评估用例明确提供的合成值。阻断项包括 retrieval（检索）的 `policy-conflict-privileged` 失召回、faith（忠实度）的 18 条有来源幻觉和 6 条裁判不可判定、judge（裁判）的 19/100 无效投票及 4 个不可判定/2 个不稳定/1 个标签与判定歧义，以及机器满分未覆盖的 `job-basic`、`hard-cronjob-full` 未定义命令补全和 `fix-missing-provisioner` 不可判定目标值。运行协议未记录 raw usage/cost（原始用量 / 费用），只能从 trace（轨迹）对账成功运行的 338 次 Voyage（向量服务）请求、124 次 DeepSeek answer（回答模型）请求和 201 次 DeepSeek judge（裁判模型）请求；首次失败运行另有无法从产物精确还原的首用例调用。
+
+Step 5（步骤 5）决定：本轮 retrieval、faith、judge、generation、fix（检索、忠实度、裁判、生成、修复）baseline（基线）全部明确拒绝晋升，不执行 `eval:promote`，也不以 override（覆盖开关）降低门禁。Faith bad case（忠实度问题用例）只完成无写入预览；既有 retrieval bad case（检索问题用例）的复发证据保留为待 review（审核）工作区差异。后续先修正已确认的评估用例和裁判边界，再单独授权必要的模型复测；当前不满足 Phase 5（阶段 5）前置条件。
+
+2026-07-29 retrieval follow-up（检索后续）：经独立授权，`policy-conflict-privileged` 使用真实复发短语补入既有 reviewed alias（已审核别名），共享检索复用唯一匹配字段路径进行软加权；alias 命中的 rerank（重排）使用原始问题、命中路径及既有标题，未增加 policy quota（策略配额）、BM25/RRF（关键词检索 / 融合排序）或全局候选数。82 条 tuning A/B（调优集对照评估）Recall@3 为 `100.0%`、MRR 为 `0.927`、无 Recall lost case（召回损失用例）。随后运行 full retrieval（完整检索）`2026-07-29T12-20-24-990Z`：相同 8,410 条索引、`voyage-3`、`rerank-2.5` 和 `k=3`，83/83 条 trace（轨迹）完整，Recall@3=`83/83`、MRR@3=`77/83`、harness error（评估框架错误）=0；目标策略排第 2，Holdout（留出集）排第 1，未新增 bad case（问题用例）。既有 `policy-conflict-privileged` 问题用例人工标为 `fixed`，回答契约收紧为 schema + policy（结构定义与组织策略）均必需。该结果只关闭 retrieval（检索）阻断，尚未执行 baseline promotion（基线晋升）；faith、judge、generation、fix（忠实度、裁判、生成、修复）阻断及 Phase 5（阶段 5）停止点不变。
+
+2026-07-29 cross-resource follow-up（跨资源检索后续）：新增五条契约覆盖 Ingress 到 Service/Secret、RoleBinding 到 Role/ClusterRole/ServiceAccount、HPA 到 Deployment、Pod 到 PVC/ConfigMap/Secret，以及 PVC 到 StorageClass。Control（对照组）完整运行 `2026-07-29T13-08-18-747Z` 的 88 条 trace（轨迹）完整，原有 83 条全部通过；总 Recall@3=`85.333/88`、MRR@3=`80.5/88`、harness error（评估框架错误）=0。Ingress 契约通过，其余四条形成真实 bad case（问题用例）。仅对五条新契约执行的 Candidate（候选组）定向 A/B Test（对照实验）中，Ingress、HPA 通过，Pod、RoleBinding、PVC 仍分别只命中 `1/3`、`1/2`、`1/2`，因此多资源软提示、规范资源名补词和直接父 schema（模式定义）补候选方案按门禁完整撤销，没有执行 88 条 Candidate（候选组）完整运行或 baseline（基线）晋升。
+
+后续只读诊断确认四条失败的目标父字段均未进入 10 条 dense coarse candidates（稠密粗候选）：HPA 已出现 `scaleTargetRef.name` 而缺 `scaleTargetRef`，RoleBinding 已出现 `subjects.kind` 而缺 `subjects`，Pod 只命中 `volumes.secret` 且由 ConfigMap/Secret 的后代字段占位，PVC 问题只命中 StorageClass 的 `allowVolumeExpansion` 而缺 PVC 的 `spec.resources.requests`。单值路由确有多资源抢占，例如 Pod 问题路由为 PVC、RoleBinding 问题路由为 ClusterRole，但 Pod 的粗候选仍全部来自 Pod，证明误路由不是唯一根因。Semantic Retrieval（语义检索）契约明确不注入 EditorContext（编辑器上下文），`target.kind` 只作为数据集身份和问题账本元数据，不能被评估器偷偷当作生产提示。下一候选必须分别证明父子字段粒度、多意图覆盖和 schema 对跨资源行为事实不足的边界，不能再用一个全局软路由规则同时掩盖三类问题。
+
+2026-07-29 evaluator follow-up（评估器后续）：未调用模型的修尺已完成。`job-basic` 与 `hard-cronjob-full` 的输入现明确给出单个 `busybox` 容器和精确 `command` 数组，断言同时校验容器数量与命令顺序；不可从输入确定目标值的 `fix-missing-provisioner` 已替换为 `fix-missing-deployment-selector`，当前 validator（校验器）只报告 `spec.selector` 缺失，修复断言要求复制 Pod 模板的 `app: web` 标签。对应错误解释用例及 Case Governance（评估用例治理）文档已经同步。`rolebinding-roleref` 的人工标签说明改为记录 S1/S3 联合依据，Judge（裁判模型）规则允许多个文档片段无歧义地联合支持一项主张，同时明确问题文本不能充当事实依据；20 条 calibration snapshot（校准快照）只从既有正式 Faith trace（忠实度轨迹）重建。`npm run eval:check` 保持 88/88/27/9 条契约通过，完整测试 317/317、TypeScript（类型系统）检查和 `git diff --check` 均通过。尚未执行新的 faith、judge、generation、fix（忠实度、裁判、生成、修复）模型运行，未重建索引或晋升 baseline（基线）；这些运行继续要求单独费用授权。
+
+2026-07-29 model retest（模型复测）：经明确授权复用相同 8,410 条索引和固定模型配置完成四类运行。首次命令在 runtime configuration（运行时配置）预检处失败，发生在任何模型请求和运行产物创建之前；未修改 `.env`，补齐既有固定非敏感配置后重试。Faith（忠实度）`2026-07-29T14-44-40-963Z-full` 的 88/88 条 trace（轨迹）完整；81 条可判定回答中 59 条 faithful（有依据）、22 条 unfaithful（无充分依据），另有 7 条裁判不可判定，拒答正确性 3/3。新 `error-deployment-missing-selector` 只检索到父字段 `spec.selector`，不足以支撑回答新增的 `matchLabels`，形成新的父子字段证据缺口。Generation（生成）`2026-07-29T15-34-18-258Z-generation` 为 27/27，Fix（修复）`2026-07-29T15-35-25-448Z-fix` 为 9/9，均在首次尝试通过全部结构、目标值、关系、保留项、副作用和内容断言，修订的精确命令及 Deployment selector（工作负载选择器）用例也通过。
+
+同轮 Judge（裁判校准）`2026-07-29T15-12-40-187Z-judge` 报告 16/17 一致、3 条不可判定、5 条不稳定和 26 次无效投票，但人工审核发现 calibration builder（校准构建器）按 case ID（用例标识）将旧人工标签自动套用到新答案和新来源上下文，该运行无效且不得用于验收或 baseline（基线）。最小修复要求人工标签显式绑定其审核过的 `sourceFaithRunId`，构建时只读取标签实际引用的正式运行并拒绝来源运行不匹配；20 条已审核快照恢复绑定 `2026-07-29T10-38-42-300Z-full`，没有保存可重复派生的答案身份，也没有再次调用模型。该修复通过校准重建、88/88/27/9 条契约检查、317/317 项完整测试、TypeScript（类型检查）和差异格式检查，重建后的校准快照与已提交内容无差异，并于 2026-07-30 完成用户 review（审核）。复测产物与校准快照共 9 个文件的凭据和生产敏感信息扫描未命中；Faith bad case（忠实度问题用例）仍只做无写入预览。trace（轨迹）可对账 172 次 Voyage（向量服务）、124 次 DeepSeek answer（回答模型）和 203 次 DeepSeek judge（裁判模型）请求，协议仍未记录实际 usage/cost（用量 / 费用）。没有重建索引、写入 bad case（问题用例）或晋升 baseline（基线）；有效 Judge（裁判校准）复测仍须另行取得模型调用授权。
+
+2026-07-30 valid judge retest（有效裁判复测）：经明确授权运行 `2026-07-29T16-10-50-371Z-judge`。20/20 条 trace（轨迹）完整，全部绑定已审核 Faith（忠实度）运行 `2026-07-29T10-38-42-300Z-full`；100/100 次计划投票全部执行，模型请求错误和 harness error（评估框架错误）均为 0。主一致率 13/14（92.9%）超过 80% 门槛，但 25 次空响应和 4 次非法 JSON（数据格式）形成 29 次无效票，造成 6 条不可判定；`rolebinding-roleref` 仍以 1 票支持、2 票反对和 2 票无效形成不稳定分歧，联合蕴含提示未解决该判定边界。该运行身份有效，但不能证明 Judge（裁判模型）稳定性改善，也不关闭 Faith（忠实度）或跨资源检索阻断。新 run（运行）和 trace（轨迹）未命中已配置凭据、常见令牌格式、生产 IP 或镜像摘要；没有写入 bad case（问题用例）、重建索引或晋升 baseline（基线），本次模型授权到此结束；运行结论与后续非模型诊断已完成用户 review（审核）。
+
+同日非模型诊断：空响应覆盖 756 至 2,797 字的上下文，不能用单一输入长度解释；`textOf` 只保留拼接后的文本块，现有 trace（轨迹）没有上游 `stop_reason`（停止原因）或内容块类型，因而无法可靠区分 token（令牌）上限、非文本内容块和供应商空文本。共享的 1,024 token（令牌）上限还有其他直接消费者，本轮不做无证据调整。`rolebinding-roleref` 的 S1 明确列出 Role/ClusterRole 两类引用，S3 定义 `kind` 为被引用资源类型，问题限定 Role 后可以按当前规则无歧义推出 `kind=Role`；人工标签不修改，当前分歧保留为裁判联合读取问题。后续若增加响应元数据，只保留能直接诊断空响应的非敏感边界字段，不保存原始裁判输出或推理内容。
+
+2026-07-30 response diagnostics follow-up（响应诊断后续）：按 review（审核）结论实现 Judge parser v3（裁判解析器第 3 版）候选。共享模型响应边界一次性拼接文本并计算停止原因、文本块数量和非文本块数量；只有 `empty_response` 尝试保存归一化后的三个诊断字段，Judge CLI（裁判命令行工具）按其聚合报告。runtime decoder（运行时解码器）仅为当前已审核的 v2 Faith trace（第 2 版忠实度轨迹）允许元数据缺省，当前生产者和测试固定新空响应必须写入；解析器身份变化隔离新旧运行。88/88/27/9 条评估契约、317/317 项完整测试、TypeScript（类型检查）和差异格式检查通过；用既有 20 条已绑定人工标签的 Faith snapshot（忠实度快照）重建后，校准文件哈希仍为 `9671cef702668acee58b333f7c8860f149b60b3b4ebdf97cfa1bd161044fcc29`。没有保存原始输出、推理或用量，没有调整共享 1,024 token（令牌）上限，也没有调用模型、重建索引、写入 bad case（问题用例）或晋升 baseline（基线）。候选随后完成用户 review（审核），模型诊断运行由下一段独立授权。
+
+2026-07-30 v3 judge diagnostics run（第 3 版裁判诊断运行）：首次命令创建失败 run（运行）`2026-07-29T16-59-09-205Z-judge` 后在 `runner_initialization`（运行器初始化）阶段因缺少固定非敏感 DeepSeek（裁判模型）配置而停止，没有 trace（轨迹）或模型请求；失败产物按协议保留。使用仓库固定端点和回答模型身份重试后，运行 `2026-07-29T16-59-56-230Z-judge` 成功：`parserSchemaIdentity=judge-vote-parser-v3`，20/20 条 trace（轨迹）全部绑定已审核 Faith（忠实度）运行 `2026-07-29T10-38-42-300Z-full`，100/100 次投票执行，77 次有效、23 次无效、0 次错误，harness error（评估框架错误）为 0。主一致率为 16/17（94.1%）；3 条因有效票不足不可判定，`rolebinding-roleref` 以 1 票支持、3 票反对继续形成唯一主结论分歧，它与 `policy-conflict-latest` 共形成 2 条内部不稳定用例。15 次空响应全部记录 `stop_reason=max_tokens`、0 个文本块和 1 个非文本块，直接证明这些请求在产生文本块前触达响应 token（令牌）上限；另外 8 次非法 JSON（数据格式）没有停止原因证据。相较上一有效运行的 25 次空响应和 4 次非法 JSON，本轮分别为 15 和 8，不能把随机变化表述为稳定性改善。失败 run（运行）、成功 run（运行）与 trace（轨迹）哈希分别为 `3286a899f497d36fdbbc115fae47f018e5de2a4c1e65e2dfd7f7577b4d89b11d`、`f14888b77ecf236e1c09cf941a97515ef5a73d1444a24adaaed1b30e4b806649`、`ee00232f0e97c78c0b30dee1c2ab0b9f6fc48421fdf018aa118fd61721cd29fe`，敏感信息扫描未命中。没有调整共享 1,024 token（令牌）上限、重建索引、写入 bad case（问题用例）或晋升 baseline（基线）；本次模型授权到此结束，等待 review（审核）。
+
+2026-07-30 v4 judge blocker fix（第 4 版裁判阻断修复）：经明确授权开始阻断项解决，先保持 DeepSeek（裁判模型）默认思考模式和其他调用方不变，只把 Judge（裁判）输出预算分离为 4,096 token（令牌）。该预算由既有 `judgePromptHash` 与模型、系统提示共同绑定，不增加平行配置身份；`judge-vote-parser-v4` 为全部解析无效票保存同一组有界停止原因及内容块计数，Judge CLI（裁判命令行工具）按 `empty_response|invalid_json|invalid_vote` 分组，不保存原始响应、推理或用量。官方依据记录在 evaluator validity design（评估器有效性设计）。20 条校准快照兼容重建前后哈希保持 `9671cef702668acee58b333f7c8860f149b60b3b4ebdf97cfa1bd161044fcc29`；88/88/27/9 条评估契约、317/317 项完整测试、TypeScript（类型检查）和差异格式检查通过。本阶段未调用模型、重建索引、写入 bad case（问题用例）或晋升 baseline（基线）；真实稳定性仍须在 review（审核）后按精确授权复测。
+
+2026-07-30 v5 judge input boundary fix（第 5 版裁判输入边界修复）：有效 v5 Judge（裁判校准）运行 `2026-07-30T06-41-38-149Z-judge` 只有 `13/20`（65%）主一致率。非模型复盘更正了“问题完全未传入”的初始概括：Faith（忠实度）传给 Judge 的 `context` 实际是完整 Ask（询问）生成输入，末尾已含问题，但调用契约没有独立 `question`，且整个生成输入被标为 `【文档】`。本地候选现让 Faith 和 Judge Calibration（裁判校准）复用单一 `JudgeInput`，显式传入问题、完整生成输入和回答，并明确只有 `<docs>`、`<current_yaml>` 和 `<editor_context>` 当前配置/错误属于事实依据。实际用户消息模板与系统提示、模型、4,096 token（令牌）预算共同进入 `judgePromptHash`，逐用例内容继续由 dataset/run/trace identity（数据集 / 运行 / 轨迹身份）约束。分歧报告同时改为选取与多数结论同值的有效票理由。完整非模型测试、88/88/27/9 条评估契约、schema（模式定义）、alias（别名）、TypeScript（类型检查）和差异格式检查通过；人工标签和校准快照未改写。本阶段没有模型调用、索引重建、bad case（问题用例）写入或 baseline（基线）晋升。用户 review（审核）已通过；真实 Judge（裁判模型）复测固定为当前 20 条校准集、每条 5 票，并仍须另行取得明确模型调用授权。
+
+2026-07-30 v5 judge input boundary retest（第 5 版裁判输入边界复测）：经明确授权执行当前 20 条校准集、每条 5 票。首次运行 `2026-07-30T08-28-59-745Z-judge` 在 `runner_initialization`（运行器初始化）阶段失败且没有 trace（轨迹）或模型请求；不修改 `.env`，补入仓库固定非敏感配置后，成功运行 `2026-07-30T08-29-41-646Z-judge` 绑定新 `promptHash=c0342c1b3c67f391717365077ab12435828778d9b444db69b9856a5b356ece22`、当前 20 条人工校准数据和 `judge-vote-parser-v5`。20/20 条 trace（轨迹）、100/100 票及来源绑定完整，86 票有效、12 票非法 JSON（数据格式）、2 票请求错误，2 条不可判定，harness error（评估框架错误）为 0；主一致率 `11/18`（61.1%），回答行为 `17/18`（94.4%），7 条分歧和 7 条不稳定。相较修复前运行没有旧分歧转为一致，`rolebinding-roleref` 仍只有 1/5 票接受联合蕴含；一条原一致用例转分歧，一条原一致用例转不可判定。该单次运行不能证明所有变化由输入模板导致，但证明独立问题边界没有关闭 Judge（裁判模型）把文档外具体键名、校验/准入后果和操作建议宽松视为示例或推断的能力缺口。run（运行）与 trace（轨迹）哈希为 `0a071304bda0dbf52d1edbe78294dec606bc1b943dad550e1a78d2e6598057fd`、`aae4e33b48391ddf3e488292c17d2035177023e1631cc65a7fe0784a0c03314e`，敏感模式扫描未命中。没有调用 Voyage（向量服务）、重建索引、写入 bad case（问题用例）或晋升 baseline（基线）；本次模型授权到此结束，等待 review（审核）。
+
+2026-07-30 v6 judge claim boundary candidate（第 6 版裁判主张边界候选）：按 review（审核）结论只修通用规则，不增加 case-specific（单用例特判）。Judge（裁判）现在把字段、资源、API、参数、键、命令和校验 / 准入 / 拒绝 / 运行后果统一视为需有依据的具体主张；示例例外只允许为依据已声明可配置的字段或参数提供占位值，来源不足披露不再抵消同一回答中的无依据主张；问题仍可从依据已明确列出的有限选项中作限定。上一有效运行的 9 张 `max_tokens`（令牌上限）无效票为直接消费者证据，Judge 专用输出预算由 4,096 提至 8,192 并继续绑定 `judgePromptHash`，其他模型调用不变。正式 `eval:judge` 复用同一人工校准集和 5 票协议，通过重复 `--case <case-id>` 产生不可晋升的 `targeted`（定向）运行；无参数继续产生完整 `calibration`（校准）运行。73 项相关定向非模型测试、完整 `npm test`、TypeScript（类型检查）、88/88/27/9 评估契约、schema（模式定义）、alias（别名）和差异格式检查均通过。九条实际选择预检的 dataset hash（数据集哈希）为 `44c958823e0e9bec11811d701d83eeacebd1849b71cac48a8f91d49a68dd1b77`，新 `promptHash=3f7a6c468230a73bb64ac6d2d3bd165a306b378637a42bd6f5309127ef73932f`；尚未调用模型。下一步精确候选为上一轮 7 条分歧与 2 条不可判定用例，共 9×5 次 DeepSeek Judge（深度求索裁判模型）请求；只有定向语义和法定人数门禁全部通过后，才另行申请 20×5 次完整复测授权。
+
+2026-07-30 v6 judge targeted retest（第 6 版裁判定向复测）：经明确授权执行运行 `2026-07-30T09-33-26-159Z-judge-targeted`。首次沙箱内命令在评估入口前因 `tsx` IPC（进程间通信）权限失败，没有产物或模型请求；沙箱外原命令重试后，9/9 条 trace（轨迹）、45/45 次计划投票和 dataset/config identity（数据集 / 配置身份）完整。42 票有效、3 票格式无效、0 次请求错误、0 个 harness error（评估框架错误）；8 条可判定用例的忠实度和回答行为均 `8/8` 与人工一致，四条策略用例的三个已标注维度均 `4/4` 一致。`refusal-nonexistent-field` 的两张有效票都正确判为不忠实，但两张非单一 JSON（数据格式）和一张 `policy:null` 非法票使其不可判定；三张无效票均正常结束且没有 `max_tokens`（令牌上限），证明预算修复关闭了本轮截断，但结构化输出稳定性仍未关闭。主结论 6 条、回答行为 1 条仍有内部不稳定。run（运行）和 trace（轨迹）哈希为 `913f81bcf22d7c7bd7b669c66d073bab32d158505bda35f9c4a332b836bfb8aa`、`d9b6c087e7af57f6dce17071d2773bef56b223a02a60f50209bfb67d2c3373ff`，严格解码、覆盖对账、Git ignore（版本控制忽略规则）和敏感模式扫描通过。定向门禁未通过，未启动完整复测，也未调用 Voyage（向量服务）、回答模型、重建索引、写入问题账本或晋升 baseline（基线）；下一步先无模型审核输出契约，任何重试仍需另行授权。
+
+2026-07-30 v7 judge output contract candidate（第 7 版裁判输出契约候选）：官方 DeepSeek Anthropic-compatible API（深度求索 Anthropic 兼容接口）支持字段没有 OpenAI-compatible API（OpenAI 兼容接口）的 `response_format`，不为三张无效票切换接口、新增依赖或复制客户端。原提示使用 `true 或 false` 等不可解析伪示例；当前改为两个合法 JSON（数据格式）对象，明确单对象首尾边界，以及无 `[policy]` 来源时必须省略 `policy`、不得输出 `null`。严格 parser（解析器）和 `judge-vote-parser-v5` 不变，新 `promptHash=7703d18a4dd8f4c7d15ff62523822a1fda00cba840067e3739b991d7dac6a79c`。35 项直接测试、完整 317/317 项测试、TypeScript（类型检查）和差异格式检查通过；没有模型或 Voyage（向量服务）调用、索引重建、问题账本写入或 baseline（基线）晋升。因为提示身份变化，上一轮 8 条成功不能与新候选拼接；该时点要求单独授权同一 9×5 次定向复测，通过后才可申请完整复测，执行结果见下一段。
+
+2026-07-30 v7 judge targeted retest（第 7 版裁判定向复测）：经再次明确授权执行 `2026-07-30T09-58-06-201Z-judge-targeted`。运行绑定九条 dataset hash（数据集哈希）`44c958823e0e9bec11811d701d83eeacebd1849b71cac48a8f91d49a68dd1b77`、上述 `promptHash`、`judge-vote-parser-v5` 和 5 票协议；9/9 条 trace（轨迹）与 45/45 次计划投票完整，41 票有效、4 票为非法 JSON（数据格式）、0 次请求错误、0 个 harness error（评估框架错误）。9/9 条忠实度、9/9 条回答行为和四条策略用例的全部已标注维度均达到法定人数并与人工标签一致；上一轮不可判定的 `refusal-nonexistent-field` 本轮 5/5 票有效且结论正确。四张无效票中两张正常结束、两张达到 8,192 token（令牌）上限；主结论 3 条、回答行为 1 条、策略冲突解释 2 条仍有内部不稳定，因此定向门禁通过，但单票结构化输出和稳定性风险未消失。run（运行）和 trace（轨迹）哈希为 `aaf3c03c879c95963651acd917732e948a7e47a6a356f04c6119042f3f590258`、`de5439450e553e3ba14cbf900d76c0f0db07094336a6d9331911d0b897548ff`，严格解码、覆盖对账、Git ignore（版本控制忽略规则）和敏感模式扫描通过。没有调用 Voyage（向量服务）、回答模型、重建索引、写入问题账本或晋升 baseline（基线）；下一步只能在再次获得明确模型调用授权后，对当前 20 条人工校准集执行每条 5 票的完整 Judge（裁判校准）复测。
+
+2026-07-30 v7 judge full calibration（第 7 版裁判完整校准）：经明确授权运行 `2026-07-30T10-34-25-790Z-judge`。20/20 条 trace（轨迹）与 100/100 次计划投票完整，91 票有效、9 票为非法 JSON（数据格式）、0 次请求错误、0 个 harness error（评估框架错误）。17 条可判定忠实度结论全部与人工一致，但 `pod-imagepullpolicy`、`rolebinding-roleref`、`refusal-prometheus-retention` 以 2:2 平票不可判定；回答行为 19/19 一致，后者另有 1 条行为平票。策略维度 distinguished（来源区分）和 misstatedAsOfficial（冒充官方规则）均 11/11，conflictExplained（冲突解释）为 10/11，`policy-pod-privileged` 的五张票一致为 true、人工为 false。9 张无效票包括 5 张正常结束与 4 张达到 8,192 token（令牌）上限的非单一对象；主结论 8 条内部不稳定。逐条无模型审核确认 `rolebinding-roleref` 与 `refusal-prometheus-retention` 的人工标签有效，平票属于裁判不稳定；`pod-imagepullpolicy` 的回答示例额外引入来源未覆盖的 `name`、`image`，与严格主张规则和人工 true 标签存在冲突；`policy-pod-privileged` 的回答实际解释了 schema（模式定义）允许与组织策略禁止的两层关系，`conflictExplained=false` 应重新判断为 true 或 N/A（不适用）。run（运行）与 trace（轨迹）哈希为 `953c94e2f73b8278f9d56422107a62ea5462dec0928a45dd0030eb7aea6b0918`、`25a7ba73c7279f4b928393880ef62d833d8b111443a5cd3f38a1554a3b182ab6`；严格解码、20 条覆盖、Git ignore（版本控制忽略规则）和敏感模式扫描通过。该运行只通过主一致率门槛，不通过完整质量门禁；没有调用 Voyage（向量服务）、回答模型、重建索引、写入问题账本或晋升 baseline（基线），也没有修改人工标签或追加模型运行。下一步先 review（审核）两处尺子边界。
+
+Task 18（任务 18）停止点与后续队列：当前结构实现、五类正式运行和产物审计均已完成，但质量验收未完成。下一步依次为：人工确认两处标签边界；在确认后无模型重建校准快照；分别诊断两个真实裁判平票和结构化输出无效票；再次授权后只先做必要的定向模型复测；随后处理 Faith（忠实度）的无依据回答 / 行为问题和四条跨资源检索问题；最后才逐类决定 baseline（基线）。未完成这些步骤或形成明确风险接受前，不进入公开发布，也不把当前 17/17 可判定一致率表述为完整校准通过。
 
 **Rollback（回滚）：** 不合格评估不晋升 baseline（基线），继续使用上一合法基线或“无当前基线”状态；不修改候选生产镜像来迎合结果。疑似敏感 artifact（产物）立即隔离并按安全事件处理。
 
@@ -1220,7 +1341,9 @@ npm run eval:fix -- --full
 
 ## Phase 5（阶段 5）：公开发布与运维验收
 
-## Task 19（任务 19）：先以 private（私有）公开 443，再人工开启 portfolio（作品集展示）
+## Task 19（任务 19，历史候选）：先以 private（私有）公开 443，再人工开启 portfolio（作品集展示）
+
+> 状态：本 Task（任务）依赖已撤销的 oauth2-proxy（认证代理）和 `private/portfolio`（私有 / 作品集展示）协议，已被 `2026-07-29-public-experience-control-design.md` 的统一公开界面、应用内身份和 `normal|interview|sleep` 三态设计替代，不得执行以下步骤。Task 18（任务 18）当前也未通过质量闸；修正并复测通过或形成明确风险接受记录后，必须先按新设计第 6 节另行确认生产发布与公网开放计划，并分别取得 Publish（正式发布）、生产部署、GitHub OAuth App（GitHub 开放授权应用）、生产 Secret（密钥）、安全组和模型开关授权。
 
 **Precondition（前置条件）：** Phase 4（阶段 4）和 Task 18（任务 18）通过，或 Task 18（任务 18）具有明确风险接受；生产证书、告警、回滚、当前/上一 digest（内容摘要）和 emergency stop（紧急停止）已验证。修改华为云安全组和公开访问获得当次明确授权。
 
@@ -1264,7 +1387,7 @@ npm run eval:fix -- --full
 
 ## Task 20（任务 20）：完成恢复演练、容量基线与观察期验收
 
-**Precondition（前置条件）：** Task 19（任务 19）受控试运行已开始；破坏性重启、隔离恢复和 Secret（密钥）轮换分别获得维护窗口与明确授权。
+**Precondition（前置条件）：** 按 2026-07-29 统一公开体验设计另行确认的生产发布任务已开始受控试运行；不得使用上方历史 Task 19（任务 19）代替。破坏性重启、隔离恢复和 Secret（密钥）轮换分别获得维护窗口与明确授权。
 
 **Files（文件）：**
 

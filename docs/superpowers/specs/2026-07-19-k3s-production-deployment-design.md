@@ -1,6 +1,6 @@
 # 华为云单机 K3s 生产部署设计
 
-> 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产，2026-07-23 审核批准六项发布证据和 Cosign（签名与证明工具）无密钥证明方案，2026-07-24 审核批准 Release Please（发布自动化工具）单一版本所有权与独立索引产物流程，2026-07-26 审核批准把候选镜像 `HIGH/CRITICAL`（高危 / 严重）漏洞扫描前移到 Pull Request（合并请求）门禁，2026-07-27 审核批准发布阶段以单次 Trivy（容器漏洞扫描）完整报告同时承担证据与失败关闭门禁；同日 `v0.1.0` 已通过人工 Publish（正式发布）和 Attempt 5（第 5 次尝试）完成首次私有部署。
+> 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产，2026-07-23 审核批准六项发布证据和 Cosign（签名与证明工具）无密钥证明方案，2026-07-24 审核批准 Release Please（发布自动化工具）单一版本所有权与独立索引产物流程，2026-07-26 审核批准把候选镜像 `HIGH/CRITICAL`（高危 / 严重）漏洞扫描前移到 Pull Request（合并请求）门禁，2026-07-27 审核批准发布阶段以单次 Trivy（容器漏洞扫描）完整报告同时承担证据与失败关闭门禁；同日 `v0.1.0` 已通过人工 Publish（正式发布）和 Attempt 5（第 5 次尝试）完成首次私有部署。2026-07-28 Task 15 Step 2（任务 15 步骤 2）依据生产 Traefik（入口控制器）和 oauth2-proxy（认证代理）实际版本证据，把受保护路由从 ForwardAuth（前置认证）修订为 oauth2-proxy reverse proxy（认证代理反向代理）；Step 3/5/6/7（步骤 3/5/6/7）的应用授权、最小隐私提示、本地验证和 Task 16（任务 16）交接已经通过用户 review（审核）。Step 4（步骤 4）的精确输入 token（令牌）前置上限和供应商费用硬额度证据作为显式延期风险继续未勾选；该审核不构成发布或部署授权。同日用户决定当前不注册域名，Task 16（任务 16）入口改为 `https://120.46.57.214/k8s-yaml-assistant` 和公网 IP 短期证书；该修订及 `set-access-mode`（设置访问模式）扩展设计已通过独立 review（审核），Step 2（步骤 2）的本地反例、候选实现和 review（审核）修正已经完成，固定 GitHub scope（GitHub 授权范围）为 `user:email read:org`，域名只保留为未来单独变更。生产安装、证书签发、真实 GitHub OAuth callback（GitHub 开放授权回调）、安全组和集群写入尚未执行。
 > 用途：定义当前项目在华为云单机 K3s（轻量 Kubernetes）上的生产部署架构、实施边界和验收门禁。
 > 本文维护设计边界；实际实施状态和审核停止点以对应实施计划为准。
 
@@ -12,7 +12,7 @@
 
 1. 华为云 Flexus 应用服务器 L 实例运行单节点 K3s（轻量 Kubernetes），使用 K3s 自带的 Traefik（入口控制器）和 ServiceLB（服务负载均衡器）。
 2. 应用构建为一个 Next.js（React 全栈框架）standalone output（独立运行产物）容器，以 non-root user（非 root 用户）运行；应用镜像推送到私有 GHCR（GitHub 容器镜像仓库），发布时同时固定 commit SHA（提交哈希）标签和镜像 digest（内容摘要），禁止使用 latest。
-3. 应用使用一个 Deployment（工作负载）、一个 ClusterIP Service（集群内服务）和一个逻辑 Ingress（入口）边界，replicas（副本数）为 1；该边界可以由多个固定、预审核的 IngressRoute（Traefik 入口路由）对象表达不同路径策略，但只有一个公开域名和 TLS（传输层安全）入口。管理员控制的 ACCESS_MODE（访问模式）只允许 private（私有）和 portfolio（作品集展示）两个值；private（私有）模式由 oauth2-proxy（OAuth 2.0 认证代理）和 GitHub OAuth 2.0（GitHub 开放授权 2.0）允许名单保护全部应用路由，portfolio（作品集展示）模式开放页面和不调用外部模型的 YAML 检查。匿名模型体验必须等待独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计和实现通过审核后才能开放。cert-manager（证书管理器）负责证书。
+3. 应用使用一个 Deployment（工作负载）、一个 ClusterIP Service（集群内服务）和一个逻辑 Ingress（入口）边界，replicas（副本数）为 1；该边界可以由多个固定、预审核的 IngressRoute（Traefik 入口路由）对象表达不同路径策略，但当前只有一个公开 origin（访问源）`https://120.46.57.214`、一个 TLS（传输层安全）入口和一个固定基础路径 `/k8s-yaml-assistant`。管理员控制的 ACCESS_MODE（访问模式）只允许 private（私有）和 portfolio（作品集展示）两个值；private（私有）模式的全部业务流量由 Traefik（入口控制器）转发到 oauth2-proxy reverse proxy（认证代理反向代理），认证代理完成 GitHub OAuth 2.0（GitHub 开放授权 2.0）允许名单校验、客户端身份头清理和受控身份注入后才访问应用。portfolio（作品集展示）模式只允许固定匿名路由由 Traefik（入口控制器）直接访问应用，其余路由仍经过认证代理。匿名模型体验必须等待独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计和实现通过审核后才能开放。cert-manager（证书管理器）负责公网 IP 短期证书和自动续期；未来改用域名时单独审核证书与回调身份，不影响当前前置条件。
 4. 当前约 37 MiB 的检索索引仍随最终应用镜像交付，但付费构建从发布证据生成中拆出：管理员只在需要的新 corpus/model/index identity（语料 / 模型 / 索引身份）缺失时手工运行 `index-build`（索引构建）流水线，生成、签名并按 digest（内容摘要）固定独立 GHCR index artifact（GHCR 索引产物）。release artifacts workflow（发布证据流水线）不读取 Voyage 密钥、不重建索引，只验证该不可变产物并通过外部 BuildKit context（BuildKit 构建上下文）把它烘焙进最终镜像；运行时只读加载，禁止因索引缺失或失效而在线重建。
 5. 第一阶段由 GitHub Actions（GitHub 自动化流水线）直接发布 release（发布版本）：`.github/workflows/release.yml` 是 Release lifecycle（发布生命周期）入口。每次普通 `main` push（主分支推送）先核对源码版本、GitHub Release（GitHub 发布版本）、Git tag（Git 标签）和关联 Pull Request（合并请求）状态；没有活动应用草稿时，Release Please（发布自动化工具）创建或更新一个 Release Pull Request（发布合并请求），不会调用 Voyage 或构建候选镜像。该合并请求合并后，Release Please（发布自动化工具）只创建并拥有当前 Draft Release（草稿发布版本）、版本、标签名和发布说明，不在同一次运行继续准备下一版本，再以自身输出调用无人工参数的 `.github/workflows/release-artifacts.yml` reusable workflow（可复用发布证据流水线）。发布证据流水线只构建、证明应用镜像并向既有草稿附加六项证据；当前唯一维护者核对后手工 Publish（发布），此时才创建 Git tag（Git 标签）并由 `release.published`（发布版本已发布）事件调度专用 self-hosted deployment runner（自托管部署运行器）。该流程是单人两步确认，不宣称独立复核；运行器绝不处理 Pull Request（合并请求），公网仍不向 GitHub 动态地址开放 SSH 22 或 Kubernetes API（Kubernetes 应用程序接口）6443。
 6. 生产 serving observation（在线观测）在安全协议、生产存储和运维门禁全部通过后持续启用；初始采用低流量单节点可审计的安全本地写入方案。现有原始 RetrievalTrace（检索轨迹）必须先隔离，任何失败都不得回退写入原文。持续启用不等于保存原始 YAML、无限期保留或保证每条请求都落盘。
@@ -160,14 +160,16 @@ Task 11（任务 11）的本地容器门禁使用“HEAD 已跟踪文件 + 当�
 K3s Traefik（入口控制器）
   ├─ TLS 终止：cert-manager（证书管理器）管理证书
   ├─ 请求体大小、入口速率、并发保护
-  ├─ private（私有）：全部应用路由经过 ForwardAuth（前置认证）
-  └─ portfolio（作品集展示）：公开页面和受控匿名路由；管理员路由仍经过 ForwardAuth
-                                  │
-                  oauth2-proxy（OAuth 2.0 认证代理）
-                  GitHub OAuth 2.0（GitHub 开放授权 2.0）允许名单
+  ├─ private（私有）：全部业务路由转发到 oauth2-proxy reverse proxy（认证代理反向代理）
+  └─ portfolio（作品集展示）：固定匿名路由直达应用；其余路由仍转发到认证代理
                                   │
                                   ▼
-                    ClusterIP Service（集群内服务）
+                  oauth2-proxy（OAuth 2.0 认证代理）
+                  GitHub OAuth 2.0（GitHub 开放授权 2.0）允许名单
+                  清理客户端身份头并注入会话主体
+                                  │
+                                  ▼
+                    应用 ClusterIP Service（应用集群内服务）
                                   │
                                   ▼
                     Next.js Deployment（Next.js 工作负载）
@@ -219,8 +221,8 @@ ACCESS_MODE（访问模式）是生产部署配置，不是前端 feature flag�
 
 模式切换不是单字段热更新：
 
-- private → portfolio（私有 → 作品集展示）：先部署并验证应用保护；如需开放匿名模型能力，还必须先完成独立计量门禁。保持 ForwardAuth（前置认证）不变完成私有反例测试，最后才开放经过审核的匿名路由。
-- portfolio → private（作品集展示 → 私有）：先让 Ingress（入口）恢复全部业务路由的 ForwardAuth（前置认证），验证匿名请求被拒绝，再把应用配置切回 private（私有）。安全或费用异常时允许直接执行这一收紧动作，不等待常规发布窗口。
+- private → portfolio（私有 → 作品集展示）：先部署并验证应用保护；如需开放匿名模型能力，还必须先完成独立计量门禁。保持全部业务路由经过 oauth2-proxy reverse proxy（认证代理反向代理）完成私有反例测试，最后才开放经过审核且删除受信身份头的匿名路由。
+- portfolio → private（作品集展示 → 私有）：先让 Ingress（入口）恢复全部业务路由到 oauth2-proxy reverse proxy（认证代理反向代理），并把应用入站 NetworkPolicy（网络策略）收紧为只允许认证代理，验证匿名请求被拒绝，再把应用配置切回 private（私有）。安全或费用异常时允许直接执行这一收紧动作，不等待常规发布窗口。
 
 固定部署适配器只能接受枚举动作 set-access-mode private 或 set-access-mode portfolio（设置访问模式），不得接收任意 ConfigMap（普通配置）、Ingress（入口）内容或 kubectl（Kubernetes 命令行工具）参数。启用 portfolio（作品集展示）需要与正式发布相同的人工清单确认；关闭到 private（私有）始终允许作为低风险紧急动作，但事后必须补录审计。
 
@@ -522,7 +524,7 @@ K3s、Namespace（命名空间）、运行时 Secret（密钥）、imagePullSecr
 
 Phase 3（阶段 3）的 direct release（直接发布）授权范围只包括“把固定 Deployment（工作负载）的应用镜像切换为已审核 digest（内容摘要），并验证或回滚”。Namespace（命名空间）、Secret（密钥）、Ingress（入口）、RBAC（基于角色的访问控制）、资源上限或其他清单变化仍按 Phase（阶段）单独审核和 bootstrap（引导配置）；不得借发布工作流扩大部署适配器能力。
 
-Phase 4（阶段 4）完成访问模式反例测试后，可以给同一 root-owned deployment adapter（root 所有的部署适配器）增加独立、固定的 set-access-mode private|portfolio（设置访问模式）动作。它只能在两个预安装、版本固定的路由配置之间切换，并同步一个枚举 ConfigMap（普通配置）值；不能接收任意清单或参数。启用 portfolio（作品集展示）先生成引用当前 image digest（镜像内容摘要）、前后模式、安全门禁和回退动作的 draft operational release（草稿运维发布版本），只有管理员手工发布后才执行。关闭到 private（私有）可由管理员手工 workflow_dispatch（手工触发）立即执行，失败时再使用固定来源 SSH（安全远程登录）；两条路径都必须记录结果。
+Phase 4（阶段 4）完成访问模式反例测试后，可以给同一 root-owned deployment adapter（root 所有的部署适配器）增加独立、固定的 set-access-mode private|portfolio（设置访问模式）动作。它只能在两个预安装、版本固定的路由配置之间切换，并同步一个枚举 ConfigMap（普通配置）值；不能接收任意清单或参数。两个方向的正常变更都先生成引用当前 image digest（镜像内容摘要）、前后模式、安全门禁、固定模式清单摘要和回退动作的 draft operational Release（草稿运维发布版本），只有管理员手工 Publish（正式发布）后，固定 access-mode workflow（访问模式流水线）才能签发授权并调度生产运行器。紧急关闭到 private（私有）可以使用固定来源 SSH（安全远程登录）调用同一 private（私有）收敛函数，不能由该路径开启 portfolio（作品集展示）；正常和紧急路径都必须记录结果。
 
 | job（任务） | runner（运行器） | GITHUB_TOKEN 最小权限 | 可见 Secret（密钥） | 生产权限 |
 | --- | --- | --- | --- | --- |
@@ -605,7 +607,7 @@ prevent self-review（禁止自我审核）的含义是：发起某次 deploymen
 - 运行器使用独立无登录、非 root 系统账号；不加入 docker group（Docker 组），不挂载 Docker socket（Docker 套接字），没有 SSH 私钥、模型 Secret（模型密钥）、GHCR 推送凭据或完整 K3s kubeconfig（K3s 客户端配置）。
 - deploy job（部署任务）不运行 actions/checkout（仓库检出动作）、第三方 Action（流水线动作）或仓库中的 shell/JavaScript（命令行 / JavaScript）脚本。工作流只能调用 root 所有、不可由运行器账号修改的固定部署适配器。
 - deploy job（部署任务）的 GITHUB_TOKEN 只授予验证 provenance（来源）和更新 deployment status（部署状态）所需的只读/写入最小权限；不得授予 contents:write、packages:write 或管理权限。
-- 运行器账号的 sudoers（提权规则）只允许无交互调用该适配器；适配器只接受 deploy/rollback（部署 / 回滚）及经过 Phase 4（阶段 4）单独审核后增加的 set-access-mode private|portfolio（设置访问模式）动作。部署输入只接受 sha256:<64-hex> 格式的 digest（内容摘要）和大小受限的签名 provenance bundle（来源证明包）；模式输入只接受两个固定枚举值和匹配的运维发布记录。目标 GHCR repository/Namespace/Deployment/container/ConfigMap/Ingress（GHCR 仓库 / 命名空间 / 工作负载 / 容器 / 普通配置 / 入口）全部固定，禁止传入命令、文件路径、URL（网址）、manifest（清单）或额外 kubectl argument（Kubernetes 命令行参数）。
+- 运行器账号的 sudoers（提权规则）只允许无参数、无交互调用该适配器；适配器只接受 deploy/rollback（部署 / 回滚）及经过 Phase 4（阶段 4）单独审核后增加的 set-access-mode private|portfolio（设置访问模式）签名信封。部署输入只接受 sha256:<64-hex> 格式的 digest（内容摘要）和大小受限的签名 provenance bundle（来源证明包）；模式输入只接受两个固定枚举值、已发布运维版本身份、当前镜像摘要和固定模式清单摘要。目标 GHCR repository/Namespace/Deployment/container/ConfigMap/Ingress（GHCR 仓库 / 命名空间 / 工作负载 / 容器 / 普通配置 / 入口）全部固定，禁止传入命令、文件路径、URL（网址）、manifest（清单）或额外 kubectl argument（Kubernetes 命令行参数）。
 - 适配器在修改前用固定 trust root/workflow identity（信任根 / 工作流身份）独立验证证明包、镜像仓库、digest（内容摘要）和当前版本，证明包中的 subject digest（主体摘要）必须等于审核值；适配器不接收 GitHub token（GitHub 令牌），内部通过本机 K3s API（K3s 应用程序接口）操作，不把 admin kubeconfig（管理员客户端配置）暴露给运行器。
 - 运行器只需出站 TCP 443 到经过审核的 GitHub Actions/GHCR（GitHub 流水线 / 容器仓库）端点；安装后重新核对监听端口，不能新增公网入站。
 - runner work directory（运行器工作目录）权限受限并在每个任务后清理；日志只保留发布元数据，不输出环境、Secret（密钥）或 kubeconfig（Kubernetes 客户端配置）。
@@ -653,8 +655,8 @@ GitOps（拉取式部署管理）必须由集群主动出站拉取，不因此�
 | Deployment（工作负载） | 运行 Next.js（React 全栈框架） | replicas=1、固定 digest（内容摘要）、安全上下文和探针 |
 | PersistentVolumeClaim（持久卷声明） | 安全 serving observation（在线观测）的轮转分段 | 小容量 local-path（本地路径）卷；只存严格协议的安全观测，不存索引、原始 YAML、回答、计量状态或 Secret（密钥） |
 | ClusterIP Service（集群内服务） | 稳定暴露容器 3000 端口 | 不使用 NodePort（节点端口）或 LoadBalancer（负载均衡器）直接公开应用 |
-| Ingress / IngressRoute（入口 / Traefik 入口路由） | 域名、TLS（传输层安全）、访问模式路由、认证和保护中间件 | 只指向内部 Service（服务）；只能在两个已审核路由配置之间切换 |
-| oauth2-proxy Deployment/Service（认证代理工作负载 / 服务） | GitHub OAuth 2.0（GitHub 开放授权 2.0）和允许名单 | 镜像固定 digest（内容摘要），只信任 Traefik 设置的身份头 |
+| Ingress / IngressRoute（入口 / Traefik 入口路由） | 入口身份、TLS（传输层安全）、访问模式路由和保护中间件 | private（私有）只指向认证代理 Service（服务）；portfolio（作品集展示）只能额外开放已审核匿名路由 |
+| oauth2-proxy Deployment/Service（认证代理工作负载 / 服务） | GitHub OAuth 2.0（GitHub 开放授权 2.0）允许名单和受保护路由反向代理 | 镜像固定 digest（内容摘要）；只接受 Traefik（入口控制器）入站，限制可信代理网段，删除其负责注入的客户端身份头后从已验证会话重新注入 |
 | Certificate/Issuer（证书 / 签发器） | ACME（自动证书管理环境）签发和续期 | 先 staging（预发布签发器）验证，再 production（生产签发器） |
 | NetworkPolicy（网络策略） | 限制入站和不必要的东西向访问 | 不宣称标准策略能按域名限制 DeepSeek/Voyage 出站 |
 
@@ -716,10 +718,10 @@ JavaScript 内存中的向量和对象会明显大于约 37 MiB 的磁盘索引�
 
 ### 8.5 网络和配置
 
-- Traefik（入口控制器）是应用唯一入站来源；应用 Service（服务）仅 ClusterIP（集群内地址）。
-- Namespace（命名空间）默认拒绝不需要的入站，显式允许 Traefik（入口控制器）访问应用和认证代理。
+- private（私有）模式中，oauth2-proxy（认证代理）是应用唯一业务入站来源，Traefik（入口控制器）只能访问认证代理；应用和认证代理 Service（服务）均仅使用 ClusterIP（集群内地址）。
+- portfolio（作品集展示）模式只为固定匿名路由增加 Traefik（入口控制器）到应用的访问；对应入口必须删除应用认可的全部身份头。受保护路由仍经过 oauth2-proxy（认证代理），模式切换必须替换同名 NetworkPolicy（网络策略），不能依赖多个策略相互覆盖，因为 NetworkPolicy（网络策略）规则按并集生效。
 - 应用允许 DNS（域名系统）解析和出站 443 到模型供应商。标准 NetworkPolicy（网络策略）不提供可靠的域名 allowlist（允许名单）；未部署专用 egress proxy（出站代理）前不能声称已按域名隔离。
-- ConfigMap（普通配置）显式设置 DEEPSEEK_BASE_URL、DEEPSEEK_ANSWER_MODEL、VOYAGE_EMBEDDING_URL、VOYAGE_RERANK_URL、VOYAGE_EMBEDDING_MODEL、VOYAGE_RERANK_MODEL、INDEX_DIR、ENABLE_QUERY_EXPANSION、ACCESS_MODE、NODE_ENV、PORT、HOSTNAME 和 serving observation（在线观测）的完整非敏感配置。缺失、未知或非法供应商配置使就绪检查失败；缺失或非法 ACCESS_MODE（访问模式）按 private（私有）处理。不在计量设计前添加 Turnstile sitekey（Turnstile 站点公钥标识）或匿名额度变量。
+- ConfigMap（普通配置）显式设置 DEEPSEEK_BASE_URL、DEEPSEEK_ANSWER_MODEL、VOYAGE_EMBEDDING_URL、VOYAGE_RERANK_URL、VOYAGE_EMBEDDING_MODEL、VOYAGE_RERANK_MODEL、INDEX_DIR、ENABLE_QUERY_EXPANSION、ACCESS_MODE、MODEL_ACCESS_ENABLED、NODE_ENV、PORT、HOSTNAME 和 serving observation（在线观测）的完整非敏感配置。缺失、未知或非法供应商配置使就绪检查失败；缺失或非法 ACCESS_MODE（访问模式）按 private（私有）处理，MODEL_ACCESS_ENABLED 只有精确 `true` 才启用模型路由。不在计量设计前添加 Turnstile sitekey（Turnstile 站点公钥标识）或匿名额度变量。
 - DEEPSEEK_API_KEY 和 VOYAGE_API_KEY 使用 secretKeyRef（密钥引用）注入；Turnstile secret key（Turnstile 服务端密钥）、未来计量或 Interview Pass（面试临时通行证）密钥由对应设计确定，日志不得打印完整环境。
 - 应用 ServiceAccount（服务账户）不授予读取或修改 ConfigMap/Secret/Ingress（普通配置 / 密钥 / 入口）的 Kubernetes API（Kubernetes 应用程序接口）权限；配置只在 Pod（容器组）启动时注入，模式变更必须经过受控 rollout（滚动更新）。
 
@@ -742,13 +744,13 @@ Phase 1（阶段 1）实施后核对：
 
 详细非敏感证据维护在 `deploy/k3s/README.md`；服务器 Secret（密钥）、完整 kubeconfig（客户端配置）和云控制面详情不写入本文。
 
-### 9.2 域名与 DNS
+### 9.2 公网入口身份
 
-- 使用专用子域名，例如由操作者选择的 app 子域；本文不假设最终域名。
-- 创建 A record（A 记录）指向 120.46.57.214；只有服务器和安全组明确启用 IPv6 时才创建 AAAA record（AAAA 记录）。
-- DNS TTL（域名缓存时间）在首次发布前临时设为较低但合理的值，稳定后再提高。
-- oauth2-proxy（OAuth 2.0 认证代理）的 callback URL（回调地址）、Ingress host（入口主机名）和 TLS certificate（TLS 证书）必须使用完全相同的最终域名。
-- 发布前验证域名所有权、解析传播和没有旧记录指向其他资产。
+- 当前不注册或依赖域名，不创建 A/AAAA record（IPv4 / IPv6 地址记录），也不把临时免费域名作为生产事实。
+- 固定访问源为 `https://120.46.57.214`，固定基础路径为 `/k8s-yaml-assistant`。Next.js（前端框架）在构建时固定同一 `basePath`（基础路径）；前端请求、探针、IngressRoute（入口路由）和 oauth2-proxy（认证代理）必须复用该路径。
+- Certificate（证书）只声明 `ipAddresses: [120.46.57.214]`，Issuer（签发器）使用 Let’s Encrypt（免费证书颁发机构）的 `shortlived`（短期证书）profile（配置档）。IP 证书约 6 天有效，只有自动续期和故障告警通过后才能进入公开门禁。
+- IP 客户端可能不发送 SNI（服务器名称指示）。Traefik（入口控制器）必须把同一证书配置为集群唯一 `default` TLSStore（默认传输层安全证书仓库）证书；发现其他 `default` TLSStore（默认传输层安全证书仓库）时停止，不覆盖未知入口。
+- GitHub OAuth callback（GitHub OAuth 回调）固定为 `https://120.46.57.214/k8s-yaml-assistant/oauth2/callback`。未来如注册域名，必须把证书、回调、路由和 OAuth App（OAuth 应用）作为同一单独审核变更，不能同时保留两个未审核入口。
 
 ### 9.3 安全组和端口
 
@@ -762,7 +764,7 @@ Phase 1（阶段 1）实施后核对：
 
 80 端口对 HTTP-01（HTTP 验证）签发和续期需要公网可达；Phase 4（阶段 4）只允许 cert-manager solver（证书管理器验证路由）响应 challenge（挑战），其他路径不得代理到应用。Phase 5（阶段 5）才增加到 HTTPS（安全超文本传输协议）的固定跳转。参考：[Let's Encrypt 允许 80 端口的说明](https://letsencrypt.org/docs/allow-port-80/)、[cert-manager HTTP-01 文档](https://cert-manager.io/docs/configuration/acme/http01/)。
 
-如果不能接受签发阶段开放 80，应另行评审 DNS-01（DNS 验证）及最小权限 DNS API（DNS 应用程序接口）凭据，不能临时关闭证书验证。
+公网 IP 证书不能使用 DNS-01（DNS 验证）。如果不能接受签发和约每 6 天续期所需的 80/TCP HTTP-01（HTTP 验证），当前方案停止；不能临时关闭证书验证或降级为明文 HTTP（超文本传输协议）。
 
 K3s（轻量 Kubernetes）与 Ubuntu firewall（Ubuntu 防火墙）的组合必须按官方网络要求审核。不能一边随意启用 UFW（Ubuntu 防火墙），一边遗漏 Pod/Service CIDR（容器组 / 服务网段）和 K3s 端口；华为云安全组仍是外层边界。参考：[K3s 安装要求](https://docs.k3s.io/installation/requirements)、[K3s 基础网络选项](https://docs.k3s.io/networking/basic-network-options)。
 
@@ -771,9 +773,9 @@ K3s（轻量 Kubernetes）与 Ubuntu firewall（Ubuntu 防火墙）的组合必�
 Phase 3（阶段 3）不开放 80/443。推荐两种只读访问路径：
 
 1. 在服务器上把 ClusterIP Service（集群内服务）临时 port-forward（端口转发）到 127.0.0.1，再从本机建立 SSH tunnel（SSH 隧道），验证 UI（用户界面）、API（应用程序接口）和探针。
-2. Ingress（入口）和临时证书就绪后，把本机 8443 隧道到服务器 127.0.0.1:443，并用最终 host（主机名）验证 SNI（服务器名称指示）、认证跳转和路由；不改变安全组。
+2. Ingress（入口）和临时证书就绪后，把本机 8443 隧道到服务器 127.0.0.1:443，验证 IP SAN（IP 主题备用名称）、无 SNI（服务器名称指示）证书选择、认证跳转和固定语义路径；不改变安全组。
 
-示意命令中的 <namespace>、<service>、<server-alias> 和 <app-host> 必须替换为审核后的真实值：
+示意命令中的 <namespace>、<service> 和 <server-alias> 必须替换为审核后的真实值：
 
 ~~~sh
 sudo k3s kubectl -n <namespace> port-forward service/<service> 18080:3000 --address=127.0.0.1
@@ -781,14 +783,14 @@ ssh -N -L 18080:127.0.0.1:18080 <server-alias>
 curl --fail http://127.0.0.1:18080/api/health/ready
 
 ssh -N -L 8443:127.0.0.1:443 <server-alias>
-curl --fail --head --resolve <app-host>:8443:127.0.0.1 https://<app-host>:8443/
+curl --fail --head --resolve 120.46.57.214:8443:127.0.0.1 https://120.46.57.214:8443/k8s-yaml-assistant
 ~~~
 
 port-forward（端口转发）只用于人工验证，不是常驻代理或生产入口。不得把完整 kubeconfig（Kubernetes 客户端配置）复制到本机来图省事。
 
 ### 9.5 access mode（访问模式）与管理员控制
 
-明确推荐保留 GitHub OAuth 2.0（GitHub 开放授权 2.0）、oauth2-proxy（OAuth 2.0 认证代理）和显式 allowlist（允许名单），但不再要求所有作品集访客登录。Traefik ForwardAuth（Traefik 前置认证）保护 private（私有）模式的全部业务路由，以及 portfolio（作品集展示）模式中的管理员路由；入口必须删除客户端自带的身份头，只接受认证代理返回的受控头。参考：[Traefik ForwardAuth 文档](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/forwardauth/)、[oauth2-proxy 配置文档](https://oauth2-proxy.github.io/oauth2-proxy/configuration/overview/)。
+明确推荐保留 GitHub OAuth 2.0（GitHub 开放授权 2.0）、oauth2-proxy（OAuth 2.0 认证代理）和显式 allowlist（允许名单），但不再要求所有作品集访客登录。受保护路由采用 oauth2-proxy reverse proxy（认证代理反向代理），不采用 ForwardAuth（前置认证）：固定版本认证代理先删除它负责设置的、包括大小写和下划线变体在内的客户端 `X-Forwarded-*` 身份头，再从成功会话注入 `X-Forwarded-User`；应用只把该字段作为当前主体输入，不把 `X-Auth-Request-*`、`Authorization` 或任意客户端字段当作身份。private（私有）NetworkPolicy（网络策略）只允许认证代理访问应用，认证代理只允许 Traefik（入口控制器）访问；两者共同构成信任边界。参考：[oauth2-proxy 配置文档](https://oauth2-proxy.github.io/oauth2-proxy/configuration/overview/)。
 
 | 路由类别 | private（私有） | portfolio（作品集展示） |
 | --- | --- | --- |
@@ -825,6 +827,8 @@ Interview Pass（面试临时通行证）保留为后续明确需求，而不是
 7. abnormal traffic response（异常流量响应）：入口 401/403/413/429/5xx 比例、验证失败、通行码猜测、并发拒绝和上游费用异常触发告警；首先把 ACCESS_MODE（访问模式）切回 private（私有）或把模型路由额度降为 0，必要时再关闭 443 安全组或停用 Ingress（入口），不能依赖应用继续承压。
 
 Phase 4（阶段 4）的 allowlist（允许名单）保守速率测试候选值仍为：认证前每 IP 每分钟 30 次、burst（突发）10 次；/api/check 每主体每分钟 60 次、突发 20 次；/api/ask 每主体每分钟 6 次、突发 2 次；/api/generate 每主体每分钟 2 次、突发 1 次；/api/fix 每主体每分钟 3 次、突发 1 次。这些值只验证入口和应用拒绝语义，不是 token/usage/cost（令牌 / 用量 / 成本）额度，也不是容量承诺。匿名和 Interview Pass（面试临时通行证）的所有累计值等待独立计量设计；必须保留把模型路由调用能力立即关闭的 emergency stop（紧急停止）能力。
+
+2026-07-28 Task 15（任务 15）候选已把上述应用侧速率、有限键空间、全局/单主体并发、模型紧急停止、上游超时和有限重试落盘。DeepSeek（回答模型）每次上游调用的输出固定为 `max_tokens=2048`，构造后的模型请求另受 256 KiB 序列化字节上限；该字节边界不等于精确输入 token（令牌）计数。DeepSeek（回答模型）官方说明不同模型的分词方法可能不同，实际处理量以响应 usage（用量）为准；在 V4（第 4 代模型）调用前精确计数契约和供应商费用硬额度得到验证前，cost circuit breaker（费用熔断器）门禁仍未完成，匿名模型能力保持关闭。参考：[DeepSeek Token Usage（DeepSeek 令牌用量）](https://api-docs.deepseek.com/quick_start/token_usage/)。
 
 Traefik（入口控制器）的短窗口内存限流重启后会清空，只是第一层削峰，不能作为费用事实源。未来计量设计必须另行证明跨重启总预算和 Interview Pass（面试临时通行证）状态；在此之前匿名模型调用保持关闭。
 
@@ -1214,11 +1218,13 @@ gh run view <run-id>
 
 输出草稿保留/发布/删除证据、实际 workflow/runner scope（工作流 / 运行器范围）边界、部署记录、私有功能、安全反例、资源峰值、日志审计、serving observation（在线观测）的落盘/轮转/删除/失败结果、模型调用次数/费用和 Action rollback（流水线回滚）演练，停止等待 review（审核）。
 
-### Phase 4：域名、TLS、认证与限流
+### Phase 4：公网 IP TLS、固定语义路径、认证与限流
+
+> 状态：本节及 Phase 5（阶段 5）中 oauth2-proxy（认证代理）、private/portfolio（私有 / 作品集展示）和允许名单方案从未部署，已由 `2026-07-29-public-experience-control-design.md` 替代。以下内容只保留历史审核背景，不再指导实现或生产安装；公网 IP、固定路径、证书和 Phase 0-3（阶段 0-3）信任链中未被替代的部分继续有效。
 
 **输入条件**
 
-- 最终域名和 DNS（域名系统）控制权已确认；
+- 公网 IPv4 `120.46.57.214`、基础路径 `/k8s-yaml-assistant` 和公网 IP 短期证书方案通过审核；域名和 DNS（域名系统）不是当前前置条件；
 - GitHub OAuth App（GitHub OAuth 应用）允许名单和回调地址已审核；如准备进入匿名模型扩展，Cloudflare Turnstile（Cloudflare 人机验证服务）生产域名和凭据职责随独立计量设计一起确认；
 - ACCESS_MODE（访问模式）、请求体限制、认证、allowlist（允许名单）、入口与应用限流、并发和 private（私有）模式费用边界已先写反例测试并实现；
 - 如果本阶段准备开放匿名模型体验或 Interview Pass（面试临时通行证），先编写独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计并停止等待 review（审核）；该设计未批准前不得实现额度存储或开放匿名付费路由；
@@ -1228,9 +1234,9 @@ gh run view <run-id>
 
 **修改内容**
 
-- 配置 DNS A record（DNS A 记录）；
-- 安装固定版本 cert-manager（证书管理器），先使用 ACME staging issuer（ACME 预发布签发器）；
-- 创建 oauth2-proxy（OAuth 2.0 认证代理）、ForwardAuth（前置认证）、body/rate/concurrency middleware（请求体 / 速率 / 并发中间件）和两个固定访问模式的 Ingress/IngressRoute（入口 / Traefik 入口路由）配置；
+- 不创建 DNS（域名系统）记录；Next.js（前端框架）、前端请求、探针、oauth2-proxy（认证代理）和 IngressRoute（入口路由）统一固定 `/k8s-yaml-assistant`；
+- 安装固定版本 cert-manager（证书管理器），先使用 ACME staging issuer（ACME 预发布签发器）的 `shortlived`（短期证书）profile（配置档）为 `120.46.57.214` 签发 IP 证书，并由唯一 `default` TLSStore（默认传输层安全证书仓库）提供给无 SNI（服务器名称指示）客户端；
+- 部署 Task 15（任务 15）已审核并固定 digest（内容摘要）的 oauth2-proxy reverse proxy（认证代理反向代理）和 private（私有）NetworkPolicy（网络策略），再创建 body/rate/concurrency middleware（请求体 / 速率 / 并发中间件）和两个固定访问模式的 IngressRoute（Traefik 入口路由）配置；
 - portfolio（作品集展示）的基础路由只开放页面、静态资源和不调用外部模型的 YAML 检查；Ask/Generate/Fix（询问 / 生成 / 修复）继续要求 allowlist（允许名单）身份。Turnstile（人机验证）、匿名会话、Interview Pass（面试临时通行证）和任何计量状态只在独立计量设计批准后实施；
 - 扩展固定部署适配器，只接受 set-access-mode private|portfolio（设置访问模式）枚举动作；实现“开启最后开放入口、关闭首先收紧入口”的有序切换和部分失败回退；
 - 对公网开放只承载 ACME HTTP-01（ACME HTTP 验证）的 80；443 仍只允许当前固定来源或另行审核的测试来源；
@@ -1241,11 +1247,10 @@ cert-manager（证书管理器）必须使用实施当日仍受支持的固定�
 **验证命令**
 
 ~~~sh
-dig +short <app-host> A
 sudo k3s kubectl -n <namespace> get ingress,certificate,certificaterequest,order,challenge
 sudo k3s kubectl -n <namespace> describe certificate <certificate>
-curl --fail --head https://<app-host>/
-openssl s_client -connect <app-host>:443 -servername <app-host>
+curl --fail --head https://120.46.57.214/k8s-yaml-assistant
+openssl s_client -connect 120.46.57.214:443 -verify_ip 120.46.57.214
 ~~~
 
 必须在受限来源中分别执行 private/portfolio（私有 / 作品集展示）基础安全反例，完成后切回 private（私有）：
@@ -1271,7 +1276,7 @@ openssl s_client -connect <app-host>:443 -servername <app-host>
 
 **停止点**
 
-输出 DNS、证书链、private/portfolio（私有 / 作品集展示）基础模式矩阵、管理员权限、限流、请求体、费用熔断、serving observation（在线观测）和异常流量测试，确认匿名模型路由关闭且最终状态为 private（私有），停止等待 review（审核）。如果下一步需要匿名模型体验，在此停止点提交独立计量设计；不能在同一次 review（审核）中边设计边上线。此时只有证书挑战端口对公网可达，应用 443 仍限制审核来源，不宣布正式发布。
+输出公网 IP 证书链与自动续期、固定语义路径、private/portfolio（私有 / 作品集展示）基础模式矩阵、管理员权限、限流、请求体、费用熔断、serving observation（在线观测）和异常流量测试，确认匿名模型路由关闭且最终状态为 private（私有），停止等待 review（审核）。如果下一步需要匿名模型体验，在此停止点提交独立计量设计；不能在同一次 review（审核）中边设计边上线。此时只有证书挑战端口对公网可达，应用 443 仍限制审核来源，不宣布正式发布。
 
 ### Phase 5：公开发布和运维验收
 
@@ -1299,7 +1304,7 @@ openssl s_client -connect <app-host>:443 -servername <app-host>
 **验证命令**
 
 ~~~sh
-curl --fail --head https://<app-host>/
+curl --fail --head https://120.46.57.214/k8s-yaml-assistant
 sudo k3s kubectl -n <namespace> rollout status deployment/<app>
 sudo k3s kubectl -n <namespace> get pods
 sudo k3s kubectl top nodes
@@ -1333,7 +1338,7 @@ sudo journalctl -u k3s --since "1 hour ago"
 6. DeepSeek/Voyage（深度求索 / 向量服务）端点和模型身份已按官方契约显式固定，安全错误映射与流式失败协议已实现；ConfigMap/Secret（普通配置 / 密钥）已经接线，供应商故障的生产冒烟测试仍待完成。
 7. Dockerfile、`.dockerignore`、私有 GitHub remote（GitHub 远程仓库）、Pull Request Actions（合并请求流水线）、默认分支规则、Action SHA pinning（流水线动作提交哈希固定）、immutable releases（不可变发布版本）、`index-build` Environment（索引构建环境）、8,410 条正式索引、`v0.1.0` 不可变发布和六项证据已经建立。无生产消费者的 `CURRENT_PRODUCTION_DIGEST` 仓库变量已经删除；当前生产内容摘要由固定适配器成功台账提供。GitHub Pro private repository（GitHub 专业版私有仓库）不能使用 GitHub artifact attestation（GitHub 产物证明），已审核改用 Cosign（签名与证明工具）无密钥证明并接受公开透明日志元数据。
 8. K3s（轻量 Kubernetes）、固定适配器和仓库级生产 runner（运行器）已经安装并审核；首次私有部署成功。个人仓库级运行器不能像 organization runner group（组织运行器组）一样限制到单一工作流，因此固定适配器仍是生产权限边界。
-9. 最终域名、DNS（域名系统）控制权、OAuth（开放授权）允许名单和证书策略尚未确定；Turnstile（人机验证）生产配置、可承受日预算及计量契约只在准备开放匿名模型能力时进入设计。
+9. 当前入口候选已固定为公网 IPv4 `120.46.57.214`、`/k8s-yaml-assistant` 和 Let’s Encrypt（免费证书颁发机构）公网 IP 短期证书；域名不再阻断。OAuth（开放授权）允许名单、实际 IP 证书自动续期和唯一 `default` TLSStore（默认传输层安全证书仓库）仍待实现与验证；Turnstile（人机验证）生产配置、可承受日预算及计量契约只在准备开放匿名模型能力时进入设计。
 10. 当前尚未基于 8,410 条语料完成正式全量质量评估和错误解释人工正确性审核；在公开发布前必须完成或显式接受风险。
 
 上述 1-7 包含后续代码或交付资源变更，其中远程仓库和云端资源仍需当次明确授权；第 8-9 项涉及服务器或外部系统，第 10 项属于暂停中的质量主线，不能被部署冒烟测试替代。
@@ -1356,7 +1361,7 @@ sudo journalctl -u k3s --since "1 hour ago"
 
 ### 公开发布门禁
 
-- [ ] 域名、DNS（域名系统）、生产 TLS（传输层安全）和自动续期通过。
+- [ ] 公网 IP 生产 TLS（传输层安全）、约 6 天短期证书自动续期、无 SNI（服务器名称指示）证书选择和固定语义路径通过；域名为未来可选变更。
 - [ ] GitHub OAuth 2.0（GitHub 开放授权 2.0）与 allowlist（允许名单）通过反例测试。
 - [ ] ACCESS_MODE（访问模式）缺失或非法时默认 private（私有）；只有管理员固定动作和固定来源紧急路径可以修改，公共 API（应用程序接口）和应用 ServiceAccount（服务账户）不能修改。
 - [ ] private（私有）模式保护全部业务路由；portfolio（作品集展示）至少只公开页面和不调用外部模型的 YAML 检查，匿名模型门禁未完成时明确拒绝付费路由；两个方向的有序切换和中途失败回退通过。
@@ -1380,6 +1385,7 @@ sudo journalctl -u k3s --since "1 hour ago"
 - 选“GitHub Actions（GitHub 自动化流水线）直接发布 + draft Release（草稿发布版本）单人两步确认 + 生产专用部署运行器”，不选每次 SSH 人工发布：保留 22 固定来源和 6443 非公网边界，同时接受没有独立复核以及生产运行器代码执行风险。
 - 选管理员控制的 private/portfolio（私有 / 作品集展示）双模式，不选“永久仅允许名单”或“匿名无限调用”：默认 private（私有）；作品集展示先开放页面和本地 YAML 检查，匿名模型体验只有在独立计量门禁完成后才追加。
 - 选 GitHub OAuth 2.0（GitHub 开放授权 2.0）允许名单保护 private（私有）和管理员访问；匿名体验使用 Turnstile（人机验证）与受控会话，不为简历访客自建注册、密码和用户资料系统。
+- 选 oauth2-proxy reverse proxy（认证代理反向代理）承载受保护业务流量，不选 ForwardAuth（前置认证）：当前生产 Traefik `3.7.4` 的 `trustForwardHeader` 已弃用且入口未配置可信代理地址，而认证代理固定版本能在同一进程中清理并重新注入应用认可的身份头；代价是认证代理进入业务数据路径，必须单独限制资源、探针和网络。
 - 选单节点 K3s 默认 SQLite（嵌入式数据库）承担集群状态，但不为应用计量预选数据库：token/usage/cost（令牌 / 用量 / 成本）事实源和存储等实施到该阶段再设计，索引仍不使用 PVC（持久卷声明）或向量数据库。
 - 保留显式 Interview Pass（面试临时通行证）需求，不选隐藏后门或无限 token（令牌）角色；签发、持久化、具体时长和额度与计量模块一起设计，当前不落占位实现。
 - 选“先隔离原始 trace（轨迹），再持续启用严格安全 observation（观测）”：低流量单节点阶段使用有界 local sink + PVC（本地写入端 + 持久卷声明），以单写入端和短暂更新不可用换取简单、可审核的本地闭环。
@@ -1392,7 +1398,9 @@ sudo journalctl -u k3s --since "1 hour ago"
 - 当前已使用个人 GitHub Pro private repository（GitHub 专业版私有仓库）。个人仓库级运行器仍不能像 organization runner group（组织运行器组）那样限制到单一工作流，GitHub artifact attestation（GitHub 产物证明）也不适用于该私有仓库；已选择 Cosign（签名工具）并接受公开透明日志元数据，但生产运行器的较宽仓库信任边界仍须按第 7.5 节单独审核。
 - 当前人工门禁由同一个 GitHub 账号触发候选构建并发布草稿版本，不是独立审核；账号、默认分支写权限或运行器凭据失陷时，攻击者可能完成发布和部署。强 MFA（多因素认证）、工作流变更单独检查和固定部署适配器只能降低风险，不能形成职责分离。
 - K3s 默认 ServiceLB（服务负载均衡器）与公网 IP 的真实行为需在服务器核对，云平台网络可能有额外约束。
-- oauth2-proxy（OAuth 2.0 认证代理）和 Traefik（入口控制器）中间件的具体版本、身份头清理和顺序必须用反例测试锁定。
+- 公网 IP 证书只有约 6 天有效，自动续期或 80/TCP HTTP-01（HTTP 验证）持续可达性失效会在短时间内使入口证书过期；Phase 4（阶段 4）必须证明续期并配置到期告警。
+- IP 客户端可能不发送 SNI（服务器名称指示），当前入口需要占用 Traefik（入口控制器）集群唯一 `default` TLSStore（默认传输层安全证书仓库）；未来同集群增加其他入口前必须重新设计，不能创建第二个同名仓库。
+- oauth2-proxy（OAuth 2.0 认证代理）反向代理、Traefik（入口控制器）匿名路由中间件的具体版本、身份头清理和顺序必须分别用反例测试锁定；Task 15（任务 15）只证明 private（私有）链路，portfolio（作品集展示）直达应用前仍须证明 Traefik（入口控制器）删除身份头。
 - Turnstile（人机验证）、来源 IP（互联网协议地址）和匿名 cookie（浏览器会话）都不能证明真实身份；匿名模型能力仍缺少经过审核的计量事实源和全局费用硬上限，因此当前必须保持关闭。
 - Turnstile（人机验证）脚本和 Siteverify API（令牌校验接口）在预期面试官网络、尤其中国大陆网络中的可达性和延迟尚未实测；不可达时匿名模型能力会安全关闭。Phase 4（阶段 4）必须从目标网络验证，失败后单独评审等价托管方案，不能直接绕过人机验证。
 - serving observation PVC（在线观测持久卷声明）与节点处于同一故障域，磁盘损坏会丢失尚未晋升的 observation（观测）；不做长期原始备份，恢复后只重新开始安全短期观测。未来计量状态的故障域和恢复风险要在独立设计中重新评估。
@@ -1408,6 +1416,7 @@ sudo journalctl -u k3s --since "1 hour ago"
 ## 16. 参考依据
 
 - [Next.js standalone output（独立运行产物）](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)
+- [Next.js basePath（基础路径）](https://nextjs.org/docs/app/api-reference/config/next-config-js/basePath)
 - [Next.js 部署](https://nextjs.org/docs/app/getting-started/deploying)
 - [Next.js 字体](https://nextjs.org/docs/app/api-reference/components/font)
 - [Node.js 发布计划](https://nodejs.org/en/about/previous-releases)
@@ -1433,6 +1442,10 @@ sudo journalctl -u k3s --since "1 hour ago"
 - [Sigstore GitHub Actions 无密钥签名](https://docs.sigstore.dev/quickstart/quickstart-ci/)
 - [Sigstore Cosign（Sigstore 镜像签名工具）验证](https://docs.sigstore.dev/cosign/verifying/verify/)
 - [cert-manager HTTP-01（证书管理器 HTTP 验证）](https://cert-manager.io/docs/configuration/acme/http01/)
+- [cert-manager ACME certificate profiles（证书管理器 ACME 证书配置档）](https://cert-manager.io/docs/configuration/acme/#acme-certificate-profiles)
+- [Let’s Encrypt 公网 IP 短期证书正式可用](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability.html)
+- [Let’s Encrypt certificate profiles（证书配置档）](https://letsencrypt.org/ca/docs/profiles/)
+- [Traefik TLSStore（传输层安全证书仓库）](https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/crd/tls/tlsstore/)
 - [Traefik ForwardAuth（Traefik 前置认证）](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/forwardauth/)
 - [Traefik RateLimit（Traefik 速率限制）](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
 - [Traefik Buffering（Traefik 请求缓冲与大小限制）](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/buffering/)

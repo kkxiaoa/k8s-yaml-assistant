@@ -12,7 +12,7 @@ import {
 } from '../knowledge/identity';
 import { canonicalHash, canonicalJson } from '../shared/json';
 import type { IndexBuildChunk } from './index-builder';
-import { getRuntimeConfig } from '../server/runtime-config';
+import { getRetrievalRuntimeConfig } from '../server/runtime-config';
 
 export const INDEX_FORMAT_VERSION = 5 as const;
 
@@ -91,7 +91,7 @@ interface IndexPaths {
 
 /** 读取已经显式解码的索引目录。 */
 export function resolveIndexDir(): string {
-  return getRuntimeConfig().indexDir;
+  return getRetrievalRuntimeConfig().indexDir;
 }
 
 function indexPaths(dir: string): IndexPaths {

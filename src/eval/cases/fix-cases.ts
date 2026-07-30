@@ -97,29 +97,47 @@ spec:
   },
   {
     governance: FIX_DEVELOPMENT,
-    id: 'fix-missing-provisioner',
+    id: 'fix-missing-deployment-selector',
     defectType: 'missing_required',
-    brokenYaml: `apiVersion: storage.k8s.io/v1
-kind: StorageClass
+    brokenYaml: `apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: fast
-reclaimPolicy: Retain
-volumeBindingMode: WaitForFirstConsumer
+  name: web
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
 `,
-    target: {
-      apiVersion: 'storage.k8s.io/v1',
-      kind: 'StorageClass',
-      name: 'fast',
-    },
+    target: { apiVersion: 'apps/v1', kind: 'Deployment', name: 'web' },
     preserve: [
-      { type: 'equals', path: 'reclaimPolicy', value: 'Retain' },
+      { type: 'equals', path: 'spec.replicas', value: 2 },
       {
         type: 'equals',
-        path: 'volumeBindingMode',
-        value: 'WaitForFirstConsumer',
+        path: 'spec.template.metadata.labels.app',
+        value: 'web',
+      },
+      {
+        type: 'matches',
+        path: 'spec.template.spec.containers',
+        rule: {
+          name: 'array_contains_object',
+          value: { name: 'nginx', image: 'nginx:1.27' },
+        },
       },
     ],
-    expectedCorrections: [{ type: 'exists', path: 'provisioner' }],
+    expectedCorrections: [
+      {
+        type: 'equals',
+        path: 'spec.selector.matchLabels.app',
+        value: 'web',
+      },
+    ],
   },
   {
     governance: FIX_DEVELOPMENT,

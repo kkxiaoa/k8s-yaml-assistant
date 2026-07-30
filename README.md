@@ -13,9 +13,10 @@
 | 能力 | 入口 | 状态 |
 |------|------|------|
 | 编辑器内 YAML 编写 | `npm run dev` | ✅ |
-| 检查与修复 | Web `/api/check`、`/api/fix`;CLI `npm run check` | ✅ |
-| 生成资源 YAML | Web `/api/generate`;CLI `npm run gen` | ✅ |
-| 上下文化问答 | Web `/api/ask` | ✅ |
+| Schema 检查 | Web `/api/check`;CLI `npm run check` | 匿名可用，不扣产品点数且不调用模型 |
+| 模型修复 | Web `/api/fix` | 匿名体验包或登录额度、全局费用与模式门禁 |
+| 生成资源 YAML | Web `/api/generate`;CLI `npm run gen` | Web 受体验门禁；CLI 保持开发入口 |
+| 上下文化问答 | Web `/api/ask` | 匿名体验包或登录额度、全局费用与模式门禁 |
 | 答案依据展示 | SSE `sources` + 前端“答案依据” | ✅ |
 | 健康检查 | Web `/api/health/live`、`/api/health/ready` | liveness（存活状态）只检查进程；readiness（就绪状态）校验本地 schema/policy/alias/index（模式 / 策略 / 别名 / 索引）闭包 |
 | 检索评估 | `npm run eval` | 契约已纠偏，待按 tuning（调优集）/ Holdout（留出集）/ full（完整集）重跑并审核 baseline（基线） |
@@ -28,7 +29,7 @@
 ```bash
 npm ci
 cp .env.example .env
-# 只在本地 .env 中填写 DEEPSEEK_API_KEY 和 VOYAGE_API_KEY
+# 模型紧急开关默认关闭；开启后匿名浏览器获得低额度体验包，登录后获得独立每日额度。
 npm run dev
 ```
 
@@ -44,7 +45,7 @@ npm run start
 打开 Next.js 输出的本地地址,默认通常是:
 
 ```text
-http://localhost:3000
+http://localhost:3000/k8s-yaml-assistant
 ```
 
 如果端口被占用,Next.js 会自动切到下一个可用端口。
@@ -52,10 +53,13 @@ http://localhost:3000
 Web 端当前包含:
 
 - Monaco YAML 编辑器
+- GitHub OAuth 2.0（开放授权协议）登录与体验状态
+- 30 天匿名低额度模型体验包与登录增额
 - `生成资源`
 - `检查与修复`
 - `解释当前配置`
 - `答案依据`
+- 管理员专用的普通、开放展示和休眠模式管理页
 
 问答请求会携带当前 YAML、`kind`、`apiVersion`、选中文本、光标路径和校验错误,用于更贴近当前编辑上下文地检索与回答。
 
@@ -309,9 +313,17 @@ data/observability/
 | `VOYAGE_RERANK_MODEL` | 必填且固定为 `rerank-2.5` |
 | `INDEX_DIR` | 必填索引目录；本地示例为 `data/index`，容器内由 ConfigMap（普通配置）固定只读绝对路径 |
 | `ENABLE_QUERY_EXPANSION` | 必填且只接受 `true` 或 `false` |
+| `MODEL_ACCESS_ENABLED` | 模型紧急开关；只有精确 `true` 才继续其余准入，示例和首次生产部署固定为 `false` |
+| `GITHUB_ID` / `GITHUB_SECRET` | GitHub OAuth App（GitHub 开放授权应用）客户端凭据；登录只请求 `read:user` |
+| `NEXTAUTH_SECRET` | 八小时加密会话密钥；不得与其他用途共用 |
+| `ADMIN_GITHUB_ID` | 唯一管理员的稳定数字 GitHub 用户编号，不接受登录名 |
+| `CONTROL_SUBJECT_HMAC_KEY` | 32 字节严格 Base64（基础六十四编码）密钥，用于登录主体匿名化和匿名体验 Cookie（浏览器标识）签名 |
+| `CONTROL_DB_PATH` | SQLite（嵌入式数据库）路径；本地状态位于被忽略的 `data/control/private` |
+| `NEXTAUTH_URL` | 身份接口的完整基础地址，必须包含 `/k8s-yaml-assistant/api/auth` |
+| `APP_PUBLIC_ORIGIN` | 管理写入的精确 `Origin`（来源）允许值；生产只接受 HTTPS，本地 `npm run dev` 只额外接受回环 HTTP |
 | `SERVING_OBSERVATION_MODE` | Ask serving observation（询问在线观测）开关；未配置或 `off` 时不创建观测文件 |
 
-上述非敏感运行时配置缺失、未知或非法时会 fail closed（失败关闭）。Secret（密钥）只检查对应能力是否可用，不进入可序列化配置快照。在线回答显式使用 `deepseek-v4-flash`，离线 judge（裁判）独立使用 `deepseek-v4-pro`。
+上述非敏感运行时配置缺失、未知或非法时会 fail closed（失败关闭）。Secret（密钥）只检查对应能力是否可用，不进入可序列化配置快照。新控制库固定从 Sleep Mode（休眠模式）开始；即使打开模型紧急开关，模式、个人额度和全局费用仍会独立阻断。在线回答显式使用 `deepseek-v4-flash`，离线 judge（裁判）独立使用 `deepseek-v4-pro`。
 
 ### Ask serving observation（询问在线观测）
 

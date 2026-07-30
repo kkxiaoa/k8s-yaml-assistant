@@ -91,11 +91,22 @@ async function main(): Promise<void> {
   });
 
   await check('始终非法 → 到上限诚实失败(yaml=null, rounds=2)', async () => {
-    const r = await generateResource(stubClient([INVALID]), {
-      requirement: 'x',
-    });
+    let providerRequests = 0;
+    const r = await generateResource(
+      stubClient([INVALID]),
+      { requirement: 'x' },
+      {
+        requestStarted() {
+          providerRequests++;
+        },
+        deepSeekUsage() {},
+        voyageEmbeddingUsage() {},
+        voyageRerankUsage() {},
+      },
+    );
     assert.equal(r.yaml, null);
     assert.equal(r.rounds, 2); // 首次 + 2 次修复后仍失败
+    assert.equal(providerRequests, 3);
     assert.ok(r.diagnostics.some((d) => d.message.includes('已达最大修复轮次')));
   });
 

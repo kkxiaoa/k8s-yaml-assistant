@@ -15,6 +15,8 @@ import {
   MAX_REPAIR_ROUNDS,
   SUBMIT_YAML_TOOL,
 } from './agent-contract';
+import { assertModelInputByteBudget } from './model-request-policy';
+import type { ProviderRequestObserver } from './provider-usage';
 
 export {
   AGENT_MAX_TOKENS,
@@ -65,6 +67,7 @@ async function runLoop(
   client: Anthropic,
   system: string,
   firstUser: string,
+  observer?: ProviderRequestObserver,
 ): Promise<GenerateResult> {
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: firstUser },
@@ -75,14 +78,24 @@ async function runLoop(
   let submits = 0;
   const maxSubmits = 1 + MAX_REPAIR_ROUNDS;
 
-  for (let turn = 0; turn < maxSubmits + 2; turn++) {
-    const resp = await client.messages.create({
+  for (let turn = 0; turn < maxSubmits; turn++) {
+    const request: Anthropic.MessageCreateParamsNonStreaming = {
       model: ANSWER_MODEL,
       max_tokens: AGENT_MAX_TOKENS,
       system,
       tools: [SUBMIT_YAML_TOOL],
       messages,
-    });
+    };
+    assertModelInputByteBudget(request);
+    observer?.requestStarted('deepseek');
+    const resp = await client.messages.create(request);
+    observer?.deepSeekUsage(
+      request.model,
+      resp.usage?.input_tokens,
+      resp.usage?.output_tokens,
+      resp.usage?.cache_creation_input_tokens,
+      resp.usage?.cache_read_input_tokens,
+    );
 
     if (resp.stop_reason !== 'tool_use') {
       const text = resp.content
@@ -139,6 +152,13 @@ async function runLoop(
     }
   }
 
+  if (lastValid === null && diagnostics.length === 0) {
+    diagnostics.push({
+      stage: 'repair',
+      message: `已达最大模型调用次数(${maxSubmits}),仍未通过校验,返回失败`,
+    });
+  }
+
   return {
     yaml: lastValid,
     rounds: Math.max(0, submits - 1),
@@ -175,8 +195,9 @@ function buildGenUser(req: GenerateRequest): string {
 export function generateResource(
   client: Anthropic,
   request: GenerateRequest,
+  observer?: ProviderRequestObserver,
 ): Promise<GenerateResult> {
-  return runLoop(client, GENERATION_SYSTEM, buildGenUser(request));
+  return runLoop(client, GENERATION_SYSTEM, buildGenUser(request), observer);
 }
 
 /** 修正一段有校验错误的资源 YAML(带自检闭环)。 */
@@ -184,6 +205,7 @@ export function fixResource(
   client: Anthropic,
   yaml: string,
   errors: ValidationError[],
+  observer?: ProviderRequestObserver,
 ): Promise<GenerateResult> {
   const errText = errors
     .map((e) => `- ${e.path || '(根)'}: ${e.message}`)
@@ -192,5 +214,6 @@ export function fixResource(
     client,
     FIX_SYSTEM,
     `请修正这段 YAML 的校验错误。\n\n当前 YAML:\n\`\`\`yaml\n${yaml}\n\`\`\`\n\n校验错误:\n${errText}`,
+    observer,
   );
 }

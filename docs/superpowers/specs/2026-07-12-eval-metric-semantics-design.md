@@ -1,6 +1,6 @@
 # Eval Metric Semantics 纠偏设计
 
-> 状态：已实施；对应实施计划已完成逐 Task（任务）审核。
+> 状态：已实施，待用户审核；回答行为相关指标语义已更新。
 > 用途：定义指标的方向、分母、空样本语义、可比较条件和 baseline 晋升门禁。
 > 对应计划：`docs/superpowers/plans/2026-07-12-eval-metric-semantics.md`。
 > 顺序：第四项实施。依赖 Artifact Protocol 和各 evaluator 的最终指标输出，完成 compare/promote 后再重建 baseline。
@@ -76,16 +76,19 @@ promote CLI 负责执行门禁，不能只打印提醒。
 
 晋升结果写为 Artifact Protocol 定义的独立 baseline snapshot，不复制 source run 的 artifact path。旧 baseline 无法满足新 identity 时先失效，等待同版本 full run 重建。
 
-## 7. 初始方向约定
+## 7. 当前方向约定
 
-- Recall、MRR、faithful rate、refusal correct rate、valid YAML、kind/value/consistency/intent pass：越高越好。
-- retrieval/rerank miss、hallucination、dual cause、judge invalid/error/indeterminate/unstable、max-round failure、harness error、latency、token、cost：越低越好。
+- Recall、MRR、faithful rate、expected behavior compliance（期望行为满足率）、grounded success（有依据完整通过率）、refusal correct rate（拒答正确率）、Judge response behavior agreement（裁判回答行为一致率）、valid YAML（有效配置）、kind/value/consistency/intent pass（资源类型 / 值 / 一致性 / 意图通过率）：越高越好。
+- retrieval/rerank miss（检索 / 重排失召回）、unsupported response（无依据回答）、behavior mismatch（行为不符）、retrieval/source incomplete（检索 / 来源不完整）、judge invalid/error/indeterminate/unstable（裁判无效 / 错误 / 不可判定 / 不稳定）、max-round failure（最大轮次失败）、harness error（评估框架错误）、latency（延迟）、token（令牌）、cost（费用）：越低越好。
 - case count、judged count、failed-first count：neutral，仅用于解释分母。
 - repair attempted 不默认代表好坏，先标 neutral；它可能表示模型首轮差，也可能表示 repair loop 正常工作。
+- `faith.refusal_correct_rate` 的分子是“回答忠于证据且实际行为为拒答”，不再用 `faithful=true` 代替实际拒答。旧 Faith run/trace（忠实度运行 / 轨迹）和旧指标已在重新评估前删除，当前指标注册表从 revision（修订号）1 起只表达修正后的语义。
 
 ## 8. 反例验收
 
-- hallucination 从 2 降到 1 必须显示改善。
+- unsupported response（无依据回答）从 2 降到 1 必须显示改善。
+- 没有人工回答行为标签时，Judge response behavior agreement（裁判回答行为一致率）显示 N/A（不适用）。
+- 应拒答用例得到忠实但实际作答的响应时，refusal correct rate（拒答正确率）的分子不能增加。
 - max-round failure 从 20% 降到 10% 必须显示改善。
 - 没有首轮失败样本时 repair-success-after-fail 显示 N/A。
 - policy/smoke run promote 必须被拒绝。

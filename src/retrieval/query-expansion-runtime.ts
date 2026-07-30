@@ -48,6 +48,7 @@ export type AliasRegistryLoadResult =
 export interface PreparedQueryExpansion {
   queryText: string;
   boostResource?: string;
+  boostPath?: string;
   trace: QueryExpansionTrace;
 }
 
@@ -160,9 +161,19 @@ export function prepareQueryExpansion(
       registry.snapshot.aliases,
       { resourceStrategy: 'alias-aware' },
     );
+    const selectedResource =
+      result.aliasSelectedResource ?? routedResource;
+    const onlyMatch =
+      result.matchedAliases.length === 1
+        ? result.matchedAliases[0]
+        : undefined;
     return {
       queryText: result.expandedQueryText,
-      boostResource: result.aliasSelectedResource ?? routedResource,
+      boostResource: selectedResource,
+      boostPath:
+        selectedResource && onlyMatch?.resource === selectedResource
+          ? onlyMatch.path
+          : undefined,
       trace: {
         ...base,
         status:
@@ -170,8 +181,7 @@ export function prepareQueryExpansion(
         expandedQueryText: result.expandedQueryText,
         matchedAliases: result.matchedAliases,
         expansionTerms: result.expansionTerms,
-        selectedResource:
-          result.aliasSelectedResource ?? routedResource,
+        selectedResource,
         resourceSelectionReason: result.resourceSelectionReason,
         registryHash: registry.snapshot.registryHash,
         reviewedAliasCount: registry.snapshot.reviewedAliasCount,

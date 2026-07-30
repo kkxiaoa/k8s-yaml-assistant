@@ -194,10 +194,16 @@ function faithMetrics(
   const metrics = faithMetricsRecord({
     faithfulCount: judged.filter((result) => result.faithful).length,
     judgedCount: judged.length,
+    expectedBehaviorSatisfiedCount: judged.length,
+    behaviorJudgedCount: judged.length,
+    groundedSuccessCount: judged.filter((result) => result.faithful).length,
     refusedCorrectlyCount: refusals.filter((result) => result.faithful).length,
     refusalJudgedCount: refusals.length,
-    hallucinationCount: 0,
-    dualCauseCount: 0,
+    unsupportedResponseCount: judged.filter((result) => !result.faithful)
+      .length,
+    behaviorMismatchCount: 0,
+    retrievalIncompleteCount: 0,
+    sourceIncompleteCount: 0,
     judgeIndeterminateCount: results.length - judged.length,
     judgeInvalidAttemptCount: 0,
     judgeErrorAttemptCount: 0,

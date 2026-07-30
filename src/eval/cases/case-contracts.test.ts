@@ -489,7 +489,7 @@ expectInvalid(() =>
   ),
 );
 
-assert.equal(RETRIEVAL_CASES.length, 83);
+assert.equal(RETRIEVAL_CASES.length, 88);
 assert.equal(GROUNDED_ANSWER_CASES.length, 88);
 assert.deepEqual(
   GROUNDED_ANSWER_CASES.filter(
@@ -518,14 +518,14 @@ assert.deepEqual(
       hasCopiedErrors: false,
     },
     {
-      id: 'error-storageclass-missing-provisioner',
+      id: 'error-deployment-missing-selector',
       input: {
         kind: 'validation_error',
-        fixCaseId: 'fix-missing-provisioner',
+        fixCaseId: 'fix-missing-deployment-selector',
         question:
-          'StorageClass 为什么提示缺少 provisioner，应该怎么修复？',
+          'Deployment 为什么提示缺少 spec.selector，应该怎么修复？',
         expectedChunkIds: [
-          'schema::storage.k8s.io/v1::StorageClass::provisioner',
+          'schema::apps/v1::Deployment::spec.selector',
         ],
       },
       governance: ERROR_DEVELOPMENT,
@@ -556,10 +556,7 @@ assert.deepEqual(
     },
     {
       id: 'policy-conflict-privileged',
-      sourceExpectation: {
-        mode: 'allow_missing_with_disclosure',
-        types: ['schema', 'policy'],
-      },
+      sourceExpectation: { mode: 'required', types: ['schema', 'policy'] },
     },
   ],
 );
@@ -580,7 +577,7 @@ assert.deepEqual(
   FIELD_DEVELOPMENT,
 );
 assert.deepEqual(resolvedConflict.sourceExpectation, {
-  mode: 'allow_missing_with_disclosure',
+  mode: 'required',
   types: ['schema', 'policy'],
 });
 assert.deepEqual(
@@ -679,7 +676,7 @@ assert.equal(
   RETRIEVAL_CASES.filter(
     (evalCase) => evalCase.governance.task === 'field_explanation',
   ).length,
-  74,
+  79,
 );
 assert.equal(
   RETRIEVAL_CASES.filter(
