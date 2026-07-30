@@ -25,9 +25,15 @@ import {
 } from '../retrieval/query-expansion-runtime';
 import { ANSWER_MODEL } from './agent-contract';
 import {
-  getDeepSeekApiKey,
-  requireRuntimeCapability,
+  assertModelInputByteBudget,
+  DEEPSEEK_CLIENT_POLICY,
+} from './model-request-policy';
+import {
+  requireDeepSeekRuntimeAccess,
+  type DeepSeekRuntimeAccess,
+  type RetrievalRuntimeAccess,
 } from './runtime-config';
+import type { ProviderRequestObserver } from './provider-usage';
 export { ANSWER_MODEL };
 
 export const ASK_MAX_TOKENS = 2048;
@@ -44,11 +50,14 @@ export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,�
 ${CONFLICT_RULES}
 - 简洁准确,涉及枚举值时列全。用中文回答。`;
 
-export function getClient(): Anthropic {
-  const config = requireRuntimeCapability('deepseek');
+export function getClient(
+  runtimeAccess: DeepSeekRuntimeAccess = requireDeepSeekRuntimeAccess(),
+): Anthropic {
+  const config = runtimeAccess.config;
   return new Anthropic({
     baseURL: config.deepseek.baseUrl,
-    apiKey: getDeepSeekApiKey(),
+    apiKey: runtimeAccess.apiKey(),
+    ...DEEPSEEK_CLIENT_POLICY,
   });
 }
 
@@ -73,6 +82,8 @@ export interface RetrieveContextOptions {
   traceSink?: RetrievalTraceSink;
   search?: typeof searchCorpusTraced;
   queryExpansion?: boolean;
+  runtimeAccess?: RetrievalRuntimeAccess;
+  requestObserver?: ProviderRequestObserver;
 }
 
 export interface RetrievalQuery {
@@ -124,7 +135,12 @@ function retrievalText(query: RetrievalQuery): string {
 
 function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
   return {
-    ...chunk,
+    id: chunk.id,
+    title: chunk.title,
+    text: chunk.text,
+    sourceType: chunk.sourceType,
+    provenance: chunk.provenance,
+    targets: chunk.targets,
     score,
   };
 }
@@ -171,7 +187,7 @@ export function buildAskUserMessage(input: AskPromptInput): string {
 export type AskRequest = Anthropic.MessageCreateParamsNonStreaming;
 
 export function buildAskRequest(input: AskPromptInput): AskRequest {
-  return {
+  const request: AskRequest = {
     model: ANSWER_MODEL,
     max_tokens: ASK_MAX_TOKENS,
     system: ASK_SYSTEM,
@@ -182,6 +198,8 @@ export function buildAskRequest(input: AskPromptInput): AskRequest {
       },
     ],
   };
+  assertModelInputByteBudget(request);
+  return request;
 }
 
 /** 完整检索流水线:软路由 → 粗召回 → rerank 精排 → 拼上下文。 */
@@ -251,6 +269,12 @@ export async function retrieveContext(
     boostPath: query.fieldPathHint,
     boostApiVersion: query.apiVersionHint,
     queryExpansion: options.queryExpansion,
+    ...(options.runtimeAccess === undefined
+      ? {}
+      : { runtimeAccess: options.runtimeAccess }),
+    ...(options.requestObserver === undefined
+      ? {}
+      : { requestObserver: options.requestObserver }),
   });
   const hits = selectContextHits(ranked, { k, taskType: 'ask' });
   const { context, sources } = formatSources(hits.map((h) => h.chunk));

@@ -18,6 +18,8 @@ import {
   prepareQueryExpansion,
   resolveQueryExpansionEnabled,
 } from './query-expansion-runtime';
+import type { RetrievalRuntimeAccess } from '../server/runtime-config';
+import type { ProviderRequestObserver } from '../server/provider-usage';
 
 const FIELD_PATH_BOOST = 0.08;
 
@@ -220,6 +222,10 @@ export interface SearchOptions {
   coarseN?: number;
   /** 显式覆盖 query expansion feature flag,供 A/B 和回退验证。 */
   queryExpansion?: boolean;
+  /** 已在当前请求边界解码并验证的 Voyage 运行时能力。 */
+  runtimeAccess?: RetrievalRuntimeAccess;
+  /** 在线请求的供应商调用与 usage（用量）消费者；评估和索引构建不传。 */
+  requestObserver?: ProviderRequestObserver;
 }
 
 /** searchCorpusTraced 返回:命中 + 检索过程 trace(不含 question/mode/hint,由上层补) */
@@ -250,6 +256,8 @@ export async function searchCorpusTraced(
     boostApiVersion,
     coarseN = COARSE_N,
     queryExpansion,
+    runtimeAccess,
+    requestObserver,
   } = options;
   const t0 = performance.now();
   const prepared = await executeRetrievalStage('retrieval', () => {
@@ -263,6 +271,7 @@ export async function searchCorpusTraced(
   });
   const effectiveQueryText = prepared.queryText;
   const effectiveBoostResource = prepared.boostResource;
+  const effectiveBoostPath = boostPath ?? prepared.boostPath;
   const index = await executeRetrievalStage('index', () => getCorpusIndex());
   const indexCache = getCorpusIndexCache();
   if (!indexCache) {
@@ -274,7 +283,13 @@ export async function searchCorpusTraced(
 
   const tEmbed = performance.now();
   const [queryEmbedding] = await executeRetrievalStage('embedding', () =>
-    embed([effectiveQueryText], 'query'),
+    embed(
+      [effectiveQueryText],
+      'query',
+      runtimeAccess?.config.voyage.embeddingModel,
+      runtimeAccess,
+      requestObserver,
+    ),
   );
   const embedMs = performance.now() - tEmbed;
   const emptyTrace = (): SearchTrace => ({
@@ -294,7 +309,7 @@ export async function searchCorpusTraced(
       index,
       coarseN,
       effectiveBoostResource,
-      boostPath,
+      effectiveBoostPath,
       boostApiVersion,
     ),
   );
@@ -302,11 +317,24 @@ export async function searchCorpusTraced(
   if (coarse.length === 0) return { hits: [], trace: emptyTrace() };
 
   const tRerank = performance.now();
+  const matchedAliasPaths = [
+    ...new Set(prepared.trace.matchedAliases.map((alias) => alias.path)),
+  ];
+  const rerankQuery =
+    matchedAliasPaths.length > 0
+      ? `${queryText}\n\n字段路径: ${matchedAliasPaths.join(' ')}`
+      : effectiveQueryText;
   const rr = await executeRetrievalStage('rerank', () =>
     rerank(
-      effectiveQueryText,
-      coarse.map((h) => h.chunk.text),
+      rerankQuery,
+      coarse.map((h) =>
+        matchedAliasPaths.length > 0
+          ? `${h.chunk.title}\n${h.chunk.text}`
+          : h.chunk.text,
+      ),
       coarse.length,
+      runtimeAccess,
+      requestObserver,
     ),
   );
   const rerankMs = performance.now() - tRerank;

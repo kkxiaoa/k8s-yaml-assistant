@@ -342,6 +342,21 @@ check('rejects every non-full scope for non-judge baselines', () => {
 check('rejects a judge subset and accepts the complete calibration identity', () => {
   const cases = [calibrationCase('judge-1'), calibrationCase('judge-2')];
 
+  const targetedRoot = mkdtempSync(join(tmpdir(), 'eval-promotion-'));
+  writeCalibration(targetedRoot, cases);
+  const targetedRun = completedRun({
+    id: 'judge-targeted',
+    kind: 'judge',
+    scope: 'targeted',
+    dataset: judgeDatasetIdentity(cases.slice(0, 1)),
+  });
+  writeRun(targetedRun, targetedRoot);
+  appendSuccessTraces(targetedRun, targetedRoot);
+  assert.throws(
+    () => promoteRun(targetedRun.id, { evalRoot: targetedRoot }),
+    /scope targeted.*requires calibration/i,
+  );
+
   const subsetRoot = mkdtempSync(join(tmpdir(), 'eval-promotion-'));
   writeCalibration(subsetRoot, cases);
   const subsetRun = completedRun({

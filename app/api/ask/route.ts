@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import type Anthropic from '@anthropic-ai/sdk';
 import { decodeServingObservationConfig } from '@/observability/config';
 import { createLocalObservationSink } from '@/observability/local-sink';
 import {
@@ -9,15 +10,29 @@ import {
 } from '@/observability/recorder';
 import { getReadiness } from '@/server/health';
 import {
-  getRuntimeConfig,
-  requireRuntimeCapability,
+  requireAskRuntimeAccess,
+  type AskRuntimeAccess,
 } from '@/server/runtime-config';
 import {
   upstreamErrorEvent,
   upstreamErrorResponse,
 } from '@/server/upstream-error';
 import { readApiRequest } from '@/server/api-contract';
-import type { RetrieveContextOptions } from '@/server/pipeline';
+import {
+  admitApiRequest,
+  modelAccessGate,
+} from '@/server/request-limiter';
+import {
+  actorLimiterSubject,
+  finishModelRequest,
+  resolveModelActor,
+  reserveModelRequest,
+} from '@/server/model-access';
+import { ModelUsageCollector } from '@/server/provider-usage';
+import type {
+  RetrieveContextOptions,
+  prepareAsk as prepareAskFunction,
+} from '@/server/pipeline';
 
 export const runtime = 'nodejs'; // 需要 Node:Anthropic SDK、dotenv、fetch 向量/rerank
 
@@ -104,11 +119,12 @@ function sse(event: string, data: unknown): Uint8Array {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  let runtimeConfig;
+  const modelAccess = modelAccessGate();
+  if (modelAccess) return modelAccess;
+
+  let runtimeAccess: AskRuntimeAccess;
   try {
-    runtimeConfig = getRuntimeConfig();
-    requireRuntimeCapability('deepseek');
-    requireRuntimeCapability('voyage');
+    runtimeAccess = requireAskRuntimeAccess();
   } catch (error) {
     return upstreamErrorResponse(error);
   }
@@ -121,6 +137,8 @@ export async function POST(req: Request): Promise<Response> {
     });
   }
 
+  const actor = await resolveModelActor();
+  if (!actor.ok) return actor.response;
   const body = await readApiRequest(req, 'ask');
   if (!body.ok) return body.response;
   const {
@@ -128,58 +146,113 @@ export async function POST(req: Request): Promise<Response> {
     context: editorContext,
     mode,
   } = body.value;
-  let prepared;
-  let stream;
+  const admission = admitApiRequest(
+    'ask',
+    actorLimiterSubject(actor.actor),
+  );
+  if (!admission.ok) return admission.response;
+  const reserved = reserveModelRequest('ask', actor.actor);
+  if (!reserved.ok) {
+    admission.release();
+    return reserved.response;
+  }
+  const usage = new ModelUsageCollector();
+  let accountingFinished = false;
+  const finishAccounting = (outcome: 'success' | 'failure'): void => {
+    if (accountingFinished) return;
+    accountingFinished = true;
+    finishModelRequest(
+      reserved.store,
+      reserved.reservation,
+      usage,
+      outcome,
+    );
+  };
+  let streamOwnsAdmission = false;
+  let prepared: Awaited<ReturnType<typeof prepareAskFunction>>;
+  let stream: ReturnType<Anthropic['messages']['stream']>;
   try {
-    const { getClient, prepareAsk } = await import('@/server/pipeline');
-    const requestId = randomUUID();
-    prepared = await prepareAsk({
-      question,
-      editorContext,
-      mode,
-      retrievalOptions: {
-        ...servingObservationRetrievalOptions(requestId),
-        queryExpansion: runtimeConfig.queryExpansionEnabled,
+    try {
+      const { getClient, prepareAsk } = await import('@/server/pipeline');
+      const requestId = randomUUID();
+      prepared = await prepareAsk({
+        question,
+        editorContext,
+        mode,
+        retrievalOptions: {
+          ...servingObservationRetrievalOptions(requestId),
+          queryExpansion:
+            runtimeAccess.retrieval.config.queryExpansionEnabled,
+          runtimeAccess: runtimeAccess.retrieval,
+          requestObserver: usage,
+        },
+      });
+      usage.requestStarted('deepseek');
+      stream = getClient(runtimeAccess.deepseek).messages.stream(
+        prepared.request,
+      );
+    } catch (error) {
+      finishAccounting('failure');
+      return upstreamErrorResponse(error);
+    }
+    const { hits, sources } = prepared;
+    // 合并引用编号和 formatSources 规范化后的 provenance。
+    const cited = hits.map((h, i) => ({
+      ...h,
+      n: sources[i]?.n ?? i + 1,
+      provenance: sources[i]?.provenance ?? h.provenance,
+    }));
+    const readable = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        let closed = false;
+        try {
+          controller.enqueue(sse('sources', cited));
+          stream.on('text', (text: string) => {
+            if (!closed) controller.enqueue(sse('delta', text));
+          });
+          const finalMessage = await stream.finalMessage();
+          usage.deepSeekUsage(
+            prepared.request.model,
+            finalMessage.usage?.input_tokens,
+            finalMessage.usage?.output_tokens,
+            finalMessage.usage?.cache_creation_input_tokens,
+            finalMessage.usage?.cache_read_input_tokens,
+          );
+          finishAccounting('success');
+          controller.enqueue(sse('done', {}));
+          closed = true;
+          controller.close();
+        } catch (error) {
+          if (closed) return;
+          finishAccounting('failure');
+          controller.enqueue(sse('error', upstreamErrorEvent(error)));
+          closed = true;
+          controller.close();
+        } finally {
+          admission.release();
+        }
+      },
+      cancel() {
+        stream.abort();
+        finishAccounting('failure');
+        admission.release();
       },
     });
-    stream = getClient().messages.stream(prepared.request);
-  } catch (error) {
-    return upstreamErrorResponse(error);
-  }
-  const { hits, sources } = prepared;
-  // 合并引用编号和 formatSources 规范化后的 provenance。
-  const cited = hits.map((h, i) => ({
-    ...h,
-    n: sources[i]?.n ?? i + 1,
-    provenance: sources[i]?.provenance ?? h.provenance,
-  }));
-  const readable = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let closed = false;
-      try {
-        controller.enqueue(sse('sources', cited));
-        stream.on('text', (text) => {
-          if (!closed) controller.enqueue(sse('delta', text));
-        });
-        await stream.finalMessage();
-        controller.enqueue(sse('done', {}));
-        closed = true;
-        controller.close();
-      } catch (error) {
-        if (closed) return;
-        controller.enqueue(sse('error', upstreamErrorEvent(error)));
-        closed = true;
-        controller.close();
-      }
-    },
-  });
 
-  return new Response(readable, {
-    headers: {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-store',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    },
-  });
+    const response = new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-store',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      },
+    });
+    streamOwnsAdmission = true;
+    return response;
+  } finally {
+    if (!streamOwnsAdmission) {
+      finishAccounting('failure');
+      admission.release();
+    }
+  }
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { decodeKnowledgeChunk, type SourceAuthority } from './chunk';
 import { CORPUS } from './corpus';
@@ -183,8 +183,12 @@ check('提交代码、eval 与 alias 数据不包含旧 schema chunk ID', () => 
     join(root, 'data/aliases/schema-field-alias-targets.json'),
     join(root, 'data/aliases/schema-field-aliases.jsonl'),
     join(root, 'data/eval/bad-cases.jsonl'),
-    join(root, 'data/eval/judge-calibration-labels.jsonl'),
   );
+  const calibrationLabels = join(
+    root,
+    'data/eval/judge-calibration-labels.jsonl',
+  );
+  if (existsSync(calibrationLabels)) files.push(calibrationLabels);
 
   const stale = files.flatMap((file) => {
     const content = readFileSync(file, 'utf8');

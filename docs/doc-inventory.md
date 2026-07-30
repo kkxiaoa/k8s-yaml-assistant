@@ -15,6 +15,8 @@
 | `RAG-复盘-03-生成层评估与修尺子.md` | 学习复盘 | 生成层评估历史经验 | 非执行依据 | `CLAUDE.md`、当前训练方案、评估报告、`docs/README.md` | 保留原路径 |
 | `PROJECT_CONTEXT.md` | 历史归档 | 早期上下文交接 | 非执行依据 | `docs/README.md` | 保留原路径 |
 | `产品设计-K8s智能助手.md` | 历史产品草稿 | 旧产品设想 | 非执行依据 | `docs/README.md` | 保留原路径 |
+| `superpowers/specs/2026-07-29-public-experience-control-design.md` | 当前设计依据 | 公共体验、身份、费用、休眠与备份 | 当前 Task 16-17 设计 | 唯一执行依据、对应实施计划 | 本地候选已实施，等待审核 |
+| `superpowers/plans/2026-07-29-public-experience-control.md` | 当前实施计划 | Task 16-17 可执行拆解与授权边界 | 当前 Task 入口 | `docs/README.md`、对应设计稿 | 本地实施完成，等待审核 |
 | `superpowers/specs/*.md` | 设计稿 | 问题、边界和架构取舍 | 设计记录 | 对应实施计划或同主题后续文档 | 保留；按日期和主题定位 |
 | `superpowers/plans/*.md` | 实施计划 | 可执行 Task（任务）拆解 | 只有最新且已确认的计划可作为当前入口 | `docs/README.md`、对应设计稿 | 保留；执行前核对状态 |
 

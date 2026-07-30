@@ -4,9 +4,10 @@ import { POST as checkPost } from '../../app/api/check/route';
 import { readApiRequest } from './api-contract';
 import { GLOBAL_MAX_BODY_BYTES } from './request-body';
 
-type ApiRoute = 'ask' | 'check' | 'generate' | 'fix';
+type ApiRoute = 'adminExperience' | 'ask' | 'check' | 'generate' | 'fix';
 
 const VALID_REQUESTS = {
+  adminExperience: { mode: 'interview', durationHours: 4 },
   ask: {
     question: '解释 spec.replicas',
     mode: 'explain_field',
@@ -49,7 +50,7 @@ async function decodeOutcome(
   };
 }
 
-test('四条业务路由接受严格合法输入且补齐显式默认值', async () => {
+test('业务与管理路由接受严格合法输入且补齐显式默认值', async () => {
   assert.deepEqual(await decodeOutcome('ask', { question: ' Pod 是什么？ ' }), {
     ok: true,
     value: { question: 'Pod 是什么？', mode: 'free' },
@@ -120,6 +121,8 @@ test('错误类型、空白必填值、非法 mode/context/errors 被拒绝', as
     ['fix', { yaml: 'kind: Pod', errors: 'invalid' }],
     ['fix', { yaml: 'kind: Pod', errors: [{ path: 1, message: 'x' }] }],
     ['fix', { yaml: 'kind: Pod', errors: [{ path: '', message: '   ' }] }],
+    ['adminExperience', { mode: 'interview', durationHours: 2 }],
+    ['adminExperience', { mode: 'sleep', durationHours: 4 }],
   ];
 
   for (const [route, value] of cases) {
@@ -176,6 +179,7 @@ test('字符串和数组资源预算在解码边界生效', async () => {
 
 test('每条路由字节预算均为正整数且不超过全局 256 KiB', async () => {
   const limits: Record<ApiRoute, number> = {
+    adminExperience: 1024,
     ask: 256 * 1024,
     check: 144 * 1024,
     generate: 72 * 1024,
@@ -217,7 +221,9 @@ test('路由返回不回显请求内容的稳定 400/413 错误', async () => {
   const oversizedResponse = await checkPost(
     new Request('http://localhost/api/check', {
       method: 'POST',
-      headers: { 'Content-Length': String(144 * 1024 + 1) },
+      headers: {
+        'Content-Length': String(144 * 1024 + 1),
+      },
       body: JSON.stringify({ yaml: 'kind: Pod' }),
     }),
   );

@@ -3,7 +3,14 @@ import test from 'node:test';
 import { APIConnectionTimeoutError } from '@anthropic-ai/sdk';
 import { embed } from '../retrieval/embeddings';
 import { rerank } from '../retrieval/rerank';
+import { getClient } from './pipeline';
 import { RuntimeConfigFault } from './runtime-config';
+import {
+  assertModelInputByteBudget,
+  DEEPSEEK_CLIENT_POLICY,
+  ModelInputBudgetError,
+  VOYAGE_REQUEST_TIMEOUT_MS,
+} from './model-request-policy';
 import {
   UpstreamHttpError,
   classifyUpstreamError,
@@ -82,6 +89,40 @@ test('请求拒绝和未知错误映射为有限 502 且不包含原始错误体
   assert.equal(JSON.stringify(event).includes(raw), false);
 });
 
+test('模型请求序列化字节预算超限时在上游调用前返回安全 413', async () => {
+  assert.doesNotThrow(() =>
+    assertModelInputByteBudget({
+      messages: [{ role: 'user', content: 'normal input' }],
+    }),
+  );
+  assert.throws(
+    () =>
+      assertModelInputByteBudget({
+        messages: [{ role: 'user', content: 'x'.repeat(256 * 1024) }],
+      }),
+    ModelInputBudgetError,
+  );
+  const response = upstreamErrorResponse(new ModelInputBudgetError());
+  assert.equal(response.status, 413);
+  assert.deepEqual(await response.json(), {
+    error: { code: 'model_input_too_large' },
+  });
+});
+
+test('DeepSeek 和 Voyage 使用固定超时且不隐藏额外计费重试', async () => {
+  assert.deepEqual(DEEPSEEK_CLIENT_POLICY, {
+    timeout: 60_000,
+    maxRetries: 0,
+  });
+  assert.equal(VOYAGE_REQUEST_TIMEOUT_MS, 30_000);
+
+  await withSupplierEnvironment(async () => {
+    const client = getClient();
+    assert.equal(client.timeout, DEEPSEEK_CLIENT_POLICY.timeout);
+    assert.equal(client.maxRetries, DEEPSEEK_CLIENT_POLICY.maxRetries);
+  });
+});
+
 test('运行时配置与能力故障沿用安全 503 码', () => {
   for (const code of [
     'runtime_config_invalid',
@@ -105,12 +146,17 @@ test('上游错误对象不保存供应商响应体', () => {
 test('Voyage embedding/rerank 不透传上游错误体并使用显式端点与模型', async () => {
   await withSupplierEnvironment(async () => {
     const originalFetch = globalThis.fetch;
-    const requests: Array<{ url: string; body: unknown }> = [];
+    const requests: Array<{
+      url: string;
+      body: unknown;
+      signal: AbortSignal | null | undefined;
+    }> = [];
     const rawBody = 'supplier raw body TestCredentialValue789';
     globalThis.fetch = (async (input, init) => {
       requests.push({
         url: String(input),
         body: JSON.parse(String(init?.body)),
+        signal: init?.signal,
       });
       const status = requests.length === 1 ? 402 : 429;
       return new Response(rawBody, { status });
@@ -149,6 +195,7 @@ test('Voyage embedding/rerank 不透传上游错误体并使用显式端点与�
             model: 'voyage-3',
             input_type: 'query',
           },
+          signal: requests[0]!.signal,
         },
         {
           url: SUPPLIER_ENV.VOYAGE_RERANK_URL,
@@ -158,8 +205,13 @@ test('Voyage embedding/rerank 不透传上游错误体并使用显式端点与�
             model: 'rerank-2.5',
             top_k: 1,
           },
+          signal: requests[1]!.signal,
         },
       ]);
+      for (const request of requests) {
+        assert.ok(request.signal instanceof AbortSignal);
+        assert.equal(request.signal.aborted, false);
+      }
     } finally {
       globalThis.fetch = originalFetch;
     }

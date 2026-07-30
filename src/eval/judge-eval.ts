@@ -16,7 +16,11 @@ import {
   type JudgeCalibrationCase,
   type JudgeCalibrationTrace,
 } from './metrics/judge-metrics';
-import { JudgeAttemptSchema, type JudgeAttempt } from './judge-votes';
+import {
+  LiveJudgeAttemptSchema,
+  type JudgeAttempt,
+  type LiveJudgeAttempt,
+} from './judge-votes';
 import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
 import {
   buildGovernanceReport,
@@ -31,6 +35,7 @@ import {
   judgeDatasetIdentity,
   judgeEnvelopeOutcome,
   judgeEvalConfig,
+  selectJudgeCases,
 } from './runner-protocol';
 import {
   createErrorTraceEnvelope,
@@ -69,16 +74,21 @@ async function evaluateCalibrationCase(
   calibrationCase: JudgeCalibrationCase,
   plannedVotes: number,
 ): Promise<JudgeCalibrationTrace> {
-  const attempts: JudgeAttempt[] = [];
+  const attempts: LiveJudgeAttempt[] = [];
   for (let index = 0; index < plannedVotes; index++) {
     const rawAttempt = await executeEvalCaseStage(
       'judge_request',
-      () => judgeOnce(client, calibrationCase.context, calibrationCase.answer),
+      () =>
+        judgeOnce(client, {
+          question: calibrationCase.question,
+          context: calibrationCase.context,
+          answer: calibrationCase.answer,
+        }),
       judgeErrorPayload(calibrationCase, attempts, plannedVotes),
     );
     const attempt = await executeEvalCaseStage(
       'judge_parse',
-      () => JudgeAttemptSchema.parse(rawAttempt),
+      () => LiveJudgeAttemptSchema.parse(rawAttempt),
       judgeErrorPayload(calibrationCase, attempts, plannedVotes),
     );
     attempts.push(attempt);
@@ -105,6 +115,13 @@ function reportJudgeCase(trace: JudgeCalibrationTrace): void {
   }
 
   const policyMarks: string[] = [];
+  const behaviorResult = trace.responseBehavior;
+  const behaviorMark =
+    behaviorResult === undefined
+      ? ''
+      : behaviorResult.judge === null
+        ? ` responseBehavior=${behaviorResult.indeterminateReason}(${behaviorResult.validVotes}/${behaviorResult.quorum})`
+        : ` responseBehavior=${behaviorResult.agree ? '✓' : '✗'}(${behaviorResult.judge}, ${behaviorResult.validVotes}票)${behaviorResult.unstable ? '⚠' : ''}`;
   for (const dimension of POLICY_DIMENSIONS) {
     const result = trace.policy[dimension];
     if (!result) continue;
@@ -120,7 +137,7 @@ function reportJudgeCase(trace: JudgeCalibrationTrace): void {
   }
 
   console.error(
-    `${trace.majority.agree ? '✓一致' : '✗分歧'} ${trace.id.padEnd(28)} human=${trace.human.faithful} judge=${trace.majority.faithful}(${trace.majority.trueVotes}/${trace.majority.validVotes})${trace.majority.unstable ? ' ⚠不稳' : ''}  [${trace.category}]${policyMarks.length ? ` policy: ${policyMarks.join(' ')}` : ''}`,
+    `${trace.majority.agree ? '✓一致' : '✗分歧'} ${trace.id.padEnd(28)} human=${trace.human.faithful} judge=${trace.majority.faithful}(${trace.majority.trueVotes}/${trace.majority.validVotes})${trace.majority.unstable ? ' ⚠不稳' : ''}${behaviorMark}  [${trace.category}]${policyMarks.length ? ` policy: ${policyMarks.join(' ')}` : ''}`,
   );
 }
 
@@ -142,6 +159,20 @@ function judgeGovernanceMetrics(
   ];
 }
 
+export function judgeReasonForMajority(
+  trace: JudgeCalibrationTrace,
+): string {
+  const majority = trace.majority.faithful;
+  if (majority === null) return '';
+  const attempt = [...trace.attempts.items]
+    .reverse()
+    .find(
+      (item) =>
+        item.status === 'valid' && item.vote.faithful === majority,
+    );
+  return attempt?.status === 'valid' ? attempt.vote.reason : '';
+}
+
 function reportDisagreements(traces: readonly JudgeCalibrationTrace[]): void {
   const disagreements = traces.filter(
     (trace) => trace.majority.agree === false,
@@ -149,18 +180,11 @@ function reportDisagreements(traces: readonly JudgeCalibrationTrace[]): void {
   if (disagreements.length) {
     console.error('\n分歧复盘(§7.4):');
     for (const disagreement of disagreements) {
-      const judgeReason = [...disagreement.attempts.items]
-        .reverse()
-        .find(
-          (attempt) => attempt.status === 'valid' && !attempt.vote.faithful,
-        );
       console.error(
         `\n▸ ${disagreement.id} [${disagreement.category}]  human=${disagreement.human.faithful} vs judge=${disagreement.majority.faithful}`,
       );
       console.error(`  human 依据: ${disagreement.human.note}`);
-      console.error(
-        `  judge 理由: ${judgeReason?.status === 'valid' ? judgeReason.vote.reason : ''}`,
-      );
+      console.error(`  judge 理由: ${judgeReasonForMajority(disagreement)}`);
     }
   }
 
@@ -179,21 +203,60 @@ function reportDisagreements(traces: readonly JudgeCalibrationTrace[]): void {
       console.error(`  human 依据: ${trace.human.note}`);
     }
   }
+
+  const behaviorDisagreements = traces.filter(
+    (trace) => trace.responseBehavior?.agree === false,
+  );
+  if (behaviorDisagreements.length) {
+    console.error('\n回答行为维度分歧复盘:');
+    for (const trace of behaviorDisagreements) {
+      console.error(
+        `\n▸ ${trace.id} human=${trace.responseBehavior?.human} vs judge=${trace.responseBehavior?.judge}`,
+      );
+      console.error(`  human 依据: ${trace.human.note}`);
+    }
+  }
 }
 
-async function main(): Promise<void> {
+function reportInvalidResponseDiagnostics(
+  traces: readonly JudgeCalibrationTrace[],
+): void {
+  const groups = new Map<string, number>();
+  for (const trace of traces) {
+    for (const attempt of trace.attempts.items) {
+      if (attempt.status !== 'invalid') continue;
+      const key = attempt.response
+        ? `${attempt.code}: stop=${attempt.response.stopReason}, textBlocks=${attempt.response.textBlockCount}, nonTextBlocks=${attempt.response.nonTextBlockCount}`
+        : `${attempt.code}: legacy response metadata missing`;
+      groups.set(key, (groups.get(key) ?? 0) + 1);
+    }
+  }
+  if (groups.size === 0) return;
+
+  console.error('\ninvalid response diagnostics:');
+  for (const [key, count] of [...groups].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    console.error(`- ${key}: ${count}`);
+  }
+}
+
+async function main(argv: readonly string[]): Promise<void> {
   const setup = await executeEvalRunStage('dataset_preflight', () => {
-    const cases = readCalibrationCases();
-    return { cases, dataset: judgeDatasetIdentity(cases) };
+    const selection = selectJudgeCases(argv, readCalibrationCases());
+    return {
+      selection,
+      dataset: judgeDatasetIdentity(selection.cases),
+    };
   });
-  const { cases } = setup;
+  const { cases } = setup.selection;
   const runConfig = judgeEvalConfig(JUDGE_CALIBRATION_VOTES);
-  const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-judge`;
+  const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-judge${setup.selection.suffix}`;
   const session = await executeEvalRunStage('artifact_write', () =>
     startEvalRun({
       id: runId,
       kind: 'judge',
-      scope: 'calibration',
+      scope: setup.selection.scope,
       dataset: setup.dataset,
       metricDefinitionVersion: METRIC_DEFINITION_VERSION,
       config: runConfig,
@@ -213,7 +276,7 @@ async function main(): Promise<void> {
       },
     );
     console.error(
-      `Judge 校准(${cases.length} 条:对固化 context+answer 跑线上裁判 vs 人工 label)\n`,
+      `Judge 校准(${setup.selection.label}; ${cases.length} 条:对固化 context+answer 跑线上裁判 vs 人工 label)\n`,
     );
 
     const batch = await executeEvalCases({
@@ -281,6 +344,10 @@ async function main(): Promise<void> {
     console.error(
       `judge 内部不稳定(${JUDGE_CALIBRATION_VOTES} 次判定分裂)= ${metrics.unstableCount} 条`,
     );
+    const behaviorRate = metrics.responseBehavior.agreementRate;
+    console.error(
+      `回答行为一致率(仅人工明确标注)= ${behaviorRate === null ? 'N/A（不适用）' : `${(behaviorRate * 100).toFixed(1)}%`} (${metrics.responseBehavior.agree}/${metrics.responseBehavior.judged}, indeterminate=${metrics.responseBehavior.indeterminate}, unstable=${metrics.responseBehavior.unstable})`,
+    );
     console.error(
       formatGovernanceReport(
         buildGovernanceReport({
@@ -304,6 +371,7 @@ async function main(): Promise<void> {
       );
     }
 
+    reportInvalidResponseDiagnostics(batch.results);
     reportDisagreements(batch.results);
 
     const metricRecord = await executeEvalRunStage(
@@ -325,7 +393,7 @@ async function main(): Promise<void> {
       metrics.agreementRate === null
         ? '\n裁判一致率为 N/A,没有可用于阈值判断的有效 case。'
         : metrics.agreementRate >= ACCEPTABLE
-          ? `\n裁判一致率 ≥ ${ACCEPTABLE * 100}%,可接受,方可扩大 grounding eval(§7.2)。`
+          ? `\n裁判一致率 ≥ ${ACCEPTABLE * 100}%,仅通过主一致率门槛；扩大 grounding eval(§7.2) 前仍须审核不可判定、无效票和不稳定项。`
           : `\n一致率 < ${ACCEPTABLE * 100}%,先复盘/修裁判再用。`,
     );
   } catch (error) {
@@ -336,7 +404,7 @@ async function main(): Promise<void> {
 
 if (isDirectExecution(import.meta.url)) {
   config({ override: true });
-  main().catch((error: unknown) => {
+  main(process.argv.slice(2)).catch((error: unknown) => {
     console.error('错误:', error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });

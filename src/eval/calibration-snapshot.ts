@@ -21,6 +21,11 @@ export function buildJudgeCalibrationCaseFromFaith(params: {
       `calibration identity mismatch: label ${label.id}, trace ${trace.id}`,
     );
   }
+  if (label.sourceFaithRunId !== sourceFaithRunId) {
+    throw new Error(
+      `calibration source run mismatch: label ${label.sourceFaithRunId}, trace ${sourceFaithRunId}`,
+    );
+  }
   if (trace.context === undefined || !trace.context.text.trim()) {
     throw new Error(`faith trace ${trace.id} missing context snapshot`);
   }

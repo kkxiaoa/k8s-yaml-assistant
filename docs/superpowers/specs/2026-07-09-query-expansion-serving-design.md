@@ -1,5 +1,7 @@
 # Alias-aware Query Expansion Serving 接入设计
 
+> 状态：已实施；2026-07-29 根据 `policy-conflict-privileged` 的正式评估证据修订粗召回与重排边界。同日跨资源多提示与父 schema（结构定义）补候选实验未通过门禁并已撤销，不属于现行实现。
+
 ## 1. 背景与证据
 
 A3 已通过全量 eval A/B 验证 schema alias query expansion 的收益：
@@ -56,10 +58,11 @@ retrieveContext / retrieval eval / faith eval / A/B
           boostResource,
           resourceStrategy: alias-aware
         )
-      → 得到 expandedQuery + aliasSelectedResource
+      → 得到 expandedQuery + aliasSelectedResource + 唯一匹配字段路径
       → embed(expandedQuery)
-      → denseSearch(effectiveResource)
-      → rerank(expandedQuery)
+      → denseSearch(effectiveResource, effectivePath)
+      → 有 alias 命中时 rerank(originalQuery + matchedPaths, title + text)
+      → 无 alias 命中时保持 rerank(expandedQuery, text)
       → 返回 hits + expansion trace
 ```
 
@@ -67,9 +70,13 @@ retrieveContext / retrieval eval / faith eval / A/B
 
 ```text
 effectiveResource = aliasSelectedResource ?? boostResource
+effectivePath = callerBoostPath
+  ?? (唯一 matched alias 的 resource 与 effectiveResource 相同时使用其 path)
 ```
 
 weak/strong、同资源/跨资源启用规则完全复用现有 `expandQueryWithAliases()`，serving 不重新实现规则。
+
+扩展术语只帮助 dense retrieval（稠密检索）跨语言或口语召回字段。有 alias 命中时，rerank（重排）使用原始用户问题和全部命中字段路径，并让文档携带既有标题，避免字段术语覆盖“能否使用”等原始意图，同时保留资源和路径身份。多个 alias 同时命中时不为 dense retrieval 推断单一字段路径，防止按注册顺序任意偏向其中一个字段；调用方显式提供的 `boostPath` 始终优先。无 alias 命中的请求保持原有重排行为。
 
 ## 5. Exact Path 与模糊叶子字段
 
@@ -165,7 +172,7 @@ queryExpansion?: {
 
 字段语义：
 
-- `queryText`：真正送入 embedding/rerank 的 query。
+- `queryText`：真正送入 embedding 的扩展后 query；有 alias 命中时，rerank 使用 `originalQueryText`、命中字段路径及文档标题，否则保持原有 query 和正文。
 - `resourceHint`：alias 处理前的原始路由结果。
 - `selectedResource`：alias 规则处理后的最终软加权资源。
 - `status=skipped_exact`：完全字段路径命中，没有执行 expansion。
@@ -252,6 +259,8 @@ searchCorpusTraced(question, {
 8. alias 缺失时回退原始 query并记录 `aliases_missing`。
 9. alias 损坏时回退原始 query并记录 `aliases_invalid`。
 10. trace 中的 query、resource、匹配 alias 和 registry 元数据语义正确。
+11. 唯一 alias 命中可提供字段软加权路径，多个 alias 命中不猜测路径。
+12. alias 命中时 rerank 使用原始用户问题、命中路径和文档标题；未命中时保持旧输入。
 
 ### 11.2 指标门禁
 
@@ -292,3 +301,22 @@ Task 1-4 只验证 expansion 接入，不改 exact/leaf 行为。Task 5 才修�
 - 单元测试、全量 A/B、retrieval eval 和 policy faith 验证结果。
 
 每个 implementation task 完成后停下汇报结果，待人工 review 后再执行下一 task。未经明确指示不提交 commit，也不晋升 baseline。
+
+## 13. 2026-07-29 跨资源候选淘汰记录
+
+为避免把“问题里出现某个资源名”直接固化成单资源路由，本次先增加五条真实评估契约，再复用共享检索入口和固定 8,410 条索引建立 Control（对照组）。
+
+Control（对照组）完整运行 `2026-07-29T13-08-18-747Z` 的结果为：
+
+- 88 条 trace（轨迹）完整，Recall@3 为 `97.0%`（`85.333/88`），MRR@3 为 `0.915`（`80.5/88`），harness error（评估框架错误）为 0。
+- 原有 83 条全部通过。
+- Ingress 到 Service/Secret 通过；Pod 到 PVC/ConfigMap/Secret、HPA 到 Deployment、RoleBinding 到 Role/ClusterRole/ServiceAccount、PVC 到 StorageClass 四条失败。
+
+Candidate（候选组）同时尝试多资源软提示、规范资源名补词和直接父 schema（结构定义）补候选。五条目标契约的定向 A/B Test（对照实验）中，Ingress、HPA 通过，Pod、RoleBinding、PVC 仍分别只命中 `1/3`、`1/2`、`1/2`。该结果已触发预先约定的淘汰门禁，因此：
+
+- 候选生产代码和候选专用测试已撤销。
+- 不继续执行 88 条 Candidate（候选组）完整运行，不以更多调参覆盖失败。
+- 不重建索引，不晋升 baseline（基线）。
+- 保留五条评估契约、Control（对照组）运行证据和四条 bad case（问题用例）。
+
+现有证据表明缺口不只来自单值资源路由：HPA 与 RoleBinding 已召回子字段但漏掉预期父字段，PVC 的父字段进入候选后仍未进入 top 3（前三名），Pod 的 PVC 父字段没有进入粗召回。下一轮必须先明确跨资源问题所需的字段粒度和 rerank（重排）目标，再提出新候选；不得恢复本次已淘汰方案或增加单资源特判。

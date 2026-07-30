@@ -31,7 +31,7 @@ const reviewedAlias = {
   fieldTerms: ['volumeMode', 'Block', 'Filesystem'],
   weakZhAliases: ['卷模式'],
   strongZhAliases: ['裸块设备'],
-  source: 'llm_offline',
+  source: 'llm_offline' as const,
   reviewed: true,
   reviewedAt: '2026-07-08',
   reviewNote: '',
@@ -110,6 +110,7 @@ check('strong alias 可扩展 query 并选择跨语言字段资源', () => {
 
     assert.equal(result.trace.status, 'applied');
     assert.equal(result.boostResource, 'PersistentVolumeClaim');
+    assert.equal(result.boostPath, 'spec.volumeMode');
     assert.equal(result.trace.selectedResource, 'PersistentVolumeClaim');
     assert.equal(result.trace.resourceSelectionReason, 'no_route_strong_alias');
     assert.match(result.queryText, /volumeMode/);
@@ -122,6 +123,44 @@ check('strong alias 可扩展 query 并选择跨语言字段资源', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+check('多个 alias 命中时不推断单一 boost path', () => {
+  const registry = {
+    ok: true as const,
+    snapshot: {
+      aliases: [
+        {
+          ...reviewedAlias,
+          id: 'endpoints-addresses',
+          resource: 'Endpoints',
+          path: 'subsets.addresses',
+          chunkId: 'schema::v1::Endpoints::subsets.addresses',
+          strongZhAliases: ['后端地址和端口'],
+        },
+        {
+          ...reviewedAlias,
+          id: 'endpoints-ports',
+          resource: 'Endpoints',
+          path: 'subsets.ports',
+          chunkId: 'schema::v1::Endpoints::subsets.ports',
+          strongZhAliases: ['后端地址和端口'],
+        },
+      ],
+      registryHash: 'a'.repeat(64),
+      reviewedAliasCount: 2,
+    },
+  };
+  const result = prepareQueryExpansion(
+    '后端地址和端口怎么写?',
+    undefined,
+    true,
+    registry,
+  );
+
+  assert.equal(result.boostResource, 'Endpoints');
+  assert.equal(result.boostPath, undefined);
+  assert.equal(result.trace.matchedAliases.length, 2);
 });
 
 check('关闭或 registry 失败时保留原 query 和 routed resource', () => {

@@ -1,16 +1,34 @@
 import type { VErr } from '../lib/yaml';
-import { LABEL, PRIMARY_BTN } from './styles';
+import {
+  LABEL,
+  PRIMARY_BTN,
+  SIDEBAR_PANEL,
+  SIDEBAR_PANEL_HEADER,
+} from './styles';
+import { Tooltip } from './Tooltip';
 
 interface Props {
   errors: VErr[] | null;
   onFix?: () => void;
   fixing?: boolean;
+  fixDisabled?: boolean;
+  fixLoginRequired?: boolean;
+  fixActionHint?: string;
 }
 
-export function ValidatePanel({ errors, onFix, fixing }: Props) {
+export function ValidatePanel({
+  errors,
+  onFix,
+  fixing,
+  fixDisabled,
+  fixLoginRequired = false,
+  fixActionHint,
+}: Props) {
   return (
-    <div className="rounded-lg border border-line bg-surface">
-      <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+    <div className={SIDEBAR_PANEL}>
+      <div
+        className={`flex items-center justify-between ${SIDEBAR_PANEL_HEADER}`}
+      >
         <span className={LABEL}>检查与修复</span>
         {errors !== null &&
           (errors.length === 0 ? (
@@ -37,9 +55,21 @@ export function ValidatePanel({ errors, onFix, fixing }: Props) {
               ))}
             </ul>
             {onFix && (
-              <button className={`mt-3 ${PRIMARY_BTN}`} onClick={onFix} disabled={fixing}>
-                {fixing ? '修复中…(自检)' : '修复当前问题'}
-              </button>
+              <div className="mt-3">
+                <Tooltip content={fixActionHint} align="start" describeChild>
+                  <button
+                    className={PRIMARY_BTN}
+                    onClick={onFix}
+                    disabled={fixDisabled}
+                  >
+                    {fixing
+                      ? '修复中…(自检)'
+                      : fixLoginRequired
+                        ? '登录后修复当前问题'
+                        : '修复当前问题'}
+                  </button>
+                </Tooltip>
+              </div>
             )}
           </>
         )}

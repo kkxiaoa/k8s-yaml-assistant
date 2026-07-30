@@ -105,9 +105,9 @@
     "path": "spec.containers.securityContext.privileged",
     "chunkId": "schema::v1::Pod::spec.containers.securityContext.privileged",
     "evalCaseIds": ["policy-conflict-privileged"],
-    "metric": false,
+    "metric": true,
     "source": "retrieval_eval_miss",
-    "priority": "low",
-    "note": "policy-conflict-privileged 的真正 miss 是 policy chunk,本条仅观察 schema 侧 expansion,不计入 A3 schema alias 成功率"
+    "priority": "high",
+    "note": "以 reviewed schema field alias 选择 Pod 与字段路径,正式度量同路径 policy chunk 的召回"
   }
 ]

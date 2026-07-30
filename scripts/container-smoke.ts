@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { RELEASE_INDEX_EMBEDDING_MODEL } from '../src/release/manifest';
+import { applicationPath } from '../src/shared/application-path.mjs';
 
 const NODE_IMAGE_DIGEST =
   'sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d';
@@ -65,6 +66,7 @@ const APP_UID_GID = '10001:10001';
 const SMOKE_TMPFS_SIZE_BYTES = 64 * 1024 * 1024;
 const OBSERVATION_VOLUME_PATH = '/app/data/observability';
 const OBSERVATION_DATA_PATH = `${OBSERVATION_VOLUME_PATH}/segments`;
+const ASK_PATH = applicationPath('/api/ask');
 const CANDIDATE_INDEX_PATHS = new Set([
   'app/data/index/manifest.json',
   'app/data/index/chunks.jsonl',
@@ -608,7 +610,7 @@ async function assertObservationRuntime(
 ): Promise<void> {
   const request = nodeInContainer(
     name,
-    "fetch('http://127.0.0.1:3000/api/ask',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(response=>console.log(response.status)).catch(()=>process.exit(2))",
+    `fetch('http://127.0.0.1:3000${ASK_PATH}',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(response=>console.log(response.status)).catch(()=>process.exit(2))`,
   );
   const expectedStatus = expectation === 'ready' ? '400' : '503';
   if (request.status !== 0 || request.stdout.trim() !== expectedStatus) {

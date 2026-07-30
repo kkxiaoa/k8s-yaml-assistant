@@ -2,20 +2,23 @@
 // 故意只暴露一个 embed() 函数,方便迭代3 换成别的提供商或本地模型而不动其他代码。
 
 import {
-  getRuntimeConfig,
-  getVoyageApiKey,
-  requireRuntimeCapability,
+  getRetrievalRuntimeConfig,
+  requireRetrievalRuntimeAccess,
+  type RetrievalRuntimeAccess,
 } from '../server/runtime-config';
 import { UpstreamHttpError } from '../server/upstream-error';
+import { voyageRequestSignal } from '../server/model-request-policy';
+import type { ProviderRequestObserver } from '../server/provider-usage';
 
 /** 读取已经显式解码的 embedding 模型身份。 */
 export function resolveEmbeddingModel(): string {
-  return getRuntimeConfig().voyage.embeddingModel;
+  return getRetrievalRuntimeConfig().voyage.embeddingModel;
 }
 const MAX_BATCH_SIZE = 1000;
 
 interface VoyageResponse {
   data: { embedding: number[] }[];
+  usage?: { total_tokens?: unknown };
 }
 
 /**
@@ -26,21 +29,30 @@ interface VoyageResponse {
 export async function embed(
   texts: string[],
   inputType: 'document' | 'query',
-  model: string = resolveEmbeddingModel(),
+  model?: string,
+  runtimeAccess: RetrievalRuntimeAccess = requireRetrievalRuntimeAccess(),
+  observer?: ProviderRequestObserver,
 ): Promise<number[][]> {
-  const config = requireRuntimeCapability('voyage');
-  const key = getVoyageApiKey();
+  const config = runtimeAccess.config;
+  const key = runtimeAccess.apiKey();
+  const resolvedModel = model ?? config.voyage.embeddingModel;
 
   const out: number[][] = [];
   for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
     const batch = texts.slice(i, i + MAX_BATCH_SIZE);
+    observer?.requestStarted('voyage');
     const res = await fetch(config.voyage.embeddingUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify({ input: batch, model, input_type: inputType }),
+      body: JSON.stringify({
+        input: batch,
+        model: resolvedModel,
+        input_type: inputType,
+      }),
+      signal: voyageRequestSignal(),
     });
 
     if (!res.ok) {
@@ -62,6 +74,10 @@ export async function embed(
     ) {
       throw new Error('invalid upstream embedding response');
     }
+    observer?.voyageEmbeddingUsage(
+      resolvedModel,
+      json.usage?.total_tokens,
+    );
     out.push(...embeddings);
   }
   return out;

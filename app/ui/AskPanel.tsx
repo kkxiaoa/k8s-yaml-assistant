@@ -1,19 +1,73 @@
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { LABEL, PRIMARY_BTN } from './styles';
-import type { AskMode, SourceHit } from '../lib/api';
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
-  sourceAuthorityLabel,
-  sourceLabel,
-} from '@/retrieval/source-policy';
+  LABEL,
+  PRIMARY_BTN,
+  SIDEBAR_PANEL,
+  SIDEBAR_PANEL_HEADER,
+  SIDEBAR_TEXTAREA,
+} from "./styles";
+import { ExampleHint } from './ExampleHint';
+import { Tooltip } from './Tooltip';
+import type { AskMode, SourceHit } from "../lib/api";
+import { sourceAuthorityLabel, sourceLabel } from "@/retrieval/source-policy";
+
+const QUESTION_EXAMPLE = '当前字段可以填写哪些值？';
+
+interface MarkdownNode {
+  type: string;
+  value?: string;
+  children?: MarkdownNode[];
+}
+
+function remarkCitationBadges() {
+  return (tree: MarkdownNode): void => {
+    function transform(node: MarkdownNode): void {
+      if (
+        !node.children ||
+        node.type === 'code' ||
+        node.type === 'inlineCode' ||
+        node.type === 'strong'
+      ) {
+        return;
+      }
+      node.children = node.children.flatMap((child) => {
+        if (child.type !== 'text' || child.value === undefined) {
+          transform(child);
+          return [child];
+        }
+        const parts = child.value.split(/(\[S\d+\])/g);
+        if (parts.length === 1) return [child];
+        return parts
+          .filter(Boolean)
+          .map((part): MarkdownNode =>
+            /^\[S\d+\]$/.test(part)
+              ? {
+                  type: 'strong',
+                  children: [{ type: 'text', value: part }],
+                }
+              : { type: 'text', value: part },
+          );
+      });
+    }
+    transform(tree);
+  };
+}
 
 const markdownComponents: Components = {
   p: ({ children }) => (
     <p className="my-2 text-sm leading-relaxed text-fg">{children}</p>
   ),
-  strong: ({ children }) => (
-    <strong className="font-semibold text-fg">{children}</strong>
-  ),
+  strong: ({ children }) => {
+    if (typeof children === 'string' && /^\[S\d+\]$/.test(children)) {
+      return (
+        <span className="mx-0.5 inline-flex -translate-y-px rounded-sm border border-brand/35 bg-brand/10 px-1 py-0.5 font-mono text-[10px] font-semibold leading-none text-brand">
+          {children}
+        </span>
+      );
+    }
+    return <strong className="font-semibold text-fg">{children}</strong>;
+  },
   h1: ({ children }) => (
     <h3 className="mt-4 text-base font-semibold text-fg">{children}</h3>
   ),
@@ -48,13 +102,13 @@ const markdownComponents: Components = {
     const isBlock = Boolean(className);
     if (isBlock) {
       return (
-        <code className={`font-mono text-xs text-fg/85 ${className ?? ''}`}>
+        <code className={`font-mono text-xs text-fg/85 ${className ?? ""}`}>
           {children}
         </code>
       );
     }
     return (
-      <code className="rounded bg-ink px-1 py-0.5 font-mono text-[12px] text-brand">
+      <code className="rounded border border-line/60 bg-black/20 px-1 py-0.5 font-mono text-[0.9em] text-fg/85">
         {children}
       </code>
     );
@@ -71,7 +125,9 @@ const markdownComponents: Components = {
   ),
   table: ({ children }) => (
     <div className="my-2 overflow-x-auto">
-      <table className="min-w-full border-collapse text-xs text-fg/85">{children}</table>
+      <table className="min-w-full border-collapse text-xs text-fg/85">
+        {children}
+      </table>
     </div>
   ),
   th: ({ children }) => (
@@ -79,15 +135,23 @@ const markdownComponents: Components = {
       {children}
     </th>
   ),
-  td: ({ children }) => <td className="border border-line px-2 py-1">{children}</td>,
+  td: ({ children }) => (
+    <td className="border border-line px-2 py-1">{children}</td>
+  ),
 };
 
-function MarkdownText({ text, streaming }: { text: string; streaming: boolean }) {
+function MarkdownText({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming: boolean;
+}) {
   return (
     <div className="mt-3 min-w-0 break-words text-sm">
       <ReactMarkdown
         components={markdownComponents}
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkCitationBadges]}
         skipHtml
       >
         {text}
@@ -103,6 +167,8 @@ interface Props {
   sources: SourceHit[];
   asking: boolean;
   disabled: boolean;
+  loginRequired: boolean;
+  actionHint?: string;
   canExplainField: boolean;
   canExplainError: boolean;
   onChange: (v: string) => void;
@@ -115,6 +181,8 @@ export function AskPanel({
   sources,
   asking,
   disabled,
+  loginRequired,
+  actionHint,
   canExplainField,
   canExplainError,
   onChange,
@@ -126,41 +194,57 @@ export function AskPanel({
   );
   const cited = sources.filter((s) => s.n != null && citedNs.has(s.n));
   return (
-    <div className="rounded-lg border border-line bg-surface">
-      <div className="border-b border-line px-4 py-2.5">
+    <div className={SIDEBAR_PANEL}>
+      <div className={SIDEBAR_PANEL_HEADER}>
         <span className={LABEL}>解释当前配置</span>
       </div>
       <div className="px-4 py-3">
         <div className="mb-2 flex flex-wrap gap-2">
-          <button
-            className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg/80 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={() => onAsk('explain_field', '解释当前字段')}
-            disabled={disabled || !canExplainField}
-          >
-            解释当前字段
-          </button>
-          <button
-            className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg/80 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={() => onAsk('explain_error', '解释当前校验错误')}
-            disabled={disabled || !canExplainError}
-          >
-            解释当前错误
-          </button>
+          <Tooltip content={actionHint} align="start" describeChild>
+            <button
+              className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg/80 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => onAsk("explain_field", "解释当前字段")}
+              disabled={disabled || !canExplainField}
+            >
+              解释当前字段
+            </button>
+          </Tooltip>
+          <Tooltip content={actionHint} align="start" describeChild>
+            <button
+              className="rounded border border-line px-2 py-1 font-mono text-[11px] text-fg/80 transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => onAsk("explain_error", "解释当前校验错误")}
+              disabled={disabled || !canExplainError}
+            >
+              解释当前错误
+            </button>
+          </Tooltip>
         </div>
         <textarea
+          id="ask-question"
+          aria-label="关于当前 YAML 的问题"
           value={question}
           onChange={(e) => onChange(e.target.value)}
           rows={3}
-          placeholder="问一个关于当前配置的问题,例如某字段能填哪些值、怎么配某项"
-          className="w-full resize-none rounded border border-line bg-ink px-3 py-2 text-sm text-fg outline-none transition focus:border-brand/50 placeholder:text-muted"
+          placeholder="输入关于当前 YAML 的问题…"
+          className={`min-h-24 resize-y ${SIDEBAR_TEXTAREA}`}
         />
-        <button
-          className={`mt-2 ${PRIMARY_BTN}`}
-          onClick={() => onAsk('free')}
-          disabled={disabled || !question.trim()}
+        <ExampleHint
+          applyLabel="将提问示例填入输入框"
+          onApply={() => onChange(QUESTION_EXAMPLE)}
         >
-          {asking ? '分析中…' : '解释'}
-        </button>
+          {QUESTION_EXAMPLE}
+        </ExampleHint>
+        <div className="mt-2">
+          <Tooltip content={actionHint} align="start" describeChild>
+            <button
+              className={PRIMARY_BTN}
+              onClick={() => onAsk("free")}
+              disabled={disabled || !question.trim()}
+            >
+              {asking ? "分析中…" : loginRequired ? "登录后解释" : "解释"}
+            </button>
+          </Tooltip>
+        </div>
         {answer && <MarkdownText text={answer} streaming={asking} />}
         {cited.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
@@ -168,38 +252,42 @@ export function AskPanel({
             <ul className="mt-2 space-y-2">
               {cited.map((source, i) => {
                 const target = source.targets[0];
-                const resource = target?.kind ?? '通用来源';
+                const resource = target?.kind ?? "通用来源";
                 const path = target?.path;
                 return (
-                <li key={source.id} className="rounded border border-line bg-ink/50 px-3 py-2">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-brand">
-                        S{source.n ?? i + 1}
+                  <li
+                    key={source.id}
+                    className="rounded border border-line bg-ink/50 px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-brand">
+                          S{source.n ?? i + 1}
+                        </span>
+                        <span className="min-w-0 break-all font-mono text-[11px] text-brand">
+                          {resource}
+                          {path ? ` · ${path}` : ""}
+                        </span>
                       </span>
-                      <span className="min-w-0 break-all font-mono text-[11px] text-brand">
-                        {resource}{path ? ` · ${path}` : ''}
+                      <span className="shrink-0 font-mono text-[10px] uppercase text-muted">
+                        {sourceLabel(source.sourceType)} ·{" "}
+                        {sourceAuthorityLabel(source.provenance.authority)}
                       </span>
-                    </span>
-                    <span className="shrink-0 font-mono text-[10px] uppercase text-muted">
-                      {sourceLabel(source.sourceType)} ·{' '}
-                      {sourceAuthorityLabel(source.provenance.authority)}
-                    </span>
-                  </div>
-                  <p className="mt-1 break-words text-xs leading-relaxed text-fg/80">
-                    {source.text}
-                  </p>
-                  {source.provenance.sourceUri?.startsWith('http') && (
-                    <a
-                      href={source.provenance.sourceUri}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1.5 inline-block break-all font-mono text-[10px] text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
-                    >
-                      查看文档 ↗
-                    </a>
-                  )}
-                </li>
+                    </div>
+                    <p className="mt-1 break-words text-xs leading-relaxed text-fg/80">
+                      {source.text}
+                    </p>
+                    {source.provenance.sourceUri?.startsWith("http") && (
+                      <a
+                        href={source.provenance.sourceUri}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1.5 inline-block break-all font-mono text-[10px] text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+                      >
+                        查看文档 ↗
+                      </a>
+                    )}
+                  </li>
                 );
               })}
             </ul>

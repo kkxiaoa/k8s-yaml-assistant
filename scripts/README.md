@@ -47,7 +47,7 @@
 
 | 脚本 | npm 入口 | 外部调用 | 写盘 | 边界与保留依据 |
 |---|---|---|---|---|
-| `build-calibration.ts` | `npm run build:calibration` | 无 | 覆盖 `data/eval/judge-calibration.jsonl` | 从人工标签和最近可用的 completed non-smoke faith traces（已完成非冒烟忠实度轨迹）物化 judge calibration snapshot（裁判校准快照）；标签命中 Holdout（留出集）轨迹时失败。 |
+| `build-calibration.ts` | `npm run build:calibration` | 无 | 覆盖 `data/eval/judge-calibration.jsonl` | 从人工标签绑定的 completed non-smoke faith run（已完成非冒烟忠实度运行）物化 judge calibration snapshot（裁判校准快照）；来源运行或用例不存在、标签命中 Holdout（留出集）轨迹时失败，不把旧标签自动套用到同名新回答。 |
 | `eval-promote.ts` | `npm run eval:promote -- <runId>` | 无 | 写入 `data/eval/baselines/<kind>.json` | 只接受通过完整 promotion gates（晋升门禁）的运行；必须在人工审核后显式执行。 |
 | `faith-bad-cases.ts` | `npm run badcases:faith -- <runId> [--write]` | 无 | 默认不写；`--write` 覆盖 `data/eval/bad-cases.jsonl` | 先预览 faithful bad-case candidates（忠实度问题候选）；显式写入时合并长期问题台账并校验证据；Holdout（留出集）轨迹不生成候选。 |
 | `check-schema-aliases.ts` | `npm run aliases:review -- <draft> [--apply]` | 无 | 默认不写；`--apply` 原子合并 `data/aliases/schema-field-aliases.jsonl` | 只接受位于草稿目录、全部完成人工审核且可追溯的记录；默认输出合并预览，并保留草稿未覆盖的正式记录。 |

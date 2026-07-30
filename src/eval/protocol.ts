@@ -285,7 +285,7 @@ const FaithRunSchema = z.strictObject({
 const JudgeRunSchema = z.strictObject({
   ...EvalRunBaseShape,
   kind: z.literal('judge'),
-  scope: z.literal('calibration'),
+  scope: z.union([z.literal('calibration'), z.literal('targeted')]),
   config: JudgeEvalConfigSchema,
 });
 
