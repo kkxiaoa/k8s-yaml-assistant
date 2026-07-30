@@ -6,11 +6,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  */
 export function useResizable(initial: number, min: number, max: number) {
   const [width, setWidth] = useState(initial);
+  const [isResizing, setIsResizing] = useState(false);
   const dragging = useRef(false);
 
   const onResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     dragging.current = true;
+    setIsResizing(true);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   }, []);
@@ -23,6 +25,7 @@ export function useResizable(initial: number, min: number, max: number) {
     function onUp() {
       if (!dragging.current) return;
       dragging.current = false;
+      setIsResizing(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     }
@@ -34,5 +37,5 @@ export function useResizable(initial: number, min: number, max: number) {
     };
   }, [min, max]);
 
-  return { width, onResizeStart };
+  return { width, isResizing, onResizeStart };
 }
