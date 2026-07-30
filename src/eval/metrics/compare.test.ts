@@ -148,11 +148,11 @@ console.log('metric-compare:');
 check('lower-is-better metrics improve when they decrease', () => {
   const faith = compareMetricRecords(
     'faith',
-    { 'faith.hallucination': metricObservation(1) },
-    { 'faith.hallucination': metricObservation(2) },
+    { 'faith.unsupported_response_count': metricObservation(1) },
+    { 'faith.unsupported_response_count': metricObservation(2) },
   );
-  assert.deepEqual(metric(faith, 'faith.hallucination'), {
-    key: 'faith.hallucination',
+  assert.deepEqual(metric(faith, 'faith.unsupported_response_count'), {
+    key: 'faith.unsupported_response_count',
     current: metricObservation(1),
     baseline: metricObservation(2),
     delta: -1,

@@ -27,6 +27,8 @@ import {
 } from './cases/grounded-answer-cases';
 import type { SemanticRetrievalCase } from './cases/retrieval-cases';
 import {
+  assessFaith,
+  currentFaithOutcome,
   decodeFaithTrace,
   type FaithOutcome,
   type FaithTrace,
@@ -192,9 +194,13 @@ const RUN = faithRun({
   cases: [MINI_GROUNDED_CASES[0]!],
 });
 
-function verdict(faithful: boolean) {
+function verdict(
+  faithful: boolean,
+  responseBehavior: 'answer' | 'refusal' | 'non_answer' = 'answer',
+) {
   return {
     faithful,
+    responseBehavior,
     unsupported: faithful ? [] : ['unsupported claim'],
     reason: faithful ? 'faithful' : 'unsupported',
   };
@@ -223,9 +229,9 @@ function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
       ),
     },
     answer: 'answer',
-    judgeAttempts: [{ status: 'valid', vote: verdict(true) }],
-    verdict: verdict(true),
-    outcome: 'faithful_hit',
+    judgeAttempts: [{ status: 'valid', vote: verdict(true, 'answer') }],
+    verdict: verdict(true, 'answer'),
+    outcome: 'passed',
   };
 }
 
@@ -289,8 +295,9 @@ function trace(
   outcome: FaithOutcome,
   overrides: Partial<FaithTrace> = {},
 ): FaithTrace {
-  const isRefusal =
-    outcome === 'refused_correctly' || outcome === 'refused_wrong';
+  const expectedBehavior =
+    overrides.expectedBehavior ?? 'answer_with_sources';
+  const isRefusal = expectedBehavior === 'refuse_insufficient_context';
   const governance = isRefusal
     ? {
         task: 'refusal' as const,
@@ -302,28 +309,26 @@ function trace(
     outcome === 'judge_failed' || outcome === 'error'
       ? null
       : verdict(
-          outcome === 'faithful_hit' ||
-            outcome === 'faithful_miss' ||
-            outcome === 'refused_correctly',
+          outcome === 'passed',
+          isRefusal ? 'refusal' : 'answer',
         );
+  const expectedChunkIds = isRefusal
+    ? []
+    : ['schema::v1::Pod::spec.containers.name'];
   return {
     id: 'case-1',
     input: isRefusal
       ? { kind: 'standalone_question', question: '这个字段怎么用?' }
       : { kind: 'retrieval_case', retrievalCaseId: 'case-1' },
     question: '这个字段怎么用?',
-    expectedBehavior: isRefusal
-      ? 'refuse_insufficient_context'
-      : 'answer_with_sources',
+    expectedBehavior,
     ...(isRefusal ? {} : { target: { kind: 'Pod' } }),
     context: contextSnapshot('schema::v1::Pod::spec.containers.name'),
     retrieval: {
-      expectedChunkIds: isRefusal
-        ? []
-        : ['schema::v1::Pod::spec.containers.image'],
+      expectedChunkIds,
       topIds: ['schema::v1::Pod::spec.containers.name'],
-      foundCount: 0,
-      fullRecall: false,
+      foundCount: expectedChunkIds.length,
+      fullRecall: expectedChunkIds.length > 0,
       queryExpansionConfig: QUERY_EXPANSION_CONFIG,
       searchTrace: searchTrace(
         '这个字段怎么用?',
@@ -336,11 +341,6 @@ function trace(
         ? [{ status: 'valid', vote: judgedVerdict }]
         : outcome === 'judge_failed'
           ? [
-              {
-                status: 'invalid',
-                code: 'invalid_json',
-                reason: 'invalid judge output',
-              },
               {
                 status: 'error',
                 stage: 'judge_request',
@@ -682,6 +682,11 @@ check('rejects inconsistent context, source, query, and judge snapshots', () => 
             status: 'invalid',
             code: 'invalid_json',
             reason: 'late invalid output',
+            response: {
+              stopReason: 'unknown',
+              textBlockCount: 1,
+              nonTextBlockCount: 0,
+            },
           },
         ],
       }),
@@ -689,11 +694,129 @@ check('rejects inconsistent context, source, query, and judge snapshots', () => 
   );
 });
 
-check('maps faithful, hallucination, refusal, judge, and runtime outcomes', () => {
+check('faithfulness, response behavior, retrieval, sources, and policy are independent', () => {
+  assert.equal(
+    currentFaithOutcome({
+      expectedBehavior: 'answer_with_sources',
+      retrieval: { fullRecall: true },
+      verdict: verdict(true, 'answer'),
+    }),
+    'passed',
+  );
+  assert.equal(
+    currentFaithOutcome({
+      expectedBehavior: 'answer_with_sources',
+      retrieval: { fullRecall: false },
+      verdict: verdict(true, 'answer'),
+    }),
+    'failed',
+  );
+  assert.equal(
+    currentFaithOutcome({
+      expectedBehavior: 'refuse_insufficient_context',
+      retrieval: { fullRecall: false },
+      verdict: verdict(true, 'answer'),
+    }),
+    'failed',
+  );
+  assert.equal(
+    currentFaithOutcome({
+      expectedBehavior: 'refuse_insufficient_context',
+      retrieval: { fullRecall: false },
+      verdict: verdict(true, 'refusal'),
+    }),
+    'passed',
+  );
+  assert.equal(
+    currentFaithOutcome({
+      expectedBehavior: 'refuse_insufficient_context',
+      retrieval: { fullRecall: false },
+      verdict: verdict(false, 'refusal'),
+    }),
+    'failed',
+  );
+  assert.equal(
+    currentFaithOutcome({
+      expectedBehavior: 'refuse_insufficient_context',
+      retrieval: { fullRecall: false },
+      verdict: verdict(true, 'non_answer'),
+    }),
+    'failed',
+  );
+
+  const conflictVote = {
+    ...verdict(true, 'answer'),
+    policy: {
+      distinguished: true,
+      conflictExplained: true,
+      misstatedAsOfficial: false,
+    },
+  };
+  assert.equal(
+    currentFaithOutcome({
+      expectedBehavior: 'explain_schema_policy_conflict',
+      retrieval: { fullRecall: true },
+      verdict: conflictVote,
+    }),
+    'passed',
+  );
+  assert.equal(
+    currentFaithOutcome({
+      expectedBehavior: 'explain_schema_policy_conflict',
+      retrieval: { fullRecall: true },
+      verdict: {
+        ...conflictVote,
+        policy: { ...conflictVote.policy, conflictExplained: false },
+      },
+    }),
+    'failed',
+  );
+
+  const sourceAssessment = assessFaith({
+    expectedBehavior: 'answer_with_sources',
+    retrieval: { fullRecall: true },
+    sourceCoverage: {
+      mode: 'required',
+      expectedTypes: ['docs'],
+      presentTypes: ['schema'],
+      missingTypes: ['docs'],
+      status: 'missing_required',
+    },
+    verdict: verdict(true, 'answer'),
+  });
+  assert.equal(sourceAssessment.sourceCoverageSatisfied, false);
+  assert.equal(sourceAssessment.passed, false);
+});
+
+check('current faith traces require response behavior and a consistent coarse outcome', () => {
+  const current = inputTrace('case-a');
+  const currentVote = verdict(true, 'answer');
+  assert.equal(decodeFaithTrace(current).outcome, 'passed');
+  assert.throws(
+    () => decodeFaithTrace({ ...current, outcome: 'failed' }),
+    /outcome does not match independent assessment/i,
+  );
+  const {
+    responseBehavior: _responseBehavior,
+    ...voteWithoutResponseBehavior
+  } = currentVote;
+  assert.throws(
+    () =>
+      decodeFaithTrace({
+        ...current,
+        judgeAttempts: [
+          { status: 'valid', vote: voteWithoutResponseBehavior },
+        ],
+        verdict: voteWithoutResponseBehavior,
+      }),
+    /responseBehavior/i,
+  );
+});
+
+check('maps passed, failed, judge, and runtime outcomes', () => {
   const expected = [
-    ['faithful_hit', 'skip'],
-    ['hallucination', 'create'],
-    ['refused_wrong', 'create'],
+    ['passed', 'skip'],
+    ['failed', 'create'],
     ['judge_failed', 'create'],
     ['error', 'error'],
   ] as const;
@@ -712,8 +835,50 @@ check('maps faithful, hallucination, refusal, judge, and runtime outcomes', () =
   }
 });
 
+check('current failures use observational bad-case types instead of causal labels', () => {
+  const supportedRetrieval = inputTrace('case-a');
+  const unsupportedVote = verdict(false, 'answer');
+  const unsupported = {
+    ...supportedRetrieval,
+    judgeAttempts: [{ status: 'valid' as const, vote: unsupportedVote }],
+    verdict: unsupportedVote,
+    outcome: 'failed' as const,
+  };
+  const unsupportedCandidate = onlyCandidate(
+    buildFaithBadCaseCandidates({
+      observations: [observation(unsupported)],
+      existingBadCases: [],
+      run: RUN,
+      scope: 'full',
+      now: '2026-07-10T00:00:00.000Z',
+    }),
+  );
+  assert.equal(unsupportedCandidate.issue?.failure.type, 'unsupported_claim');
+
+  const expectedRefusal = trace('passed', {
+    expectedBehavior: 'refuse_insufficient_context',
+  });
+  const answerVote = verdict(true, 'answer');
+  const behaviorMismatch = {
+    ...expectedRefusal,
+    judgeAttempts: [{ status: 'valid' as const, vote: answerVote }],
+    verdict: answerVote,
+    outcome: 'failed' as const,
+  };
+  const behaviorCandidate = onlyCandidate(
+    buildFaithBadCaseCandidates({
+      observations: [observation(behaviorMismatch)],
+      existingBadCases: [],
+      run: RUN,
+      scope: 'full',
+      now: '2026-07-10T00:00:00.000Z',
+    }),
+  );
+  assert.equal(behaviorCandidate.issue?.failure.type, 'behavior_mismatch');
+});
+
 check('full and holdout runs never turn holdout traces into bad-case candidates', () => {
-  const holdoutTrace = trace('hallucination', {
+  const holdoutTrace = trace('failed', {
     governance: {
       task: 'field_explanation',
       origin: 'human',
@@ -743,37 +908,57 @@ check('full and holdout runs never turn holdout traces into bad-case candidates'
   );
 });
 
-check('links dual-cause evidence to an existing retrieval issue', () => {
+check('reports retrieval-incomplete evidence independently from unsupported claims', () => {
   const retrieval = badCase({
     evalCaseId: 'case-1',
     layer: 'rerank',
     type: 'rerank_miss',
     source: 'retrieval_eval',
   });
+  const incomplete = trace('failed', {
+    retrieval: {
+      ...trace('failed').retrieval,
+      expectedChunkIds: ['schema::v1::Pod::spec.containers.image'],
+      foundCount: 0,
+      fullRecall: false,
+    },
+  });
   const candidates = buildFaithBadCaseCandidates({
-    observations: [observation(trace('dual_cause'))],
+    observations: [observation(incomplete)],
     existingBadCases: [retrieval],
     run: RUN,
     scope: 'policy',
     now: '2026-07-10T00:00:00.000Z',
   });
 
-  assert.equal(candidates.length, 1);
-  assert.deepEqual(candidates[0]?.issue?.relatedBadCaseIds, [retrieval.id]);
+  assert.equal(candidates.length, 2);
+  assert.equal(
+    candidates.some(
+      (candidate) =>
+        candidate.action === 'create' &&
+        candidate.issue?.failure.type === 'unsupported_claim',
+    ),
+    true,
+  );
+  assert.deepEqual(
+    candidates.find((candidate) => candidate.action === 'link_only')
+      ?.relatedBadCaseIds,
+    [retrieval.id],
+  );
 });
 
 check('recurring issues retain status and extend observed runs once', () => {
   const existing = badCase({
     evalCaseId: 'case-1',
     layer: 'generation',
-    type: 'hallucination',
+    type: 'unsupported_claim',
     source: 'faith_eval',
     observedRunIds: ['older-run'],
     status: 'fixed',
   });
   const candidate = onlyCandidate(
     buildFaithBadCaseCandidates({
-      observations: [observation(trace('hallucination'), 'trace-recurrence')],
+      observations: [observation(trace('failed'), 'trace-recurrence')],
       existingBadCases: [existing],
       run: RUN,
       scope: 'policy',

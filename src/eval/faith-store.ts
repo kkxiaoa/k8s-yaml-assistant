@@ -11,11 +11,14 @@ import {
   SourceExpectationSchema,
   evaluateSourceExpectation,
   groundedAnswerAskMode,
+  type SourceCoverage,
 } from './cases/grounded-answer-cases';
 import { EvalCaseGovernanceSchema } from './cases/governance';
 import {
-  JudgeAttemptSchema,
-  JudgeVoteSchema,
+  LiveJudgeAttemptSchema,
+  LiveJudgeVoteSchema,
+  type JudgeResponseBehavior,
+  type LiveJudgeVote,
 } from './judge-votes';
 import {
   EvalCaseErrorStageSchema,
@@ -23,15 +26,79 @@ import {
 } from './protocol';
 
 export const FaithOutcomeSchema = z.enum([
-  'faithful_hit',
-  'faithful_miss',
-  'hallucination',
-  'dual_cause',
-  'refused_correctly',
-  'refused_wrong',
+  'passed',
+  'failed',
   'judge_failed',
   'error',
 ]);
+
+type GroundedAnswerExpectedBehavior = z.infer<
+  typeof GroundedAnswerExpectedBehaviorSchema
+>;
+
+interface FaithAssessmentInput {
+  expectedBehavior: GroundedAnswerExpectedBehavior;
+  sourceCoverage?: SourceCoverage;
+  retrieval: { fullRecall: boolean };
+  verdict: LiveJudgeVote | null;
+}
+
+interface FaithAssessment {
+  faithful: boolean | null;
+  responseBehavior: JudgeResponseBehavior | null;
+  expectedBehaviorSatisfied: boolean | null;
+  retrievalSatisfied: boolean;
+  sourceCoverageSatisfied: boolean;
+  passed: boolean | null;
+}
+
+export function assessFaith(input: FaithAssessmentInput): FaithAssessment {
+  const { expectedBehavior, sourceCoverage, retrieval, verdict } = input;
+  const responseBehavior = verdict?.responseBehavior ?? null;
+  const expectedBehaviorSatisfied =
+    responseBehavior === null
+      ? null
+      : expectedBehavior === 'refuse_insufficient_context'
+        ? responseBehavior === 'refusal'
+        : expectedBehavior === 'answer_with_sources'
+          ? responseBehavior === 'answer'
+          : responseBehavior === 'answer' &&
+            verdict?.policy?.distinguished === true &&
+            verdict.policy.conflictExplained === true &&
+            verdict.policy.misstatedAsOfficial === false;
+  const retrievalSatisfied =
+    expectedBehavior === 'refuse_insufficient_context' ||
+    retrieval.fullRecall;
+  const sourceCoverageSatisfied =
+    sourceCoverage === undefined || sourceCoverage.status === 'complete';
+  const passed =
+    verdict === null || expectedBehaviorSatisfied === null
+      ? null
+      : verdict.faithful &&
+        expectedBehaviorSatisfied &&
+        retrievalSatisfied &&
+        sourceCoverageSatisfied;
+
+  return {
+    faithful: verdict?.faithful ?? null,
+    responseBehavior,
+    expectedBehaviorSatisfied,
+    retrievalSatisfied,
+    sourceCoverageSatisfied,
+    passed,
+  };
+}
+
+export function currentFaithOutcome(
+  input: FaithAssessmentInput,
+): z.infer<typeof FaithOutcomeSchema> {
+  if (input.verdict === null) return 'judge_failed';
+  const assessment = assessFaith(input);
+  if (assessment.passed === null) {
+    throw new TypeError('current faith verdict requires responseBehavior');
+  }
+  return assessment.passed ? 'passed' : 'failed';
+}
 
 export const FaithErrorPhaseSchema = EvalCaseErrorStageSchema.extract([
   'embedding',
@@ -244,8 +311,8 @@ export const FaithTraceSchema = z.strictObject({
     searchTrace: FaithSearchTraceSchema.optional(),
   }),
   answer: z.string(),
-  judgeAttempts: z.array(JudgeAttemptSchema),
-  verdict: JudgeVoteSchema.nullable(),
+  judgeAttempts: z.array(LiveJudgeAttemptSchema),
+  verdict: LiveJudgeVoteSchema.nullable(),
   outcome: FaithOutcomeSchema,
   errorPhase: FaithErrorPhaseSchema.optional(),
 }).superRefine((trace, context) => {
@@ -453,6 +520,29 @@ export const FaithTraceSchema = z.strictObject({
       message: 'judged faith outcome requires a valid verdict',
       path: ['verdict'],
     });
+  }
+  if (trace.outcome === 'passed' || trace.outcome === 'failed') {
+    if (trace.verdict === null) {
+      context.addIssue({
+        code: 'custom',
+        message: 'judged faith outcome requires a verdict',
+        path: ['verdict'],
+      });
+    } else {
+      const expectedOutcome = currentFaithOutcome({
+        expectedBehavior: trace.expectedBehavior,
+        sourceCoverage: trace.sourceCoverage,
+        retrieval: trace.retrieval,
+        verdict: trace.verdict,
+      });
+      if (trace.outcome !== expectedOutcome) {
+        context.addIssue({
+          code: 'custom',
+          message: 'faith outcome does not match independent assessment',
+          path: ['outcome'],
+        });
+      }
+    }
   }
 
   if (trace.context !== undefined) {

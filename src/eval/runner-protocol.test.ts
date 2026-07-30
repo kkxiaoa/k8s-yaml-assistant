@@ -21,11 +21,12 @@ import { RetrievalPipelineError } from '../retrieval/retrieve';
 import { VALIDATION_LOGIC_REVISION } from '../validation/validate';
 import {
   FAITH_JUDGE_ATTEMPT_LIMIT,
+  JUDGE_MAX_TOKENS,
   JUDGE_MODEL,
   JUDGE_PARSER_SCHEMA_IDENTITY,
   JUDGE_SYSTEM,
+  JUDGE_USER_MESSAGE_TEMPLATE,
 } from './judge';
-import { TEXT_MAX_TOKENS } from './llm';
 import {
   computeCanonicalHash,
   metricObservation,
@@ -52,6 +53,7 @@ import {
   retrievalMetricsRecord,
   selectEvalSuiteCases,
   selectFaithCases,
+  selectJudgeCases,
   selectRetrievalCases,
   toPersistedPayload,
 } from './runner-protocol';
@@ -561,6 +563,48 @@ check('judge dataset hashes question/context/answer and human labels', () => {
   }
 });
 
+check('judge selection uses the canonical calibration set for full and targeted runs', () => {
+  const second: JudgeCalibrationCase = {
+    ...JUDGE_CASE,
+    id: 'judge-2',
+    sourceFaithTraceId: 'faith-run-1:judge-2',
+  };
+  const cases = [JUDGE_CASE, second];
+
+  const calibration = selectJudgeCases([], cases);
+  const targeted = selectJudgeCases(
+    ['--case', 'judge-2', '--case', 'judge-1'],
+    cases,
+  );
+
+  assert.equal(calibration.scope, 'calibration');
+  assert.deepEqual(
+    calibration.cases.map((evalCase) => evalCase.id),
+    ['judge-1', 'judge-2'],
+  );
+  assert.equal(targeted.scope, 'targeted');
+  assert.deepEqual(
+    targeted.cases.map((evalCase) => evalCase.id),
+    ['judge-1', 'judge-2'],
+  );
+  assert.throws(
+    () => selectJudgeCases(['--case', 'missing'], cases),
+    /unknown judge case ID: missing/,
+  );
+  assert.throws(
+    () =>
+      selectJudgeCases(
+        ['--case', 'judge-1', '--case', 'judge-1'],
+        cases,
+      ),
+    /duplicate judge case ID: judge-1/,
+  );
+  assert.throws(
+    () => selectJudgeCases(['judge-1'], cases),
+    /用法/,
+  );
+});
+
 check('generation and fix hashes cover their full expected contracts', () => {
   const generation = generationDatasetIdentity([GENERATION_CASE]);
   assert.notEqual(
@@ -688,7 +732,8 @@ check('faith and judge prompt hashes are derived from actual request inputs', ()
   );
   const judgeHash = computeCanonicalHash({
     system: JUDGE_SYSTEM,
-    request: { model: JUDGE_MODEL, maxTokens: TEXT_MAX_TOKENS },
+    userMessageTemplate: JUDGE_USER_MESSAGE_TEMPLATE,
+    request: { model: JUDGE_MODEL, maxTokens: JUDGE_MAX_TOKENS },
   });
   assert.equal(faith.judgePromptHash, judgeHash);
   assert.equal(faith.judgeAttemptLimit, FAITH_JUDGE_ATTEMPT_LIMIT);
@@ -836,10 +881,15 @@ check('faith refusal rate is N/A without a conclusive refusal case', () => {
   const record = faithMetricsRecord({
     faithfulCount: 2,
     judgedCount: 2,
+    expectedBehaviorSatisfiedCount: 2,
+    behaviorJudgedCount: 2,
+    groundedSuccessCount: 2,
     refusedCorrectlyCount: 0,
     refusalJudgedCount: 0,
-    hallucinationCount: 0,
-    dualCauseCount: 0,
+    unsupportedResponseCount: 0,
+    behaviorMismatchCount: 0,
+    retrievalIncompleteCount: 0,
+    sourceIncompleteCount: 0,
     judgeIndeterminateCount: 0,
     judgeInvalidAttemptCount: 0,
     judgeErrorAttemptCount: 0,
@@ -866,10 +916,15 @@ check('all retrieval and faith case errors leave quality N/A', () => {
     ...faithMetricsRecord({
       faithfulCount: 0,
       judgedCount: 0,
+      expectedBehaviorSatisfiedCount: 0,
+      behaviorJudgedCount: 0,
+      groundedSuccessCount: 0,
       refusedCorrectlyCount: 0,
       refusalJudgedCount: 0,
-      hallucinationCount: 0,
-      dualCauseCount: 0,
+      unsupportedResponseCount: 0,
+      behaviorMismatchCount: 0,
+      retrievalIncompleteCount: 0,
+      sourceIncompleteCount: 0,
       judgeIndeterminateCount: 0,
       judgeInvalidAttemptCount: 0,
       judgeErrorAttemptCount: 0,

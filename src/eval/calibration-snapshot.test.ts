@@ -86,6 +86,7 @@ const BASE_TRACE: FaithTrace = {
       status: 'valid',
       vote: {
         faithful: false,
+        responseBehavior: 'answer',
         unsupported: ['claim'],
         reason: 'unsupported',
       },
@@ -93,10 +94,11 @@ const BASE_TRACE: FaithTrace = {
   ],
   verdict: {
     faithful: false,
+    responseBehavior: 'answer',
     unsupported: ['claim'],
     reason: 'unsupported',
   },
-  outcome: 'dual_cause',
+  outcome: 'failed',
 };
 
 const { context: _context, ...TRACE_WITHOUT_CONTEXT } = BASE_TRACE;

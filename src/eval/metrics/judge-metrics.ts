@@ -6,9 +6,13 @@ import {
   BooleanQuorumDiagnosticsSchema,
   DEFAULT_JUDGE_QUORUM,
   JudgeAttemptSchema,
+  JudgeResponseBehaviorSchema,
   POLICY_DIMENSIONS,
+  ResponseBehaviorQuorumDiagnosticsSchema,
   computeBooleanQuorum,
+  computeResponseBehaviorQuorum,
   type JudgeAttempt,
+  type JudgeResponseBehavior,
   type PolicyDimension,
 } from '../judge-votes';
 import {
@@ -18,7 +22,11 @@ import {
 } from '../protocol';
 
 export { POLICY_DIMENSIONS } from '../judge-votes';
-export type { JudgeVote, PolicyDimension } from '../judge-votes';
+export type {
+  JudgeResponseBehavior,
+  JudgeVote,
+  PolicyDimension,
+} from '../judge-votes';
 
 const NonBlankStringSchema = z
   .string()
@@ -45,6 +53,7 @@ const HumanPolicySchema = z.strictObject({
 
 export const JudgeHumanLabelSchema = z.strictObject({
   faithful: z.boolean(),
+  responseBehavior: JudgeResponseBehaviorSchema.optional(),
   policy: HumanPolicySchema.optional(),
   note: NonBlankStringSchema,
 });
@@ -212,8 +221,18 @@ const PolicyQuorumResultSchema = BooleanQuorumDiagnosticsSchema.extend({
   agree: z.boolean().nullable(),
 });
 
+const ResponseBehaviorQuorumResultSchema =
+  ResponseBehaviorQuorumDiagnosticsSchema.extend({
+    human: JudgeResponseBehaviorSchema,
+    judge: JudgeResponseBehaviorSchema.nullable(),
+    agree: z.boolean().nullable(),
+  });
+
 export type JudgePolicyDimensionResult = z.infer<
   typeof PolicyQuorumResultSchema
+>;
+type JudgeResponseBehaviorResult = z.infer<
+  typeof ResponseBehaviorQuorumResultSchema
 >;
 
 export const JudgeCalibrationTraceSchema = z
@@ -227,6 +246,7 @@ export const JudgeCalibrationTraceSchema = z
     human: JudgeHumanLabelSchema,
     attempts: AttemptSummarySchema,
     majority: FaithfulQuorumResultSchema,
+    responseBehavior: ResponseBehaviorQuorumResultSchema.optional(),
     policy: z.strictObject({
       distinguished: PolicyQuorumResultSchema.optional(),
       conflictExplained: PolicyQuorumResultSchema.optional(),
@@ -279,6 +299,87 @@ export const JudgeCalibrationTraceSchema = z
         path: ['majority', 'quorum'],
         message: 'faithful quorum cannot exceed planned attempts',
       });
+    }
+    const expectedHumanBehavior = trace.human.responseBehavior;
+    const behaviorResult = trace.responseBehavior;
+    if (expectedHumanBehavior === undefined) {
+      if (behaviorResult !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['responseBehavior'],
+          message:
+            'response behavior result requires an explicit human label',
+        });
+      }
+    } else if (behaviorResult === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['responseBehavior'],
+        message:
+          'explicit human response behavior label requires a result',
+      });
+    } else {
+      const {
+        human: resultHuman,
+        judge,
+        agree,
+        ...diagnostics
+      } = behaviorResult;
+      const expectedBehaviorQuorum = computeResponseBehaviorQuorum(
+        trace.attempts.items.flatMap((attempt) => {
+          const value =
+            attempt.status === 'valid'
+              ? attempt.vote.responseBehavior
+              : undefined;
+          return value === undefined ? [] : [value];
+        }),
+        behaviorResult.quorum,
+      );
+      if (
+        !isDeepStrictEqual(
+          { responseBehavior: judge, ...diagnostics },
+          expectedBehaviorQuorum,
+        )
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['responseBehavior'],
+          message: 'response behavior quorum diagnostics are inconsistent',
+        });
+      }
+      const expectedAgree =
+        judge === null ? null : judge === resultHuman;
+      if (agree !== expectedAgree) {
+        context.addIssue({
+          code: 'custom',
+          path: ['responseBehavior', 'agree'],
+          message:
+            'response behavior agreement does not match human label',
+        });
+      }
+      if (resultHuman !== expectedHumanBehavior) {
+        context.addIssue({
+          code: 'custom',
+          path: ['responseBehavior', 'human'],
+          message:
+            'response behavior result human value does not match human label',
+        });
+      }
+      if (behaviorResult.quorum !== trace.majority.quorum) {
+        context.addIssue({
+          code: 'custom',
+          path: ['responseBehavior', 'quorum'],
+          message: 'response behavior quorum must match faithful quorum',
+        });
+      }
+      if (behaviorResult.validVotes > trace.attempts.valid) {
+        context.addIssue({
+          code: 'custom',
+          path: ['responseBehavior', 'validVotes'],
+          message:
+            'response behavior valid vote count cannot exceed valid attempts',
+        });
+      }
     }
     for (const dimension of POLICY_DIMENSIONS) {
       const result = trace.policy[dimension];
@@ -397,6 +498,30 @@ function faithfulResult(
   };
 }
 
+function responseBehaviorResult(
+  attempts: readonly JudgeAttempt[],
+  expected: JudgeResponseBehavior,
+  quorum: number,
+): JudgeResponseBehaviorResult {
+  const result = computeResponseBehaviorQuorum(
+    attempts.flatMap((attempt) => {
+      const value =
+        attempt.status === 'valid'
+          ? attempt.vote.responseBehavior
+          : undefined;
+      return value === undefined ? [] : [value];
+    }),
+    quorum,
+  );
+  const { responseBehavior: judge, ...diagnostics } = result;
+  return {
+    human: expected,
+    judge,
+    ...diagnostics,
+    agree: judge === null ? null : judge === expected,
+  };
+}
+
 function policyResult(
   attempts: readonly JudgeAttempt[],
   dimension: PolicyDimension,
@@ -463,6 +588,15 @@ export function buildJudgeCalibrationTrace(params: {
       calibrationCase.human.faithful,
       quorum,
     ),
+    ...(calibrationCase.human.responseBehavior === undefined
+      ? {}
+      : {
+          responseBehavior: responseBehaviorResult(
+            attempts,
+            calibrationCase.human.responseBehavior,
+            quorum,
+          ),
+        }),
     policy,
   });
 }
@@ -485,6 +619,14 @@ export interface JudgeCalibrationMetrics {
     valid: number;
     invalid: number;
     error: number;
+  };
+  responseBehavior: {
+    total: number;
+    agree: number;
+    indeterminate: number;
+    unstable: number;
+    judged: number;
+    agreementRate: number | null;
   };
   policy: Record<
     PolicyDimension,
@@ -522,6 +664,14 @@ export function computeJudgeCalibrationMetrics(
     invalid: 0,
     error: 0,
   };
+  const responseBehavior = {
+    total: 0,
+    agree: 0,
+    indeterminate: 0,
+    unstable: 0,
+    judged: 0,
+    agreementRate: null as number | null,
+  };
   let agree = 0;
   let judged = 0;
   let judgeFailed = 0;
@@ -543,6 +693,17 @@ export function computeJudgeCalibrationMetrics(
       if (trace.majority.agree) agree++;
     }
 
+    if (trace.responseBehavior !== undefined) {
+      responseBehavior.total++;
+      if (trace.responseBehavior.unstable) responseBehavior.unstable++;
+      if (trace.responseBehavior.judge === null) {
+        responseBehavior.indeterminate++;
+      } else {
+        responseBehavior.judged++;
+        if (trace.responseBehavior.agree) responseBehavior.agree++;
+      }
+    }
+
     for (const dimension of POLICY_DIMENSIONS) {
       const result = trace.policy[dimension];
       if (!result) continue;
@@ -562,6 +723,10 @@ export function computeJudgeCalibrationMetrics(
     const stat = policy[dimension];
     stat.agreementRate = ratioObservation(stat.agree, stat.judged).value;
   }
+  responseBehavior.agreementRate = ratioObservation(
+    responseBehavior.agree,
+    responseBehavior.judged,
+  ).value;
 
   return {
     agree,
@@ -570,6 +735,7 @@ export function computeJudgeCalibrationMetrics(
     unstableCount,
     agreementRate: ratioObservation(agree, judged).value,
     attempts,
+    responseBehavior,
     policy,
   };
 }
@@ -591,6 +757,22 @@ export function judgeMetricsRecord(
     'judge.attempt.valid': metricObservation(metrics.attempts.valid),
     'judge.attempt.invalid': metricObservation(metrics.attempts.invalid),
     'judge.attempt.error': metricObservation(metrics.attempts.error),
+    'judge.response_behavior.agreement_rate': ratioObservation(
+      metrics.responseBehavior.agree,
+      metrics.responseBehavior.judged,
+    ),
+    'judge.response_behavior.agree': metricObservation(
+      metrics.responseBehavior.agree,
+    ),
+    'judge.response_behavior.judged': metricObservation(
+      metrics.responseBehavior.judged,
+    ),
+    'judge.response_behavior.indeterminate': metricObservation(
+      metrics.responseBehavior.indeterminate,
+    ),
+    'judge.response_behavior.unstable': metricObservation(
+      metrics.responseBehavior.unstable,
+    ),
   };
   for (const dimension of POLICY_DIMENSIONS) {
     const stat = metrics.policy[dimension];

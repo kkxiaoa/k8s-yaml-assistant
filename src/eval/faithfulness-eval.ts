@@ -23,11 +23,12 @@ import {
 } from './cases/grounded-answer-cases';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
 import {
+  assessFaith,
+  currentFaithOutcome,
   decodeFaithTrace,
   FaithSearchTraceSchema,
   type FaithContextSnapshot,
   type FaithErrorPhase,
-  type FaithOutcome,
   type FaithSearchTrace,
   type FaithTrace,
 } from './faith-store';
@@ -231,8 +232,11 @@ async function processCase(
     () =>
       judge(
         client,
-        contextSnapshot.text,
-        answer,
+        {
+          question: resolved.question,
+          context: contextSnapshot.text,
+          answer,
+        },
         runConfig.judgeAttemptLimit,
       ),
     {
@@ -245,20 +249,12 @@ async function processCase(
       answer,
     } satisfies FaithErrorTraceInput,
   );
-  const outcome: FaithOutcome =
-    verdict === null
-      ? 'judge_failed'
-      : isRefusal
-        ? verdict.faithful
-          ? 'refused_correctly'
-          : 'refused_wrong'
-        : verdict.faithful
-          ? fullRecall
-            ? 'faithful_hit'
-            : 'faithful_miss'
-          : fullRecall
-            ? 'hallucination'
-            : 'dual_cause';
+  const outcome = currentFaithOutcome({
+    expectedBehavior: resolved.expectedBehavior,
+    sourceCoverage,
+    retrieval: { fullRecall },
+    verdict,
+  });
 
   return executeEvalCaseStage(
     'trace_payload',
@@ -326,10 +322,15 @@ async function withRetry<T>(
 function faithMetricCounts(traces: readonly FaithTrace[]): FaithMetricCounts {
   let faithfulCount = 0;
   let judgedCount = 0;
+  let expectedBehaviorSatisfiedCount = 0;
+  let behaviorJudgedCount = 0;
+  let groundedSuccessCount = 0;
   let refusedCorrectlyCount = 0;
   let refusalJudgedCount = 0;
-  let hallucinationCount = 0;
-  let dualCauseCount = 0;
+  let unsupportedResponseCount = 0;
+  let behaviorMismatchCount = 0;
+  let retrievalIncompleteCount = 0;
+  let sourceIncompleteCount = 0;
   let judgeIndeterminateCount = 0;
   let judgeInvalidAttemptCount = 0;
   let judgeErrorAttemptCount = 0;
@@ -341,6 +342,9 @@ function faithMetricCounts(traces: readonly FaithTrace[]): FaithMetricCounts {
     judgeErrorAttemptCount += trace.judgeAttempts.filter(
       (attempt) => attempt.status === 'error',
     ).length;
+    const assessment = assessFaith(trace);
+    if (!assessment.retrievalSatisfied) retrievalIncompleteCount++;
+    if (!assessment.sourceCoverageSatisfied) sourceIncompleteCount++;
     if (trace.verdict === null) {
       judgeIndeterminateCount++;
       continue;
@@ -348,22 +352,41 @@ function faithMetricCounts(traces: readonly FaithTrace[]): FaithMetricCounts {
 
     judgedCount++;
     if (trace.verdict.faithful) faithfulCount++;
+    else unsupportedResponseCount++;
+    if (assessment.expectedBehaviorSatisfied !== null) {
+      behaviorJudgedCount++;
+      if (assessment.expectedBehaviorSatisfied) {
+        expectedBehaviorSatisfiedCount++;
+      } else {
+        behaviorMismatchCount++;
+      }
+      if (assessment.passed) groundedSuccessCount++;
+    }
     if (trace.expectedBehavior === 'refuse_insufficient_context') {
-      refusalJudgedCount++;
-      if (trace.verdict.faithful) refusedCorrectlyCount++;
-    } else if (!trace.verdict.faithful) {
-      if (trace.retrieval.fullRecall) hallucinationCount++;
-      else dualCauseCount++;
+      if (assessment.responseBehavior !== null) {
+        refusalJudgedCount++;
+        if (
+          trace.verdict.faithful &&
+          assessment.responseBehavior === 'refusal'
+        ) {
+          refusedCorrectlyCount++;
+        }
+      }
     }
   }
 
   return {
     faithfulCount,
     judgedCount,
+    expectedBehaviorSatisfiedCount,
+    behaviorJudgedCount,
+    groundedSuccessCount,
     refusedCorrectlyCount,
     refusalJudgedCount,
-    hallucinationCount,
-    dualCauseCount,
+    unsupportedResponseCount,
+    behaviorMismatchCount,
+    retrievalIncompleteCount,
+    sourceIncompleteCount,
     judgeIndeterminateCount,
     judgeInvalidAttemptCount,
     judgeErrorAttemptCount,
@@ -380,6 +403,11 @@ function faithGovernanceMetrics(
       label: 'faithful',
       unit: 'ratio',
       observation: metrics['faith.faithful_rate'],
+    },
+    {
+      label: 'grounded-success',
+      unit: 'ratio',
+      observation: metrics['faith.grounded_success_rate'],
     },
     {
       label: 'refusal-correct',
@@ -485,10 +513,15 @@ async function main(): Promise<void> {
     const {
       faithfulCount,
       judgedCount,
-      hallucinationCount: hallucination,
-      dualCauseCount: dualCause,
+      expectedBehaviorSatisfiedCount,
+      behaviorJudgedCount,
+      groundedSuccessCount,
       refusalJudgedCount: refusalTotal,
       refusedCorrectlyCount: refusedCorrectly,
+      unsupportedResponseCount,
+      behaviorMismatchCount,
+      retrievalIncompleteCount,
+      sourceIncompleteCount,
       judgeIndeterminateCount: judgeFailed,
       judgeInvalidAttemptCount: judgeInvalidAttempts,
       judgeErrorAttemptCount: judgeErrorAttempts,
@@ -518,14 +551,25 @@ async function main(): Promise<void> {
         continue;
       }
 
+      const assessment = assessFaith(trace);
       console.error(
-        `${verdict.faithful ? '✓忠实' : '✗不忠'} ${tag}${retrievalLabel} | ${trace.question}`,
+        `${trace.outcome === 'passed' ? '✓通过' : '✗未通过'} ${verdict.faithful ? '忠实' : '不忠实'} 行为=${verdict.responseBehavior} ${tag}${retrievalLabel} | ${trace.question}`,
       );
       console.error(`   回答: ${answer}...`);
       if (!verdict.faithful) {
         console.error(
           `   未支持: ${verdict.unsupported.join(' / ')}  (${verdict.reason})`,
         );
+      }
+      const diagnostics = [
+        assessment.expectedBehaviorSatisfied === false
+          ? '回答行为不符合用例契约'
+          : null,
+        !assessment.retrievalSatisfied ? '检索不完整' : null,
+        !assessment.sourceCoverageSatisfied ? '必需来源不完整' : null,
+      ].filter((value): value is string => value !== null);
+      if (diagnostics.length > 0) {
+        console.error(`   诊断: ${diagnostics.join(' / ')}`);
       }
     }
 
@@ -534,23 +578,32 @@ async function main(): Promise<void> {
       ...harnessErrorMetrics('faith', batch.harnessErrors.length),
     }));
     const faithfulRate = metrics['faith.faithful_rate'].value;
+    const behaviorComplianceRate =
+      metrics['faith.behavior_compliance_rate'].value;
+    const groundedSuccessRate = metrics['faith.grounded_success_rate'].value;
     const refusalCorrectRate = metrics['faith.refusal_correct_rate'].value;
 
     console.error('\n━━━━━━ 汇总 ━━━━━━');
     console.error(
-      `Faithfulness 率 = ${faithfulRate === null ? 'N/A' : `${(faithfulRate * 100).toFixed(1)}%`}  (${faithfulCount}/${judgedCount})`,
+      `Faithfulness（忠实度）率 = ${faithfulRate === null ? 'N/A' : `${(faithfulRate * 100).toFixed(1)}%`}  (${faithfulCount}/${judgedCount})`,
     );
     console.error(
-      `拒答正确率(应拒答的)= ${refusalCorrectRate === null ? 'N/A' : `${(refusalCorrectRate * 100).toFixed(1)}%`}  (${refusedCorrectly}/${refusalTotal})`,
+      `期望行为满足率 = ${behaviorComplianceRate === null ? 'N/A' : `${(behaviorComplianceRate * 100).toFixed(1)}%`}  (${expectedBehaviorSatisfiedCount}/${behaviorJudgedCount})`,
     );
     console.error(
-      `归因(可答不忠实)= 真幻觉(检索✓却瞎编)${hallucination} 条 / 检索漏+编造(检索✗)${dualCause} 条`,
+      `Grounded success（有依据完整通过）= ${groundedSuccessRate === null ? 'N/A' : `${(groundedSuccessRate * 100).toFixed(1)}%`}  (${groundedSuccessCount}/${behaviorJudgedCount})`,
+    );
+    console.error(
+      `拒答正确率(应拒答且行为已判定)= ${refusalCorrectRate === null ? 'N/A' : `${(refusalCorrectRate * 100).toFixed(1)}%`}  (${refusedCorrectly}/${refusalTotal})`,
+    );
+    console.error(
+      `并列诊断: 无依据回答=${unsupportedResponseCount} / 行为不符=${behaviorMismatchCount} / 检索不完整=${retrievalIncompleteCount} / 来源不完整=${sourceIncompleteCount}`,
     );
     console.error(
       `judge indeterminate=${judgeFailed} 条(invalid attempts=${judgeInvalidAttempts}, request error attempts=${judgeErrorAttempts})`,
     );
     console.error(
-      `quality fail=${judgedCount - faithfulCount} 条；harness error=${batch.harnessErrors.length} 条；质量分母=${judgedCount}；已完成 case=${batch.results.length}/${cases.length}`,
+      `quality fail=${behaviorJudgedCount - groundedSuccessCount} 条；harness error=${batch.harnessErrors.length} 条；质量分母=${behaviorJudgedCount}；已完成 case=${batch.results.length}/${cases.length}`,
     );
     console.error(
       `注:被测=${ANSWER_MODEL}(flash),裁判=${JUDGE_MODEL}(pro)。Faithfulness=只忠于 Ask 输入证据,不等于事实正确。`,
