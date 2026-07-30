@@ -136,7 +136,6 @@ export function createAuthOptions(
         return {
           githubId,
           login,
-          admin: isAdminGithubId(githubId, environment),
         };
       },
       session({ session, token }) {

@@ -20,10 +20,12 @@ import { useResizable } from './lib/use-resizable';
 import { useExperience } from './lib/use-experience';
 import {
   ApiRequestError,
+  apiErrorMessage,
   checkYaml,
   askStream,
   generateYaml,
   fixYaml,
+  getGithubSignInUrl,
   type AskMode,
   type SourceHit,
 } from './lib/api';
@@ -47,11 +49,6 @@ volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 `;
 
-const LOGIN_PATH = applicationPath(
-  `/api/auth/signin/github?callbackUrl=${encodeURIComponent(
-    APPLICATION_BASE_PATH,
-  )}`,
-);
 const LOGOUT_PATH = applicationPath(
   `/api/auth/signout?callbackUrl=${encodeURIComponent(
     APPLICATION_BASE_PATH,
@@ -71,22 +68,22 @@ interface LoginDraft {
 }
 
 function modelLockMessage(reason: string | null): string {
-  switch (reason) {
-    case 'quota_exhausted':
-      return '当前体验额度不足';
-    case 'sleep_mode':
-      return '休眠模式已开启，模型功能暂不可用';
-    case 'global_budget_exhausted':
-      return '本期体验预算已用完，稍后可继续体验';
-    case 'model_access_disabled':
-      return '模型功能当前已由管理员关闭';
-    case 'runtime_config_invalid':
-      return '模型服务配置尚未就绪';
-    case 'control_state_unavailable':
-      return '体验状态暂不可用，模型功能已安全关闭';
-    default:
-      return '正在确认登录和体验状态…';
-  }
+  return reason === null
+    ? '正在确认登录和体验状态…'
+    : apiErrorMessage(reason);
+}
+
+function GitHubMark() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="size-3.5 shrink-0"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M12 .7a11.3 11.3 0 0 0-3.6 22c.6.1.8-.2.8-.5v-2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.9 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.3 11.3 0 0 0 12 .7Z" />
+    </svg>
+  );
 }
 
 function ModeStatusIcon({
@@ -260,10 +257,10 @@ export default function Home() {
     }
   }, []);
 
-  function beginLogin(
+  async function beginLogin(
     pendingAction: ModelRoute | null = null,
     override?: { question?: string; requirement?: string },
-  ): void {
+  ): Promise<void> {
     const draft: LoginDraft = {
       version: 2,
       savedAt: Date.now(),
@@ -277,7 +274,11 @@ export default function Home() {
     } catch {
       // Login remains available when current-tab storage is unavailable.
     }
-    window.location.assign(LOGIN_PATH);
+    try {
+      window.location.assign(await getGithubSignInUrl(APPLICATION_BASE_PATH));
+    } catch (error) {
+      reportRequestError(error);
+    }
   }
 
   function reportRequestError(error: unknown): void {
@@ -296,7 +297,7 @@ export default function Home() {
       }
       return;
     }
-    setRequestError('请求失败，请稍后再试。');
+    setRequestError(apiErrorMessage('request_failed'));
   }
 
   function setMarkers(errs: VErr[]) {
@@ -343,7 +344,7 @@ export default function Home() {
     if (!q) return;
     if (questionOverride) setQuestion(questionOverride);
     if (loginRequiredFor('ask')) {
-      beginLogin('ask', { question: q });
+      void beginLogin('ask', { question: q });
       return;
     }
     if (modelActionDisabled('ask')) {
@@ -397,7 +398,7 @@ export default function Home() {
 
   async function generate(requestedRequirement: string) {
     if (loginRequiredFor('generate')) {
-      beginLogin('generate', { requirement: requestedRequirement });
+      void beginLogin('generate', { requirement: requestedRequirement });
       return;
     }
     if (modelActionDisabled('generate')) {
@@ -424,7 +425,7 @@ export default function Home() {
   async function fix() {
     if (!errors || errors.length === 0) return;
     if (loginRequiredFor('fix')) {
-      beginLogin('fix');
+      void beginLogin('fix');
       return;
     }
     if (modelActionDisabled('fix')) {
@@ -452,7 +453,7 @@ export default function Home() {
       <header className="flex items-center gap-4 border-b border-line bg-surface/50 px-5 py-3 backdrop-blur">
         <span className="text-brand">◆</span>
         <span className="font-mono text-sm font-semibold tracking-tight text-fg">
-          k8s<span className="text-muted">.</span>yaml copilot
+          K8s YAML Assistant
         </span>
         <span className={LABEL}>YAML 编写 · Schema 校验 · 答案可追溯</span>
         <div className="ml-auto flex items-center gap-2">
@@ -471,41 +472,40 @@ export default function Home() {
             </span>
           )}
           {experience?.user ? (
-            <>
+            <div className="flex h-8 min-w-0 items-stretch overflow-hidden rounded-md border border-line bg-surface/70 font-mono text-[11px] shadow-sm">
+              <span
+                className="inline-flex min-w-0 items-center gap-1.5 border-r border-line px-2.5 text-muted"
+                title={`已通过 GitHub 登录：@${experience.user.login}`}
+              >
+                <GitHubMark />
+                <span className="max-w-32 truncate">
+                  @{experience.user.login}
+                </span>
+              </span>
               {experience.user.admin && (
                 <a
                   href={ADMIN_PATH}
-                  className="rounded border border-line px-2.5 py-1 font-mono text-[11px] text-fg transition hover:border-brand/40 hover:text-brand"
+                  className="inline-flex items-center border-r border-line px-3 text-fg transition hover:bg-brand/10 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
                 >
                   管理
                 </a>
               )}
-              <span className="font-mono text-[11px] text-muted">
-                @{experience.user.login}
-              </span>
               <a
                 href={LOGOUT_PATH}
-                className="rounded border border-line px-2.5 py-1 font-mono text-[11px] text-fg transition hover:border-brand/40 hover:text-brand"
+                className="inline-flex items-center px-3 text-muted transition hover:bg-white/5 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
               >
                 退出
               </a>
-            </>
+            </div>
           ) : (
             <span className="group relative">
               <button
                 type="button"
-                onClick={() => beginLogin()}
+                onClick={() => void beginLogin()}
                 aria-describedby="github-login-hint"
                 className="inline-flex items-center gap-1.5 rounded border border-brand/40 px-2.5 py-1 font-mono text-[11px] text-brand transition hover:border-brand/60 hover:bg-brand/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="size-3.5"
-                  fill="currentColor"
-                  aria-hidden="true"
-                >
-                  <path d="M12 .7a11.3 11.3 0 0 0-3.6 22c.6.1.8-.2.8-.5v-2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.9 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.3 11.3 0 0 0 12 .7Z" />
-                </svg>
+                <GitHubMark />
                 使用 GitHub 登录
               </button>
               <span

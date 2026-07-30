@@ -8,17 +8,15 @@ import type {
 import { applicationPath } from '@/shared/application-path.mjs';
 import {
   ApiRequestError,
+  apiErrorMessage,
   getAdminExperience,
+  getGithubSignInUrl,
   setAdminExperience,
 } from '../lib/api';
 import { useExperience } from '../lib/use-experience';
 
 const HOME_PATH = applicationPath('/');
-const LOGIN_PATH = applicationPath(
-  `/api/auth/signin/github?callbackUrl=${encodeURIComponent(
-    applicationPath('/admin'),
-  )}`,
-);
+const ADMIN_PATH = applicationPath('/admin');
 
 const MODE_LABELS = {
   normal: '普通模式',
@@ -68,6 +66,21 @@ export default function AdminPage() {
     }
   }
 
+  async function beginLogin(): Promise<void> {
+    setBusy(true);
+    setMessage(null);
+    try {
+      window.location.assign(await getGithubSignInUrl(ADMIN_PATH));
+    } catch (error) {
+      setMessage(
+        error instanceof ApiRequestError
+          ? error.message
+          : apiErrorMessage('authentication_unavailable'),
+      );
+      setBusy(false);
+    }
+  }
+
   if (experience === null && errorCode === null) {
     return (
       <main className="mx-auto max-w-2xl p-8 text-sm text-muted">
@@ -102,12 +115,14 @@ export default function AdminPage() {
           体验模式管理
         </h1>
         <p className="mt-4 text-sm text-muted">请先登录管理员账号。</p>
-        <a
-          href={LOGIN_PATH}
-          className="mt-4 inline-block rounded border border-brand/40 px-3 py-2 text-sm text-brand"
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void beginLogin()}
+          className="mt-4 inline-block rounded border border-brand/40 px-3 py-2 text-sm text-brand disabled:opacity-50"
         >
           GitHub 登录
-        </a>
+        </button>
       </main>
     );
   }
