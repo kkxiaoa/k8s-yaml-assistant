@@ -37,6 +37,12 @@
 |---|---|---|---|---|---|
 | `deployment-authorization.ts` | `npm run deployment:authorize -- <inspect-tag\|create\|request\|current-production\|result\|rollback-candidate\|verify-rollback\|verify-rollback-draft>` | 已下载并验证的 Published Release（已发布版本）身份、原始 Sigstore bundle（签名证明包）、GitHub deployment/status（GitHub 部署 / 状态）快照和适配器单行结果 | 无 | 只写调用方指定的 authorization/request/status/identity/notes（授权 / 请求 / 状态 / 身份 / 说明）文件或 GitHub output（GitHub 任务输出） | 生产消费者是由 `published-release.yml` 调用的 `published-release-deploy.yml`；回滚候选消费者是 `rollback-candidate.yml`；发布证据流水线只使用 `current-production`。请求总上限为 64 KiB，JSON string encoding（JSON 字符串编码）后的授权、授权证明包和来源证明包预算分别为 2 KiB、28 KiB、32 KiB。所有发布、证明和部署快照必须先由工作流从固定 GitHub API（GitHub 应用程序接口）下载，脚本不接受任意镜像摘要、URL（统一资源定位符）、清单或命令。 |
 
+## 生产镜像预热脚本
+
+| 脚本 | 人工入口 | 读取内容 | 外部调用 | 写盘 | 边界与保留依据 |
+|---|---|---|---|---|---|
+| `k3s-image-preheat.sh` | `bash scripts/k3s-image-preheat.sh <目标草稿标签>` | 固定仓库的 Draft Release（草稿发布版本）；应用草稿的 `release-manifest.json` 或规范回滚标签；GHCR（GitHub 容器镜像仓库）中的精确摘要镜像 | GitHub Release/API（GitHub 发布版本 / 应用程序接口）、GHCR、Skopeo（容器镜像复制工具）或 Docker（容器运行时）、SSH（安全远程登录）和生产 K3s（轻量 Kubernetes） | 在受限临时目录生成认证文件与 OCI archive（开放容器镜像归档），传输到服务器临时目录并导入 K3s image store（镜像存储）；退出时清理两端临时文件 | 这是 SWR（华为云容器镜像服务）企业版可用前、人工 Publish（正式发布）之前的生产写入步骤，因此不包装成日常 npm 命令。脚本固定仓库、镜像和节点，只接受未发布且不是 Pre-release（预发布）的应用或规范回滚草稿；它只预热镜像，不修改 Deployment（工作负载）、不创建标签、不发布也不部署。 |
+
 ## 容器交付脚本
 
 | 脚本 | npm 入口 | 外部调用 | 写盘 | 边界与保留依据 |
@@ -65,6 +71,6 @@
 
 ## Cleanup（清理）结论
 
-- 当前操作脚本均有 npm 入口，且代码仍对应本地门禁、数据维护、人工审核或实验诊断流程；部署适配器、部署授权、发布构建和发布清单分别有独立入口。本轮没有足够证据删除其他脚本。
+- 除明确列出的生产镜像预热脚本外，当前操作脚本均有 npm 入口，且代码仍对应本地门禁、数据维护、人工审核或实验诊断流程；部署适配器、部署授权、发布构建和发布清单分别有独立入口。预热脚本直接写入生产节点镜像缓存，只保留人工入口；本轮没有足够证据删除其他脚本。
 - 实验脚本继续留在 `scripts/`，避免仅为目录整齐而修改 npm 入口和历史引用。是否下线实验必须由新的使用证据决定。
 - 原有 13 项 `latest` 直接依赖已固定为当前 lockfile（锁文件）的既有解析版本；`scripts/dependency-versions.test.ts` 校验直接依赖不使用 `latest`、根清单声明一致，以及精确版本与解析版本一致。本次没有升级、重新解析或安装依赖。

@@ -1,6 +1,7 @@
 # 华为云单机 K3s 生产部署设计
 
 > 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产，2026-07-23 审核批准六项发布证据和 Cosign（签名与证明工具）无密钥证明方案，2026-07-24 审核批准 Release Please（发布自动化工具）单一版本所有权与独立索引产物流程，2026-07-26 审核批准把候选镜像 `HIGH/CRITICAL`（高危 / 严重）漏洞扫描前移到 Pull Request（合并请求）门禁，2026-07-27 审核批准发布阶段以单次 Trivy（容器漏洞扫描）完整报告同时承担证据与失败关闭门禁；同日 `v0.1.0` 已通过人工 Publish（正式发布）和 Attempt 5（第 5 次尝试）完成首次私有部署。2026-07-28 Task 15 Step 2（任务 15 步骤 2）依据生产 Traefik（入口控制器）和 oauth2-proxy（认证代理）实际版本证据，把受保护路由从 ForwardAuth（前置认证）修订为 oauth2-proxy reverse proxy（认证代理反向代理）；Step 3/5/6/7（步骤 3/5/6/7）的应用授权、最小隐私提示、本地验证和 Task 16（任务 16）交接已经通过用户 review（审核）。Step 4（步骤 4）的精确输入 token（令牌）前置上限和供应商费用硬额度证据作为显式延期风险继续未勾选；该审核不构成发布或部署授权。同日用户决定当前不注册域名，Task 16（任务 16）入口改为 `https://120.46.57.214/k8s-yaml-assistant` 和公网 IP 短期证书；该修订及 `set-access-mode`（设置访问模式）扩展设计已通过独立 review（审核），Step 2（步骤 2）的本地反例、候选实现和 review（审核）修正已经完成，固定 GitHub scope（GitHub 授权范围）为 `user:email read:org`，域名只保留为未来单独变更。生产安装、证书签发、真实 GitHub OAuth callback（GitHub 开放授权回调）、安全组和集群写入尚未执行。
+> 2026-07-31 修订：SWR（华为云容器镜像服务）企业版可用前，应用或回滚 Draft Release（草稿发布版本）通过对应证据核对后，使用仓库脚本完成精确摘要预热；预热成功后才可另行确认 Publish（正式发布），失败时保留草稿并停止。
 > 用途：定义当前项目在华为云单机 K3s（轻量 Kubernetes）上的生产部署架构、实施边界和验收门禁。
 > 本文维护设计边界；实际实施状态和审核停止点以对应实施计划为准。
 
@@ -14,7 +15,7 @@
 2. 应用构建为一个 Next.js（React 全栈框架）standalone output（独立运行产物）容器，以 non-root user（非 root 用户）运行；应用镜像推送到私有 GHCR（GitHub 容器镜像仓库），发布时同时固定 commit SHA（提交哈希）标签和镜像 digest（内容摘要），禁止使用 latest。
 3. 应用使用一个 Deployment（工作负载）、一个 ClusterIP Service（集群内服务）和一个逻辑 Ingress（入口）边界，replicas（副本数）为 1；该边界可以由多个固定、预审核的 IngressRoute（Traefik 入口路由）对象表达不同路径策略，但当前只有一个公开 origin（访问源）`https://120.46.57.214`、一个 TLS（传输层安全）入口和一个固定基础路径 `/k8s-yaml-assistant`。管理员控制的 ACCESS_MODE（访问模式）只允许 private（私有）和 portfolio（作品集展示）两个值；private（私有）模式的全部业务流量由 Traefik（入口控制器）转发到 oauth2-proxy reverse proxy（认证代理反向代理），认证代理完成 GitHub OAuth 2.0（GitHub 开放授权 2.0）允许名单校验、客户端身份头清理和受控身份注入后才访问应用。portfolio（作品集展示）模式只允许固定匿名路由由 Traefik（入口控制器）直接访问应用，其余路由仍经过认证代理。匿名模型体验必须等待独立 token/usage/cost metering（令牌 / 用量 / 成本计量）设计和实现通过审核后才能开放。cert-manager（证书管理器）负责公网 IP 短期证书和自动续期；未来改用域名时单独审核证书与回调身份，不影响当前前置条件。
 4. 当前约 37 MiB 的检索索引仍随最终应用镜像交付，但付费构建从发布证据生成中拆出：管理员只在需要的新 corpus/model/index identity（语料 / 模型 / 索引身份）缺失时手工运行 `index-build`（索引构建）流水线，生成、签名并按 digest（内容摘要）固定独立 GHCR index artifact（GHCR 索引产物）。release artifacts workflow（发布证据流水线）不读取 Voyage 密钥、不重建索引，只验证该不可变产物并通过外部 BuildKit context（BuildKit 构建上下文）把它烘焙进最终镜像；运行时只读加载，禁止因索引缺失或失效而在线重建。
-5. 第一阶段由 GitHub Actions（GitHub 自动化流水线）直接发布 release（发布版本）：`.github/workflows/release.yml` 是 Release lifecycle（发布生命周期）入口。每次普通 `main` push（主分支推送）先核对源码版本、GitHub Release（GitHub 发布版本）、Git tag（Git 标签）和关联 Pull Request（合并请求）状态；没有活动应用草稿时，Release Please（发布自动化工具）创建或更新一个 Release Pull Request（发布合并请求），不会调用 Voyage 或构建候选镜像。该合并请求合并后，Release Please（发布自动化工具）只创建并拥有当前 Draft Release（草稿发布版本）、版本、标签名和发布说明，不在同一次运行继续准备下一版本，再以自身输出调用无人工参数的 `.github/workflows/release-artifacts.yml` reusable workflow（可复用发布证据流水线）。发布证据流水线只构建、证明应用镜像并向既有草稿附加六项证据；当前唯一维护者核对后手工 Publish（发布），此时才创建 Git tag（Git 标签）并由 `release.published`（发布版本已发布）事件调度专用 self-hosted deployment runner（自托管部署运行器）。该流程是单人两步确认，不宣称独立复核；运行器绝不处理 Pull Request（合并请求），公网仍不向 GitHub 动态地址开放 SSH 22 或 Kubernetes API（Kubernetes 应用程序接口）6443。
+5. 第一阶段由 GitHub Actions（GitHub 自动化流水线）直接发布 release（发布版本）：`.github/workflows/release.yml` 是 Release lifecycle（发布生命周期）入口。每次普通 `main` push（主分支推送）先核对源码版本、GitHub Release（GitHub 发布版本）、Git tag（Git 标签）和关联 Pull Request（合并请求）状态；没有活动应用草稿时，Release Please（发布自动化工具）创建或更新一个 Release Pull Request（发布合并请求），不会调用 Voyage 或构建候选镜像。该合并请求合并后，Release Please（发布自动化工具）只创建并拥有当前 Draft Release（草稿发布版本）、版本、标签名和发布说明，不在同一次运行继续准备下一版本，再以自身输出调用无人工参数的 `.github/workflows/release-artifacts.yml` reusable workflow（可复用发布证据流水线）。发布证据流水线只构建、证明应用镜像并向既有草稿附加六项证据；当前唯一维护者核对后，在 SWR（华为云容器镜像服务）企业版可用前先运行 `scripts/k3s-image-preheat.sh` 预热精确镜像摘要，预热成功后才另行手工 Publish（发布）。同一预热步骤也适用于 rollback candidate workflow（回滚候选流水线）创建的规范回滚草稿，目标摘要直接来自回滚标签，完整来源证明仍由正式部署流水线校验。Publish（发布）此时创建 Git tag（Git 标签），并由 `release.published`（发布版本已发布）事件调度专用 self-hosted deployment runner（自托管部署运行器）。该流程仍是单人确认，不宣称独立复核；预热只导入镜像，不修改 Deployment（工作负载），运行器绝不处理 Pull Request（合并请求），公网仍不向 GitHub 动态地址开放 SSH 22 或 Kubernetes API（Kubernetes 应用程序接口）6443。
 6. 生产 serving observation（在线观测）在安全协议、生产存储和运维门禁全部通过后持续启用；初始采用低流量单节点可审计的安全本地写入方案。现有原始 RetrievalTrace（检索轨迹）必须先隔离，任何失败都不得回退写入原文。持续启用不等于保存原始 YAML、无限期保留或保证每条请求都落盘。
 7. 当前不为应用索引引入数据库、向量数据库、Redis（内存数据存储）或对象存储。匿名额度和 Interview Pass（面试临时通行证）依赖尚未贯通的 token/usage/cost metering（令牌 / 用量 / 成本计量）；其事实源、持久化介质、扣减协议和恢复语义留到该阶段单独设计，不在本文预选 SQLite（嵌入式数据库）、PVC（持久卷声明）或其他基础设施。计量门禁完成前，portfolio（作品集展示）只公开页面和不调用外部模型的 YAML 检查。
 
@@ -551,9 +552,11 @@ release workflow（发布流水线）固定为以下 job graph（任务图）：
 4. release artifacts verify（发布证据验证）：GitHub-hosted runner（GitHub 托管运行器）复核精确源码、既有草稿正文和目标提交，再验证独立索引产物 digest（内容摘要）、签名和完整内容；草稿 JSON snapshot（JSON 快照）通过保留 1 天的 GitHub Artifact（GitHub 任务产物）传给构建任务。schema/corpus/eval contract、无索引容器门禁（模式 / 语料 / 评估契约 / 无索引容器门禁）不在这里重复执行；受保护 Pull Request（合并请求）负责这些源码门禁，最终 Dockerfile 的 `verify/build` 阶段仍执行测试、类型检查和 Next.js build（Next.js 构建）。
 5. release artifacts build（发布证据构建）：使用已校验草稿快照和按 digest（内容摘要）固定的外部索引构建上下文构建最终应用镜像，推送 GHCR（GitHub 容器镜像仓库），生成漏洞结果、SPDX SBOM（SPDX 软件物料清单）、SLSA provenance（SLSA 来源证明）、Cosign bundle（Cosign 证明包）和 release manifest（发布清单）；该任务没有草稿写权限，也不调用 Release API（发布接口）。
 6. release artifacts attach（发布证据附加）：上传前重新读取草稿并核对正文哈希，确认长时间构建期间没有漂移后，才向既有草稿上传六项证据；上传后再次回读正文、附件名称、文件哈希和签名。证据构建失败时草稿保留但不可进入部署。
-7. manual confirm（人工确认）：唯一维护者在 GitHub 页面核对正文、release manifest（发布清单）和六项证据，选择 Publish release（发布版本）或保留/删除草稿。发布动作是当前人工门禁；同一账号完成审核和发布确认，因此没有 separation of duties（职责分离）。
-8. deploy（部署）：独立 production deploy workflow（生产部署流水线）只监听 `release.published`（发布版本已发布）。Publish（发布）此时创建 Git tag（Git 标签）；部署流水线先在 GitHub-hosted runner（GitHub 托管运行器）验证 tag/commit/release manifest/digest/provenance（标签 / 提交 / 发布清单 / 内容摘要 / 来源），通过后才调度生产专用 self-hosted deployment runner（自托管部署运行器）。部署任务不 checkout（检出）仓库、不执行仓库脚本、不下载任意 manifest（清单），只把已确认的 image digest（镜像内容摘要）和有界证明包交给服务器上 root-owned deployment adapter（root 所有的部署适配器）。
-9. verify and record（验证与记录）：适配器更新固定 Namespace/Deployment/container（命名空间 / 工作负载 / 容器），等待 rollout/readiness（滚动发布 / 就绪状态），核对实际 digest/index identity（内容摘要 / 索引身份），更新 GitHub deployment 与 release ledger（GitHub 部署记录 / 发布台账）；模型 smoke test（冒烟测试）仍需单独批准费用。
+7. manual review（人工审核）：唯一维护者在 GitHub 页面核对正文、release manifest（发布清单）和六项证据。发现漂移或缺失时保留/删除草稿，不进入预热或发布。
+8. image preheat（镜像预热）：SWR（华为云容器镜像服务）企业版可用前，维护者在获得本次生产节点写入授权后，以目标草稿标签运行仓库内 `scripts/k3s-image-preheat.sh`。应用草稿从 `release-manifest.json` 接受精确 `linux/amd64` 根摘要；规范回滚草稿从标签接受精确根摘要，完整回滚来源证明和台账不在脚本中重复校验。脚本在本机生成并校验 OCI（开放容器镜像）归档，经 SSH（安全远程登录）导入 K3s（轻量 Kubernetes）并回读同一摘要；失败时保留草稿并停止。预热不创建标签、不修改 Deployment（工作负载）也不触发部署。
+9. manual Publish（人工正式发布）：只有人工审核和镜像预热均成功后，唯一维护者才可另行确认 Publish release（发布版本）；也可继续保留或删除草稿。发布动作仍是当前人工门禁；同一账号完成审核和发布确认，因此没有 separation of duties（职责分离）。
+10. deploy（部署）：独立 production deploy workflow（生产部署流水线）只监听 `release.published`（发布版本已发布）。Publish（发布）此时创建 Git tag（Git 标签）；部署流水线先在 GitHub-hosted runner（GitHub 托管运行器）验证 tag/commit/release manifest/digest/provenance（标签 / 提交 / 发布清单 / 内容摘要 / 来源），通过后才调度生产专用 self-hosted deployment runner（自托管部署运行器）。部署任务不 checkout（检出）仓库、不执行仓库脚本、不下载任意 manifest（清单），只把已确认的 image digest（镜像内容摘要）和有界证明包交给服务器上 root-owned deployment adapter（root 所有的部署适配器）。
+11. verify and record（验证与记录）：适配器更新固定 Namespace/Deployment/container（命名空间 / 工作负载 / 容器），等待 rollout/readiness（滚动发布 / 就绪状态），核对实际 digest/index identity（内容摘要 / 索引身份），更新 GitHub deployment 与 release ledger（GitHub 部署记录 / 发布台账）；模型 smoke test（冒烟测试）仍需单独批准费用。
 
 production-deploy concurrency group（生产部署并发组）只允许一个活动部署，cancel-in-progress=false，禁止新发布中断正在进行的发布。重跑 workflow（流水线）仍使用原 GITHUB_SHA/GITHUB_REF（GitHub 提交 / 引用）；部署新 digest（内容摘要）必须对应一条新的人工发布记录，不能用重跑绕过草稿确认。
 
@@ -563,15 +566,17 @@ prevent self-review（禁止自我审核）的含义是：发起某次 deploymen
 
 套餐边界也不适合把它作为当前前提：GitHub 官方说明，GitHub Free/Pro/Team（GitHub 免费版 / 专业版 / 团队版）的 required reviewers（必需审核人）只对公开仓库可用，私有仓库要使用该规则需要 GitHub Enterprise（GitHub 企业版）；私有仓库的 Environment secret（环境密钥）则至少需要 GitHub Pro/Team/Enterprise（GitHub 专业版 / 团队版 / 企业版）。当前 GitHub Pro private repository（GitHub 专业版私有仓库）只使用 `index-build` Environment secret（索引构建环境密钥）隔离 Voyage 凭据，不配置 required reviewer（必需审核人）；唯一维护者仍以下述草稿发布版本作为人工门禁。参考：[GitHub Deployments and environments（GitHub 部署与环境）](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)。
 
-当前采用 draft GitHub Release（GitHub 草稿发布版本）的单人两步确认：
+当前采用 draft GitHub Release（GitHub 草稿发布版本）的单人确认，并在 SWR（华为云容器镜像服务）企业版可用前增加发布前镜像预热：
 
-1. Release Please（发布自动化工具）在审核后的 Release Pull Request（发布合并请求）合并后创建 Draft Release（草稿发布版本），拥有版本、标签名、目标提交和发布说明。`draft: true` 只保存预期标签名，尚不创建 Git tag（Git 标签）。
-2. release artifacts workflow（发布证据流水线）在 GitHub-hosted runner（GitHub 托管运行器）完成验证、构建、签名和检查，只向既有草稿附加 release manifest（发布清单）和证明包；它不创建草稿、不编辑草稿正文或元数据、不创建标签，也不调用生产运行器。
-3. release artifacts workflow（发布证据流水线）结束后没有 waiting deploy job（等待中的部署任务），K3s 不发生变化。证据构建失败时只允许修复前置条件并重跑原 failed jobs（失败任务），不能用新的手工输入替换发布身份。
-4. 唯一维护者打开草稿，人工核对下方清单。选择 Save draft/Delete（保留草稿 / 删除）时不部署；只有手工点击 Publish release（发布版本）才表示批准并创建 Git tag（Git 标签）。
-5. production deploy workflow（生产部署流水线）只声明 `release: types: [published]` 触发器，并且工作流文件必须存在于默认分支。GitHub 文档说明 Draft Release（草稿发布版本）的创建或编辑不会触发该部署事件，从草稿发布时 `published`（已发布）事件会触发。参考：[GitHub release 事件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release)、[GitHub 管理发布版本](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)。
-6. 部署流水线在 GitHub-hosted runner（GitHub 托管运行器）重新验证 release/tag/commit/manifest/digest/signature（发布版本 / 标签 / 提交 / 清单 / 内容摘要 / 签名）后，才把固定输入交给生产运行器。
-7. 仓库支持 immutable release（不可变发布版本）时必须启用；不支持时，部署任务记录 Release ID、asset hash（发布版本标识 / 附件哈希）并拒绝与发布瞬间记录不一致的输入。
+1. 应用版本由 Release Please（发布自动化工具）在审核后的 Release Pull Request（发布合并请求）合并后创建 Draft Release（草稿发布版本）；回滚版本由 rollback candidate workflow（回滚候选流水线）创建规范回滚草稿。两者的 `draft: true` 都只保存预期标签名，尚不创建 Git tag（Git 标签）。
+2. release artifacts workflow（发布证据流水线）向应用草稿附加 release manifest（发布清单）和六项证据；rollback candidate workflow（回滚候选流水线）向回滚草稿附加对应 provenance bundle（来源证明包）。两条路径都不自动 Publish（正式发布）或调用生产运行器。
+3. 对应 workflow（流水线）结束后没有 waiting deploy job（等待中的部署任务），K3s 不发生变化。证据生成失败时只允许修复前置条件并重跑原 failed jobs（失败任务），不能用新的手工输入替换发布身份。
+4. 唯一维护者打开草稿，人工核对下方清单中除预热结果外的发布证据项。核对不通过时选择 Save draft/Delete（保留草稿 / 删除），不运行预热也不部署。
+5. 获得本次生产节点镜像导入授权后，维护者运行 `bash scripts/k3s-image-preheat.sh <目标草稿标签>`。脚本必须拒绝已发布版本、Pre-release（预发布）、错误仓库、非法标签和非法摘要；应用草稿从发布清单读取固定镜像、`linux/amd64` 平台和摘要，回滚草稿从规范标签读取摘要。传输后必须校验归档哈希、导入并回读同一根摘要，退出时清理两端临时文件。
+6. 只有脚本成功并完成下方预热结果核对后，维护者才可另行确认并手工点击 Publish release（发布版本），表示批准并创建 Git tag（Git 标签）。预热结果不替代这次确认。
+7. production deploy workflow（生产部署流水线）只声明 `release: types: [published]` 触发器，并且工作流文件必须存在于默认分支。GitHub 文档说明 Draft Release（草稿发布版本）的创建或编辑不会触发该部署事件，从草稿发布时 `published`（已发布）事件会触发。参考：[GitHub release 事件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release)、[GitHub 管理发布版本](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)。
+8. 部署流水线在 GitHub-hosted runner（GitHub 托管运行器）重新验证 release/tag/commit/manifest/digest/signature（发布版本 / 标签 / 提交 / 清单 / 内容摘要 / 签名）后，才把固定输入交给生产运行器。
+9. 仓库支持 immutable release（不可变发布版本）时必须启用；不支持时，部署任务记录 Release ID、asset hash（发布版本标识 / 附件哈希）并拒绝与发布瞬间记录不一致的输入。
 
 该流程提供“构建完成后停下、展示精确产物、由人再次确认、留下发布记录”，但发起和确认都属于同一个 GitHub 账号，不具备 two-person review/separation of duties（双人复核 / 职责分离）。因此：
 
@@ -587,6 +592,7 @@ prevent self-review（禁止自我审核）的含义是：发起某次 deploymen
 
 - source commit（源提交）属于受保护分支，质量门禁全部通过；
 - GHCR image digest（GHCR 镜像内容摘要）与 provenance attestation（来源证明）一致；
+- 节点回读已存在与应用清单或规范回滚标签一致的 GHCR image digest（GHCR 镜像内容摘要）；
 - 语料、模型、索引 identity（身份）是本次预期值；
 - 漏洞扫描没有未接受的 critical/high finding（严重 / 高危发现）；
 - 当前版本、目标版本和回滚 digest（内容摘要）明确；
@@ -1166,7 +1172,7 @@ docker buildx imagetools inspect <ghcr-image>@sha256:<digest>
 
 - 通过固定来源 SSH 完成一次 bootstrap（引导配置）：创建 Namespace（命名空间）、Pod 安全标签、运行时 Secret（密钥）、imagePullSecret（镜像拉取密钥）、固定非敏感资源、生产部署 runner（运行器）账号/服务和 root-owned deployment adapter（root 所有部署适配器）；不手工发布应用版本；
 - 如果 GitHub organization（GitHub 组织）能力允许，把生产运行器放入只允许当前仓库和 production deploy workflow（生产部署流水线）的 runner group（运行器组）；否则按已接受的个人仓库级边界注册。两种情况都必须核对没有新增公网监听端口；
-- 合并已通过全部门禁的 Release Pull Request（发布合并请求），由 Release Please（发布自动化工具）创建 Draft Release（草稿发布版本）并自动调用 release artifacts workflow（发布证据流水线）；确认发布证据生成结束后只留下草稿、生产运行器没有收到任务且 K3s 无变化。人工核对 release manifest（发布清单）并手工 Publish release（发布版本）后，才由 `release.published`（发布版本已发布）流水线直接创建或更新固定 Deployment（工作负载）；
+- 合并已通过全部门禁的 Release Pull Request（发布合并请求），由 Release Please（发布自动化工具）创建 Draft Release（草稿发布版本）并自动调用 release artifacts workflow（发布证据流水线）；确认发布证据生成结束后只留下草稿、生产运行器没有收到任务且 K3s 无变化。回滚时则由 rollback candidate workflow（回滚候选流水线）创建规范回滚草稿。人工核对对应证据后，先在单独授权下运行 `scripts/k3s-image-preheat.sh`，把应用清单或规范回滚标签中的精确镜像根摘要导入 K3s（轻量 Kubernetes）；预热不修改 Deployment（工作负载）。预热成功并再次确认 Publish release（发布版本）后，才由 `release.published`（发布版本已发布）流水线直接创建或更新固定 Deployment（工作负载）；
 - 镜像使用 digest（内容摘要），replicas=1，配置安全上下文、资源、startup/readiness/liveness probes（启动 / 就绪 / 存活探针）；
 - 创建安全 serving observation（在线观测）专用 local-path PVC（本地路径持久卷），只挂载固定 `data/observability/` 目录，应用只在其 `0700` `segments/` 子目录写入；显式注入已审核的 local candidate profile（本地候选配置），保持 `maxSurge=0`、`maxUnavailable=1` 的单写入端更新边界；
 - 显式设置 ACCESS_MODE=private（访问模式为私有），验证缺失或非法值也不会开放匿名路由；本阶段不创建公开模式切换能力；
@@ -1382,7 +1388,7 @@ sudo journalctl -u k3s --since "1 hour ago"
 ### 15.1 关键取舍
 
 - 选“独立、已签名、可复用的 GHCR 索引产物作为构建中间件 + 最终应用镜像内置索引”，不选 PVC + Job（持久卷 + 独立任务）：避免每次功能发布重复调用 Voyage，同时保留约 37 MiB 镜像增量带来的原子发布、运行时无远程依赖和简单回滚。
-- 选“GitHub Actions（GitHub 自动化流水线）直接发布 + draft Release（草稿发布版本）单人两步确认 + 生产专用部署运行器”，不选每次 SSH 人工发布：保留 22 固定来源和 6443 非公网边界，同时接受没有独立复核以及生产运行器代码执行风险。
+- 选“GitHub Actions（GitHub 自动化流水线）直接发布 + draft Release（草稿发布版本）单人确认 + 生产专用部署运行器”，不选每次 SSH 人工部署：保留 22 固定来源和 6443 非公网边界，同时接受没有独立复核以及生产运行器代码执行风险。SWR（华为云容器镜像服务）企业版可用前的本机 SSH（安全远程登录）步骤只导入应用清单或规范回滚标签中的精确镜像摘要，不修改 Deployment（工作负载）或替代发布流水线。
 - 选管理员控制的 private/portfolio（私有 / 作品集展示）双模式，不选“永久仅允许名单”或“匿名无限调用”：默认 private（私有）；作品集展示先开放页面和本地 YAML 检查，匿名模型体验只有在独立计量门禁完成后才追加。
 - 选 GitHub OAuth 2.0（GitHub 开放授权 2.0）允许名单保护 private（私有）和管理员访问；匿名体验使用 Turnstile（人机验证）与受控会话，不为简历访客自建注册、密码和用户资料系统。
 - 选 oauth2-proxy reverse proxy（认证代理反向代理）承载受保护业务流量，不选 ForwardAuth（前置认证）：当前生产 Traefik `3.7.4` 的 `trustForwardHeader` 已弃用且入口未配置可信代理地址，而认证代理固定版本能在同一进程中清理并重新注入应用认可的身份头；代价是认证代理进入业务数据路径，必须单独限制资源、探针和网络。

@@ -129,7 +129,7 @@ sudo k3s kubectl -n k8s-yaml-assistant-prod get deployment,pod,ingress
 2026-07-28 经本次明确授权完成发布、部署和非模型验收：
 
 - `v0.1.1` Release（发布版本）`360575653` 精确绑定源提交 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d`，包含六项证据；`Deploy published release`（部署已发布版本）运行 `30296287472` Attempt 1（第 1 次尝试）成功，GitHub deployment（GitHub 部署记录）`5628234264` 最终为 `success`。
-- 因跨境 GHCR（GitHub 容器镜像仓库）冷拉取过慢且 SWR（华为云容器镜像服务）企业版仍待审批，本次在 Publish（正式发布）前把精确 `linux/amd64` 镜像制作为保留根摘要的 OCI archive（开放容器镜像归档），校验 SHA-256（安全哈希算法）`86766515ef4793329808f60747dfce4a50c43e610e1cbaeafbc7f06aa535ff29` 后经 SSH（安全远程登录）传输并由 `k3s ctr images import` 导入。临时认证文件和两端归档已删除，节点保留生产所需的已导入内容；这是一条一次性临时路径，不替代同区域镜像分发。
+- 因跨境 GHCR（GitHub 容器镜像仓库）冷拉取过慢且 SWR（华为云容器镜像服务）企业版仍待审批，本次在 Publish（正式发布）前把精确 `linux/amd64` 镜像制作为保留根摘要的 OCI archive（开放容器镜像归档），校验 SHA-256（安全哈希算法）`86766515ef4793329808f60747dfce4a50c43e610e1cbaeafbc7f06aa535ff29` 后经 SSH（安全远程登录）传输并由 `k3s ctr images import` 导入。临时认证文件和两端归档已删除，节点保留生产所需的已导入内容；这是 `v0.1.1` 的历史一次性实施证据。
 - 人工回滚 Release（发布版本）`360812512` 通过不可变标签精确绑定 `v0.1.0` 摘要和唯一 provenance bundle（来源证明包）；`Deploy published release`（部署已发布版本）运行 `30325880287` Attempt 1（第 1 次尝试）成功，GitHub deployment（GitHub 部署记录）`5633580284` 最终为 `success`。节点事件确认目标镜像已存在于本机，没有跨境拉取。
 - 恢复 Release（发布版本）`360824879` 通过不可变标签精确绑定 `v0.1.1` 摘要和唯一 provenance bundle（来源证明包），于 `2026-07-28T03:56:06Z` Publish（正式发布）；仓库 `Latest`（最新发布）仍为普通 `v0.1.1` Release（发布版本）。`Deploy published release`（部署已发布版本）运行 `30327301138` Attempt 1（第 1 次尝试）成功，GitHub deployment（GitHub 部署记录）`5633826683` 最终为 `success`。节点事件确认目标镜像已存在于本机，没有跨境拉取。
 - 当前生产镜像为 `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37`；Deployment/Pod（工作负载 / 容器组）为 `1/1` 可用，节点重启后 Pod（容器组）重启为预期的 `1` 且没有继续增加。生产运行器服务为 `active/enabled`（运行中 / 开机自启），GitHub（代码托管平台）显示在线空闲，适配器操作标记不存在。成功台账已有四个事件和两个不同摘要，最新事件仍为精确绑定运行 `30327301138/1` 的 `action=rollback`。
@@ -140,6 +140,28 @@ sudo k3s kubectl -n k8s-yaml-assistant-prod get deployment,pod,ingress
 - 与 `v0.1.1` 源码一致的配置、脱敏、投影、采样、轮转、保留、总量清理和符号链接拒绝本地门禁为 55/55 通过。恢复后的 `/app/data/observability/segments` 为 `10001:10001 0700`，既有分段仍为 1,170 字节、`0600 10001:10001`、1 行且不是符号链接；启动日志没有 `root_unsafe` 或观测失败，恢复过程没有模型调用。16 MiB 轮转、7 天 / 256 MiB 清理、人工删除和符号链接攻击拒绝仍没有生产实证。
 - 节点重启前已创建数据库与服务端令牌分离备份 `20260728T041517Z-8d2b24cc-0d2d-4954-9997-ce6b2f1aa3e6`，上传私有 OBS（对象存储服务）的三个对象均由管理员回读核对摘要。重启后 K3s（轻量 Kubernetes）、生产运行器和应用自动恢复，适配器运行时目录重新创建为 `root:root 0700`；节点复用本地 `v0.1.1` 镜像，没有跨境拉取。
 - 节点重启没有改变 Deployment（工作负载）代次、成功台账、操作标记、observation PVC（观测持久卷声明）分段或三个索引文件的时间与摘要，也没有产生 GitHub（代码托管平台）运行、deployment（部署记录）、模型调用或在线索引重建。启动瞬间一条 startup probe（启动探针）连接拒绝警告后，live/ready（存活 / 就绪）持续返回 HTTP `200`。
+
+## Publish（正式发布）前镜像预热
+
+SWR（华为云容器镜像服务）企业版可用前，应用和回滚 Draft Release（草稿发布版本）统一使用仓库内的 `scripts/k3s-image-preheat.sh`。脚本是发布前缓存预热入口，不承担完整发布身份授权；应用草稿从 `release-manifest.json` 读取镜像根摘要，回滚草稿从规范标签 `rollback-vX.Y.Z-sha256-<64 位十六进制摘要>-r<运行号>` 读取镜像根摘要。
+
+执行顺序固定为：
+
+1. 由 Release lifecycle（发布生命周期）生成应用草稿及六项证据，或由 rollback candidate workflow（回滚候选流水线）生成规范回滚草稿；
+2. 维护者人工核对对应草稿的正文、目标提交或来源标签、镜像摘要和现有证据，并确认实际标签仍不存在；
+3. 获得本次生产节点镜像导入授权后，在仓库根目录传入目标草稿标签：
+
+   ```bash
+   KYA_DRAFT_TAG='vX.Y.Z'
+   bash scripts/k3s-image-preheat.sh "$KYA_DRAFT_TAG"
+   ```
+
+   回滚时把 `KYA_DRAFT_TAG` 替换为该草稿页面显示的完整规范回滚标签。
+
+4. 只有脚本输出 K3s（轻量 Kubernetes）已按目标根摘要完成预热，且两端临时归档已清理，才进入单独的 Publish（正式发布）确认；
+5. 脚本失败时保留草稿并停止。不得用可变标签、服务器直接跨境拉取、手工替换摘要或跳过根摘要回读继续发布。
+
+脚本只接受尚未发布且不是 Pre-release（预发布）的 `vX.Y.Z` 应用草稿或规范回滚草稿；它固定仓库、镜像、生产节点和 SSH（安全远程登录）密钥路径，在本机使用 Skopeo（容器镜像复制工具）或固定摘要的 Skopeo 容器生成 OCI（开放容器镜像）归档，校验传输哈希后导入 K3s（轻量 Kubernetes），并回读同一根摘要引用。回滚草稿的来源发布、provenance（来源证明）和部署台账仍由 Publish（正式发布）后的部署流水线完整校验，不在预热脚本中重复实现。该操作不修改 Deployment（工作负载）、不创建 Git tag（Git 标签）、不触发发布流水线，也不构成 Publish（正式发布）或部署授权；同区域镜像分发可用后应重新审核是否下线该步骤。
 
 ## 非破坏性回退
 
