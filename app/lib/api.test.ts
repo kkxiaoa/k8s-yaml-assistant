@@ -8,11 +8,13 @@ import {
   generateYaml,
   getAdminExperience,
   getExperience,
+  getGithubSignInUrl,
   setAdminExperience,
 } from './api';
 
 test('browser API requests use the fixed application base path', async () => {
   const calls: Array<{ url: string; method: string }> = [];
+  let githubSignInBody: URLSearchParams | null = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (
     input: RequestInfo | URL,
@@ -35,6 +37,17 @@ test('browser API requests use the fixed application base path', async () => {
     }
     if (url.endsWith('/api/check')) {
       return Response.json({ errors: [] });
+    }
+    if (url.endsWith('/api/auth/csrf')) {
+      return Response.json({ csrfToken: 'csrf-token' });
+    }
+    if (url.endsWith('/api/auth/signin/github')) {
+      if (init?.body instanceof URLSearchParams) {
+        githubSignInBody = init.body;
+      }
+      return Response.json({
+        url: 'https://github.com/login/oauth/authorize?client_id=test',
+      });
     }
     if (url.endsWith('/api/admin/experience')) {
       return Response.json({ mode: 'sleep', interviewExpiresAt: null });
@@ -68,6 +81,10 @@ test('browser API requests use the fixed application base path', async () => {
     await getExperience();
     await getAdminExperience();
     await setAdminExperience({ mode: 'sleep' });
+    assert.equal(
+      await getGithubSignInUrl('/k8s-yaml-assistant/admin'),
+      'https://github.com/login/oauth/authorize?client_id=test',
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -80,7 +97,21 @@ test('browser API requests use the fixed application base path', async () => {
     { url: '/k8s-yaml-assistant/api/experience', method: 'GET' },
     { url: '/k8s-yaml-assistant/api/admin/experience', method: 'GET' },
     { url: '/k8s-yaml-assistant/api/admin/experience', method: 'POST' },
+    { url: '/k8s-yaml-assistant/api/auth/csrf', method: 'GET' },
+    {
+      url: '/k8s-yaml-assistant/api/auth/signin/github',
+      method: 'POST',
+    },
   ]);
+  assert.ok(githubSignInBody);
+  assert.deepEqual(
+    Object.fromEntries(githubSignInBody),
+    {
+      csrfToken: 'csrf-token',
+      callbackUrl: '/k8s-yaml-assistant/admin',
+      json: 'true',
+    },
+  );
 });
 
 test('API failures expose stable user-safe errors instead of silent results', async () => {

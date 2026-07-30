@@ -36,7 +36,9 @@ export interface EditorContext {
 
 export type AskMode = 'free' | 'explain_field' | 'explain_error';
 
+const REQUEST_FAILED_MESSAGE = '请求失败，请稍后再试。';
 const apiErrorMessages: Readonly<Record<string, string>> = {
+  authentication_unavailable: 'GitHub 登录暂不可用，请稍后重试。',
   authentication_required: '请先通过 GitHub 登录后再使用此功能。',
   access_denied: '当前账号无权执行此操作。',
   sleep_mode: '当前处于休眠模式，模型功能暂不可用。',
@@ -70,15 +72,19 @@ const apiErrorMessages: Readonly<Record<string, string>> = {
   aliases_missing: '别名数据尚未就绪，请稍后再试。',
   aliases_invalid: '别名数据无效，请联系管理员。',
   service_unavailable: '服务当前不可用，请稍后再试。',
-  request_failed: '请求失败，请稍后再试。',
+  request_failed: REQUEST_FAILED_MESSAGE,
   empty_response: '服务未返回有效响应，请稍后再试。',
 };
+
+export function apiErrorMessage(code: string): string {
+  return apiErrorMessages[code] ?? REQUEST_FAILED_MESSAGE;
+}
 
 export class ApiRequestError extends Error {
   readonly code: string;
 
   constructor(code: string) {
-    super(apiErrorMessages[code] ?? apiErrorMessages.request_failed);
+    super(apiErrorMessage(code));
     this.name = 'ApiRequestError';
     this.code = code;
   }
@@ -123,6 +129,50 @@ async function requireSuccessfulResponse(response: Response): Promise<void> {
     }
   }
   throw new ApiRequestError(code ?? statusErrorCode(response.status));
+}
+
+async function authenticationResponseField(
+  response: Response,
+  field: string,
+): Promise<string> {
+  await requireSuccessfulResponse(response);
+  const payload = (await response.json()) as unknown;
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new ApiRequestError('authentication_unavailable');
+  }
+  const value = (payload as Record<string, unknown>)[field];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new ApiRequestError('authentication_unavailable');
+  }
+  return value;
+}
+
+export async function getGithubSignInUrl(
+  callbackUrl: string,
+): Promise<string> {
+  try {
+    const csrfResponse = await fetch(applicationPath('/api/auth/csrf'));
+    const csrfToken = await authenticationResponseField(
+      csrfResponse,
+      'csrfToken',
+    );
+
+    const signInResponse = await fetch(
+      applicationPath('/api/auth/signin/github'),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          csrfToken,
+          callbackUrl,
+          json: 'true',
+        }),
+      },
+    );
+    return await authenticationResponseField(signInResponse, 'url');
+  } catch {
+    throw new ApiRequestError('authentication_unavailable');
+  }
 }
 
 /** 校验 YAML,返回错误列表。 */

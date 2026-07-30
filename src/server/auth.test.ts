@@ -52,7 +52,7 @@ test('GitHub 登录只请求 read:user 并只读取稳定用户身份接口', as
   });
 });
 
-test('JWT 与会话只保留数字 GitHub 身份和管理员事实', async () => {
+test('JWT 只保留稳定身份，会话单独派生管理员事实', async () => {
   const options = createAuthOptions(AUTH_ENV);
   const jwt = options.callbacks?.jwt;
   const session = options.callbacks?.session;
@@ -67,7 +67,6 @@ test('JWT 与会话只保留数字 GitHub 身份和管理员事实', async () =>
   assert.deepEqual(token, {
     githubId: '12345',
     login: 'kkxiaoa',
-    admin: true,
   });
 
   const value = await session({
