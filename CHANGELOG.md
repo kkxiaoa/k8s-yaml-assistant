@@ -3,6 +3,20 @@
 > 状态：当前维护。
 > 用途：记录面向使用者的版本变化、部署边界和已知限制。
 
+## [0.2.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.1.1...v0.2.0) (2026-07-30)
+
+
+### Features
+
+* add controlled public experience ([#23](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/23)) ([aba5654](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/aba5654963391cf5ee1f3e9505fc6f2c3085ac72))
+* enforce bounded API request contracts ([#22](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/22)) ([699261d](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/699261ddc6ffa73fd29905aebf3a28a6047ac2d7))
+* support rollback image preheating ([#24](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/24)) ([289bf9f](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/289bf9f595e0ca11f2dbf93411ba4317c459d69d))
+
+
+### Bug Fixes
+
+* remove low-value release validation blockers ([#18](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/18)) ([d43a8b2](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/d43a8b24dee8dcc720d16f90304e6a74f7899ac5))
+
 ## [0.1.1](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.1.0...v0.1.1) (2026-07-27)
 
 
