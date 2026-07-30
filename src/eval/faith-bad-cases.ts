@@ -9,8 +9,8 @@ import {
   type BadCaseTracking,
 } from './bad-cases';
 import {
+  assessFaith,
   decodeFaithTrace,
-  type FaithOutcome,
   type FaithTrace,
 } from './faith-store';
 import {
@@ -66,6 +66,7 @@ interface FaithFailure {
   layer: BadCase['failure']['layer'];
   type: BadCase['failure']['type'];
   severity: BadCase['severity'];
+  note?: string;
 }
 
 function equalSorted(a: string[], b: string[]): boolean {
@@ -172,20 +173,6 @@ export function readFaithBadCaseInput(params: {
     scope: faithScope(run),
     warnings: [],
   };
-}
-
-function failureForOutcome(outcome: FaithOutcome): FaithFailure | null {
-  switch (outcome) {
-    case 'hallucination':
-    case 'dual_cause':
-      return { layer: 'generation', type: 'hallucination', severity: 'high' };
-    case 'refused_wrong':
-      return { layer: 'generation', type: 'refusal_error', severity: 'high' };
-    case 'judge_failed':
-      return { layer: 'judge', type: 'judge_error', severity: 'medium' };
-    default:
-      return null;
-  }
 }
 
 function sameEvalCase(issue: BadCase, evalCaseId: string): boolean {
@@ -295,7 +282,7 @@ function issueFromTrace(params: {
     failure: {
       layer: failure.layer,
       type: failure.type,
-      note: existing?.failure.note ?? trace.verdict?.reason,
+      note: existing?.failure.note ?? failure.note ?? trace.verdict?.reason,
     },
     severity: existing?.severity ?? failure.severity,
     status: existing?.status ?? 'new',
@@ -421,66 +408,102 @@ export function buildFaithBadCaseCandidates(params: {
       continue;
     }
 
-    if (trace.outcome === 'faithful_miss') {
-      const related = retrievalQualityIssues(existingBadCases, trace.id);
-      if (related.length > 0) {
-        candidates.push({
-          action: 'link_only',
-          evalCaseId: trace.id,
-          issueId: related[0]!.id,
-          issue: related[0],
-          relatedBadCaseIds: related.map((issue) => issue.id),
-        });
-      } else {
+    if (trace.outcome === 'failed') {
+      const assessment = assessFaith(trace);
+      if (trace.verdict?.faithful === false) {
         candidates.push(
-          warningCandidate(trace, 'missing_retrieval_issue for faithful_miss'),
+          issueCandidate({
+            trace,
+            existingBadCases,
+            run,
+            scope,
+            now,
+            failure: {
+              layer: 'generation',
+              type: 'unsupported_claim',
+              severity: 'high',
+            },
+            latestEvidence,
+          }),
+        );
+      }
+      if (assessment.expectedBehaviorSatisfied === false) {
+        candidates.push(
+          issueCandidate({
+            trace,
+            existingBadCases,
+            run,
+            scope,
+            now,
+            failure: {
+              layer: 'generation',
+              type: 'behavior_mismatch',
+              severity: 'high',
+              note: `expected ${trace.expectedBehavior}; observed ${assessment.responseBehavior}`,
+            },
+            latestEvidence,
+          }),
+        );
+      }
+
+      const related = retrievalQualityIssues(existingBadCases, trace.id);
+      if (!assessment.retrievalSatisfied) {
+        candidates.push(
+          related.length > 0
+            ? {
+                action: 'link_only',
+                evalCaseId: trace.id,
+                issueId: related[0]!.id,
+                issue: related[0],
+                relatedBadCaseIds: related.map((issue) => issue.id),
+              }
+            : warningCandidate(
+                trace,
+                'missing_retrieval_issue for retrieval_incomplete',
+              ),
+        );
+      }
+      if (!assessment.sourceCoverageSatisfied) {
+        candidates.push(
+          warningCandidate(trace, 'source expectation is incomplete'),
         );
       }
       continue;
     }
 
-    const failure = failureForOutcome(trace.outcome);
-    if (!failure) {
-      const existingFaithIssues = faithIssues(existingBadCases, trace.id);
+    if (trace.outcome === 'judge_failed') {
       candidates.push(
-        existingFaithIssues.length > 0
-          ? {
-              action: 'resolved_in_run',
-              evalCaseId: trace.id,
-              issueId: existingFaithIssues[0]!.id,
-            }
-          : {
-              action: 'skip',
-              evalCaseId: trace.id,
-              message: trace.outcome,
-            },
+        issueCandidate({
+          trace,
+          existingBadCases,
+          run,
+          scope,
+          now,
+          failure: {
+            layer: 'judge',
+            type: 'judge_error',
+            severity: 'medium',
+          },
+          latestEvidence,
+        }),
       );
       continue;
     }
 
-    const related =
-      trace.outcome === 'dual_cause'
-        ? retrievalQualityIssues(existingBadCases, trace.id)
-        : [];
-
+    const existingFaithIssues = faithIssues(existingBadCases, trace.id);
     candidates.push(
-      issueCandidate({
-        trace,
-        existingBadCases,
-        run,
-        scope,
-        now,
-        failure,
-        latestEvidence,
-        relatedBadCaseIds: related.map((issue) => issue.id),
-      }),
+      existingFaithIssues.length > 0
+        ? {
+            action: 'resolved_in_run',
+            evalCaseId: trace.id,
+            issueId: existingFaithIssues[0]!.id,
+          }
+        : {
+            action: 'skip',
+            evalCaseId: trace.id,
+            message: trace.outcome,
+          },
     );
-
-    if (trace.outcome === 'dual_cause' && related.length === 0) {
-      candidates.push(
-        warningCandidate(trace, 'missing_retrieval_issue for dual_cause'),
-      );
-    }
   }
 
   return candidates;

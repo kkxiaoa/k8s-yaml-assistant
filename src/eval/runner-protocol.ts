@@ -54,11 +54,12 @@ import {
 import type { FaithTrace } from './faith-store';
 import {
   FAITH_JUDGE_ATTEMPT_LIMIT,
+  JUDGE_MAX_TOKENS,
   JUDGE_MODEL,
   JUDGE_PARSER_SCHEMA_IDENTITY,
   JUDGE_SYSTEM,
+  JUDGE_USER_MESSAGE_TEMPLATE,
 } from './judge';
-import { TEXT_MAX_TOKENS } from './llm';
 import type {
   FixCaseResult,
   GenerationCaseResult,
@@ -133,10 +134,15 @@ export function retrievalMetricsRecord(counts: RetrievalMetricCounts) {
 export interface FaithMetricCounts {
   faithfulCount: number;
   judgedCount: number;
+  expectedBehaviorSatisfiedCount: number;
+  behaviorJudgedCount: number;
+  groundedSuccessCount: number;
   refusedCorrectlyCount: number;
   refusalJudgedCount: number;
-  hallucinationCount: number;
-  dualCauseCount: number;
+  unsupportedResponseCount: number;
+  behaviorMismatchCount: number;
+  retrievalIncompleteCount: number;
+  sourceIncompleteCount: number;
   judgeIndeterminateCount: number;
   judgeInvalidAttemptCount: number;
   judgeErrorAttemptCount: number;
@@ -149,13 +155,32 @@ export function faithMetricsRecord(counts: FaithMetricCounts) {
       counts.faithfulCount,
       counts.judgedCount,
     ),
+    'faith.behavior_compliance_rate': ratioObservation(
+      counts.expectedBehaviorSatisfiedCount,
+      counts.behaviorJudgedCount,
+    ),
+    'faith.grounded_success_rate': ratioObservation(
+      counts.groundedSuccessCount,
+      counts.behaviorJudgedCount,
+    ),
     'faith.refusal_correct_rate': ratioObservation(
       counts.refusedCorrectlyCount,
       counts.refusalJudgedCount,
     ),
-    'faith.hallucination': metricObservation(counts.hallucinationCount),
-    'faith.dual_cause': metricObservation(counts.dualCauseCount),
+    'faith.unsupported_response_count': metricObservation(
+      counts.unsupportedResponseCount,
+    ),
+    'faith.behavior_mismatch_count': metricObservation(
+      counts.behaviorMismatchCount,
+    ),
+    'faith.retrieval_incomplete_count': metricObservation(
+      counts.retrievalIncompleteCount,
+    ),
+    'faith.source_incomplete_count': metricObservation(
+      counts.sourceIncompleteCount,
+    ),
     'faith.judged': metricObservation(counts.judgedCount),
+    'faith.behavior_judged': metricObservation(counts.behaviorJudgedCount),
     'faith.refusal_judged': metricObservation(counts.refusalJudgedCount),
     'faith.case_count': metricObservation(counts.caseCount),
     'faith.judge_indeterminate': metricObservation(
@@ -221,6 +246,13 @@ export interface EvalSuiteCaseSelection<T> {
 export interface RetrievalCaseSelection
   extends EvalSuiteCaseSelection<SemanticRetrievalCase> {
   k: number;
+}
+
+export interface JudgeCaseSelection {
+  cases: JudgeCalibrationCase[];
+  scope: 'calibration' | 'targeted';
+  suffix: '' | '-targeted';
+  label: string;
 }
 
 export interface RetrievalEvalTracePayload {
@@ -383,6 +415,55 @@ export function selectEvalSuiteCases<T extends GovernedEvalCase>(
     cases: selectCasesForSuite(cases, parsed.suite),
     suite: parsed.suite,
     scope: parsed.suite,
+  };
+}
+
+export function selectJudgeCases(
+  argv: readonly string[] = [],
+  cases: readonly JudgeCalibrationCase[],
+): JudgeCaseSelection {
+  if (argv.length === 0) {
+    return {
+      cases: [...cases],
+      scope: 'calibration',
+      suffix: '',
+      label: '完整校准集',
+    };
+  }
+
+  const requestedIds = new Set<string>();
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] !== '--case') {
+      throw new Error(
+        '用法: npm run eval:judge -- [--case <case-id>]...',
+      );
+    }
+    const id = argv[index + 1];
+    if (id === undefined || id.startsWith('--')) {
+      throw new Error(
+        '用法: npm run eval:judge -- [--case <case-id>]...',
+      );
+    }
+    if (requestedIds.has(id)) {
+      throw new Error(`duplicate judge case ID: ${id}`);
+    }
+    requestedIds.add(id);
+    index++;
+  }
+
+  const knownIds = new Set(cases.map((evalCase) => evalCase.id));
+  const unknownIds = [...requestedIds].filter((id) => !knownIds.has(id));
+  if (unknownIds.length > 0) {
+    throw new Error(`unknown judge case ID: ${unknownIds.join(', ')}`);
+  }
+  const selected = cases.filter((evalCase) =>
+    requestedIds.has(evalCase.id),
+  );
+  return {
+    cases: selected,
+    scope: 'targeted',
+    suffix: '-targeted',
+    label: `定向校准集: ${selected.map((evalCase) => evalCase.id).join(', ')}`,
   };
 }
 
@@ -633,7 +714,8 @@ function answerPromptHash(): string {
 function judgePromptHash(): string {
   return computeCanonicalHash({
     system: JUDGE_SYSTEM,
-    request: { model: JUDGE_MODEL, maxTokens: TEXT_MAX_TOKENS },
+    userMessageTemplate: JUDGE_USER_MESSAGE_TEMPLATE,
+    request: { model: JUDGE_MODEL, maxTokens: JUDGE_MAX_TOKENS },
   });
 }
 
@@ -722,26 +804,25 @@ export function buildRetrievalEvalTracePayload(params: {
 
 export function faithEnvelopeOutcome(trace: FaithTrace): EnvelopeOutcome {
   switch (trace.outcome) {
-    case 'faithful_hit':
-    case 'refused_correctly':
+    case 'passed':
       return 'success';
+    case 'failed':
+      return 'failed';
     case 'judge_failed':
       return 'skipped';
     case 'error':
       return 'error';
-    default:
-      return 'failed';
   }
 }
 
 export function judgeEnvelopeOutcome(
   trace: JudgeCalibrationTrace,
 ): EnvelopeOutcome {
-  return trace.majority.agree === null
-    ? 'skipped'
-    : trace.majority.agree
-      ? 'success'
-      : 'failed';
+  if (trace.majority.agree === null) return 'skipped';
+  if (!trace.majority.agree) return 'failed';
+  if (trace.responseBehavior?.agree === null) return 'skipped';
+  if (trace.responseBehavior?.agree === false) return 'failed';
+  return 'success';
 }
 
 export function generationEnvelopeOutcome(

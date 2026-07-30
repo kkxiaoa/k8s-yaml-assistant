@@ -335,9 +335,12 @@ check('faith config requires model, prompt, parser, and attempt identities', () 
   }
 });
 
-check('judge config requires calibration scope and vote identity', () => {
+check('judge config accepts calibration or targeted scope and requires vote identity', () => {
   assert.throws(() =>
     decodeEvalRun({ ...runFixture('judge'), scope: 'full' }),
+  );
+  assert.doesNotThrow(() =>
+    decodeEvalRun({ ...runFixture('judge'), scope: 'targeted' }),
   );
   assert.throws(() => decodeEvalRun(omit(runFixture('judge'), 'dataset')));
   for (const field of [

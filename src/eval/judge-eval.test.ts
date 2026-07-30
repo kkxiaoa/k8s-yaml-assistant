@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { judgeReasonForMajority } from './judge-eval';
 import {
   buildJudgeCalibrationTrace,
   computeJudgeCalibrationMetrics,
@@ -44,6 +45,7 @@ function calibrationCase(
   id: string,
   faithful: boolean,
   policy?: JudgeCalibrationCase['human']['policy'],
+  responseBehavior?: JudgeCalibrationCase['human']['responseBehavior'],
 ): JudgeCalibrationCase {
   return {
     id,
@@ -57,6 +59,7 @@ function calibrationCase(
     answer: 'answer',
     human: {
       faithful,
+      ...(responseBehavior ? { responseBehavior } : {}),
       ...(policy ? { policy } : {}),
       note: 'human note',
     },
@@ -66,9 +69,11 @@ function calibrationCase(
 function vote(
   faithful: boolean,
   policy?: JudgeVote['policy'],
+  responseBehavior: NonNullable<JudgeVote['responseBehavior']> = 'answer',
 ): JudgeVote {
   return {
     faithful,
+    responseBehavior,
     unsupported: faithful ? [] : ['unsupported'],
     reason: faithful ? 'faithful' : 'unsupported',
     ...(policy ? { policy } : {}),
@@ -78,8 +83,12 @@ function vote(
 function valid(
   faithful: boolean,
   policy?: JudgeVote['policy'],
+  responseBehavior: NonNullable<JudgeVote['responseBehavior']> = 'answer',
 ): JudgeAttempt {
-  return { status: 'valid', vote: vote(faithful, policy) };
+  return {
+    status: 'valid',
+    vote: vote(faithful, policy, responseBehavior),
+  };
 }
 
 function invalid(reason = 'invalid vote'): JudgeAttempt {
@@ -103,6 +112,21 @@ check('calibration preflight rejects malformed labels and missing snapshots', ()
       },
     ]).length,
     1,
+  );
+  assert.equal(
+    decodeJudgeCalibrationLabels([
+      {
+        id: 'case-a',
+        sourceFaithRunId: 'faith-run-1',
+        category: 'correct_refusal',
+        human: {
+          faithful: true,
+          responseBehavior: 'refusal',
+          note: 'reviewed',
+        },
+      },
+    ])[0]?.human.responseBehavior,
+    'refusal',
   );
   assert.throws(
     () =>
@@ -217,6 +241,17 @@ check('trace records planned, valid, invalid, error attempts and lineage', () =>
   );
 });
 
+check('disagreement diagnostics select a reason from the judge majority', () => {
+  const trace = buildJudgeCalibrationTrace({
+    calibrationCase: calibrationCase('case-a', false),
+    attempts: [valid(true), valid(true), valid(false)],
+    plannedVotes: 3,
+  });
+  assert.equal(trace.majority.faithful, true);
+  assert.equal(trace.majority.agree, false);
+  assert.equal(judgeReasonForMajority(trace), 'faithful');
+});
+
 check('1/5, 2/5, and a 2:2 tie remain indeterminate', () => {
   const traces = [];
   for (const [id, attempts, reason] of [
@@ -304,6 +339,55 @@ check('each explicitly labeled policy dimension reaches quorum independently', (
   );
   assert.equal(trace.policy.misstatedAsOfficial?.judge, null);
   assert.equal(trace.policy.misstatedAsOfficial?.indeterminateReason, 'tie');
+});
+
+check('response behavior is calibrated only when humans label it explicitly', () => {
+  const unlabeled = buildJudgeCalibrationTrace({
+    calibrationCase: calibrationCase('unlabeled-behavior', true),
+    plannedVotes: 5,
+    attempts: Array.from({ length: 5 }, () => valid(true)),
+  });
+  assert.equal(unlabeled.responseBehavior, undefined);
+
+  const labeled = buildJudgeCalibrationTrace({
+    calibrationCase: calibrationCase(
+      'labeled-behavior',
+      true,
+      undefined,
+      'refusal',
+    ),
+    plannedVotes: 5,
+    attempts: [
+      valid(true, undefined, 'refusal'),
+      valid(true, undefined, 'refusal'),
+      valid(true, undefined, 'answer'),
+      valid(true, undefined, 'refusal'),
+      invalid(),
+    ],
+  });
+  assert.deepEqual(labeled.responseBehavior, {
+    human: 'refusal',
+    judge: 'refusal',
+    quorum: 3,
+    answerVotes: 1,
+    refusalVotes: 3,
+    nonAnswerVotes: 0,
+    validVotes: 4,
+    reachedQuorum: true,
+    indeterminateReason: null,
+    unstable: true,
+    agree: true,
+  });
+
+  const metrics = computeJudgeCalibrationMetrics([unlabeled, labeled]);
+  assert.deepEqual(metrics.responseBehavior, {
+    total: 1,
+    agree: 1,
+    indeterminate: 0,
+    unstable: 1,
+    judged: 1,
+    agreementRate: 1,
+  });
 });
 
 check('trace decoder rejects inconsistent counts, labels, and quorum', () => {
@@ -417,6 +501,14 @@ check('metrics exclude indeterminate cases and retain attempt diagnostics', () =
   assert.equal(metrics.policy.distinguished.unstable, 1);
   assert.equal(metrics.policy.distinguished.indeterminate, 0);
   assert.equal(metrics.policy.distinguished.agreementRate, 1);
+  assert.deepEqual(metrics.responseBehavior, {
+    total: 0,
+    agree: 0,
+    indeterminate: 0,
+    unstable: 0,
+    judged: 0,
+    agreementRate: null,
+  });
 
   const record = judgeMetricsRecord(metrics);
   assert.deepEqual(record['judge.agreement_rate'], metricObservation(2 / 3, 2, 3));
@@ -425,6 +517,10 @@ check('metrics exclude indeterminate cases and retain attempt diagnostics', () =
   assert.deepEqual(record['judge.attempt.valid'], metricObservation(19));
   assert.deepEqual(record['judge.attempt.invalid'], metricObservation(3));
   assert.deepEqual(record['judge.attempt.error'], metricObservation(3));
+  assert.deepEqual(
+    record['judge.response_behavior.agreement_rate'],
+    metricObservation(null, 0, 0),
+  );
 });
 
 console.log(`\n通过 ${passed} 项`);

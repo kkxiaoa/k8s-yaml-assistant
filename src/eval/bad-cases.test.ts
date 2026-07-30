@@ -165,7 +165,7 @@ function withTempDir(fn: (directory: string) => void): void {
   const generation = canonicalBadCaseId({
     evalCaseId: 'pod-volumes',
     layer: 'generation',
-    type: 'hallucination',
+    type: 'unsupported_claim',
   });
 
   assert.match(first, /^[a-f0-9]{12}$/);
@@ -310,7 +310,7 @@ function withTempDir(fn: (directory: string) => void): void {
   const first = badCase({
     evalCaseId: 'case-a',
     layer: 'generation',
-    type: 'hallucination',
+    type: 'unsupported_claim',
     status: 'triaged',
     observedRunIds: ['run-a'],
   });
@@ -318,7 +318,7 @@ function withTempDir(fn: (directory: string) => void): void {
     ...badCase({
       evalCaseId: 'case-a',
       layer: 'generation',
-      type: 'hallucination',
+      type: 'unsupported_claim',
       status: 'new',
       observedRunIds: ['run-b'],
     }),
