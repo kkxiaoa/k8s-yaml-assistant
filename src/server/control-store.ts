@@ -151,55 +151,63 @@ function databasePath(environment: ControlEnvironment): string {
 function initializeDatabase(path: string): Database.Database {
   ensureControlDirectory(path);
   const db = new Database(path);
-  chmodSync(path, 0o600);
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('busy_timeout = 5000');
-  db.pragma('foreign_keys = ON');
-  const version = db.pragma('user_version', { simple: true });
-  if (version !== 0 && version !== 1) {
-    db.close();
-    throw new ControlStateFault();
-  }
-  if (version === 0) {
-    db.exec(`
-      CREATE TABLE experience_state (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        mode TEXT NOT NULL CHECK (mode IN ('normal', 'interview', 'sleep')),
-        interview_expires_at INTEGER,
-        updated_at INTEGER NOT NULL
-      );
-      INSERT INTO experience_state (id, mode, interview_expires_at, updated_at)
-      VALUES (1, 'sleep', NULL, 0);
+  try {
+    chmodSync(path, 0o600);
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('busy_timeout = 5000');
+    db.pragma('foreign_keys = ON');
+    const version = db.pragma('user_version', { simple: true });
+    if (version !== 0 && version !== 1) {
+      throw new ControlStateFault();
+    }
+    if (version === 0) {
+      const initialize = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE experience_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            mode TEXT NOT NULL CHECK (mode IN ('normal', 'interview', 'sleep')),
+            interview_expires_at INTEGER,
+            updated_at INTEGER NOT NULL
+          );
+          INSERT INTO experience_state (
+            id, mode, interview_expires_at, updated_at
+          ) VALUES (1, 'sleep', NULL, 0);
 
-      CREATE TABLE request_ledger (
-        request_id TEXT PRIMARY KEY,
-        subject_hash TEXT NOT NULL,
-        quota_day TEXT NOT NULL,
-        route TEXT NOT NULL CHECK (route IN ('ask', 'generate', 'fix')),
-        credits INTEGER NOT NULL CHECK (credits >= 0),
-        state TEXT NOT NULL CHECK (
-          state IN ('reserved', 'settled', 'charged_max')
-        ),
-        reserved_cost_microusd INTEGER NOT NULL CHECK (
-          reserved_cost_microusd >= 0
-        ),
-        settled_cost_microusd INTEGER NOT NULL CHECK (
-          settled_cost_microusd >= 0
-        ),
-        lease_expires_at INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        completed_at INTEGER
-      );
-      CREATE INDEX request_ledger_subject_day
-        ON request_ledger (subject_hash, quota_day, state);
-      CREATE INDEX request_ledger_day
-        ON request_ledger (quota_day, state);
+          CREATE TABLE request_ledger (
+            request_id TEXT PRIMARY KEY,
+            subject_hash TEXT NOT NULL,
+            quota_day TEXT NOT NULL,
+            route TEXT NOT NULL CHECK (route IN ('ask', 'generate', 'fix')),
+            credits INTEGER NOT NULL CHECK (credits >= 0),
+            state TEXT NOT NULL CHECK (
+              state IN ('reserved', 'settled', 'charged_max')
+            ),
+            reserved_cost_microusd INTEGER NOT NULL CHECK (
+              reserved_cost_microusd >= 0
+            ),
+            settled_cost_microusd INTEGER NOT NULL CHECK (
+              settled_cost_microusd >= 0
+            ),
+            lease_expires_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER
+          );
+          CREATE INDEX request_ledger_subject_day
+            ON request_ledger (subject_hash, quota_day, state);
+          CREATE INDEX request_ledger_day
+            ON request_ledger (quota_day, state);
 
-      PRAGMA user_version = 1;
-    `);
+          PRAGMA user_version = 1;
+        `);
+      });
+      initialize.immediate();
+    }
+    return db;
+  } catch (error) {
+    if (db.open) db.close();
+    throw error;
   }
-  return db;
 }
 
 function effectiveState(
@@ -346,13 +354,14 @@ export class ControlStore {
           ? now + request.durationHours * 60 * 60_000
           : null;
       const transaction = this.db.transaction(() => {
-        this.db
+        const result = this.db
           .prepare(
             `UPDATE experience_state
              SET mode = ?, interview_expires_at = ?, updated_at = ?
              WHERE id = 1`,
           )
           .run(request.mode, expiresAt, now);
+        if (result.changes !== 1) throw new ControlStateFault();
       });
       transaction.immediate();
       return {

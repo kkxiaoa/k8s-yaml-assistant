@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test, { afterEach } from 'node:test';
 import Database from 'better-sqlite3';
 import {
+  ControlStateFault,
   ControlStore,
   ReservationRejected,
 } from './control-store';
@@ -71,6 +72,65 @@ test('新库从休眠开始且休眠关闭模型', () => {
   assert.equal(store.experienceAccess(USER_SUBJECT, NOW).mode, 'normal');
   assert.equal(store.experienceAccess(USER_SUBJECT, NOW).reason, null);
   store.close();
+});
+
+test('版本初始化后半段失败时回滚此前创建的 schema', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'kya-control-test-'));
+  directories.push(directory);
+  const path = join(directory, 'control.sqlite3');
+  const existing = new Database(path);
+  try {
+    existing.exec('CREATE TABLE request_ledger (marker TEXT)');
+  } finally {
+    existing.close();
+  }
+
+  assert.throws(() => new ControlStore(path, Buffer.alloc(32, 7)));
+
+  const database = new Database(path, {
+    readonly: true,
+    fileMustExist: true,
+  });
+  try {
+    const tables = database
+      .prepare(
+        `SELECT name FROM sqlite_schema
+         WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+         ORDER BY name`,
+      )
+      .all() as Array<{ name: string }>;
+    assert.deepEqual(tables, [{ name: 'request_ledger' }]);
+    assert.equal(database.pragma('user_version', { simple: true }), 0);
+  } finally {
+    database.close();
+  }
+});
+
+test('管理员状态行缺失时更新失败关闭', () => {
+  const { directory, store } = controlStore();
+  const path = join(directory, 'control.sqlite3');
+  store.close();
+
+  const database = new Database(path);
+  try {
+    assert.equal(
+      database.prepare('DELETE FROM experience_state WHERE id = 1').run()
+        .changes,
+      1,
+    );
+  } finally {
+    database.close();
+  }
+
+  const reopened = new ControlStore(path, Buffer.alloc(32, 7));
+  try {
+    assert.throws(
+      () => reopened.setAdminState({ mode: 'normal' }, NOW),
+      ControlStateFault,
+    );
+  } finally {
+    reopened.close();
+  }
 });
 
 test('普通与开放展示额度共享当日累计，管理员只绕过个人点数', () => {
