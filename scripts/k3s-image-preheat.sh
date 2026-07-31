@@ -89,6 +89,7 @@ require_command python3
 require_command ssh
 require_command scp
 require_command shasum
+require_command tar
 
 skopeo_backend=""
 if command -v skopeo >/dev/null 2>&1; then
@@ -130,6 +131,7 @@ release_json="$work_dir/release.json"
 manifest_dir="$work_dir/release"
 manifest_path="$manifest_dir/release-manifest.json"
 auth_file="$work_dir/auth.json"
+layout_path="$work_dir/image.oci"
 archive_path="$work_dir/image.oci.tar"
 mkdir -m 700 "$manifest_dir"
 
@@ -270,7 +272,7 @@ if [[ "$skopeo_backend" == "native" ]]; then
     --preserve-digests \
     --src-authfile "$auth_file" \
     "docker://$exact_image" \
-    "oci-archive:$archive_path"
+    "oci:$layout_path"
 else
   docker run --rm \
     --volume "$work_dir:/work" \
@@ -281,10 +283,13 @@ else
     --preserve-digests \
     --src-authfile /work/auth.json \
     "docker://$exact_image" \
-    "oci-archive:/work/image.oci.tar"
+    "oci:/work/image.oci"
 fi
 
 rm -f -- "$auth_file"
+
+# oci-archive 会为多镜像索引增加包装层；K3s 导入需要顶层描述符保持发布根摘要。
+COPYFILE_DISABLE=1 tar -C "$layout_path" -cf "$archive_path" .
 
 printf '3/5 校验 OCI 根摘要\n'
 python3 - "$archive_path" "$image_digest" <<'PY'

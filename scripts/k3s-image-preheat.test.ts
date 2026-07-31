@@ -46,6 +46,16 @@ test('image preheat script is executable shell with bounded tag help', () => {
   );
 });
 
+test('image preheat archives a direct OCI layout instead of an archive wrapper', () => {
+  assert.doesNotMatch(script, /oci-archive:/u);
+  assert.match(script, /"oci:\$layout_path"/u);
+  assert.match(script, /"oci:\/work\/image\.oci"/u);
+  assert.match(
+    script,
+    /COPYFILE_DISABLE=1 tar -C "\$layout_path" -cf "\$archive_path" \./u,
+  );
+});
+
 test('image preheat tag patterns accept stable and canonical rollback drafts', () => {
   const stable = pattern('STABLE_TAG_PATTERN');
   const rollback = pattern('ROLLBACK_TAG_PATTERN');
