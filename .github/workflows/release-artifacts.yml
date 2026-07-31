@@ -499,6 +499,7 @@ jobs:
         run: |
           gh release view "$RELEASE_TAG" \
             --json tagName,targetCommitish,isDraft,isPrerelease,body,assets \
+            --jq '{tagName,targetCommitish,isDraft,isPrerelease,body,assets:[.assets[]|{name:.name}]}' \
             > candidate-state/draft-release-readback.json
           mkdir -p candidate-state/release-readback
           gh release download "$RELEASE_TAG" \
