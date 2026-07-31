@@ -103,7 +103,7 @@ jobs:
       - name: Build no-index runtime image
         run: npm run container:build:runtime-base
 
-      - name: Verify fail-closed runtime image
+      - name: Verify index-missing runtime boundary
         run: npm run container:smoke:runtime-base
 
       - name: Reject high and critical runtime vulnerabilities
