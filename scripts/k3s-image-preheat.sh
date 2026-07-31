@@ -288,7 +288,8 @@ fi
 
 rm -f -- "$auth_file"
 
-# oci-archive 会为多镜像索引增加包装层；K3s 导入需要顶层描述符保持发布根摘要。
+# containerd --local --digests 只为 index.json 的直接 manifests 建立摘要引用；
+# 直接打包 OCI layout 可确保发布根位于这一层，避免 oci-archive 再增加包装层。
 COPYFILE_DISABLE=1 tar -C "$layout_path" -cf "$archive_path" .
 
 printf '3/5 校验 OCI 根摘要\n'
@@ -385,10 +386,10 @@ else
 fi
 
 "${k3s_command[@]}" ctr --namespace k8s.io images import \
+  --local \
   --all-platforms \
   --base-name "$image_name" \
   --digests \
-  --index-name "$exact_image" \
   "$remote_archive"
 
 "${k3s_command[@]}" ctr --namespace k8s.io content get "$image_digest" >/dev/null
