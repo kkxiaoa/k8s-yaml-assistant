@@ -241,6 +241,24 @@ test('candidate smoke accepts only an immutable image digest', () => {
   }
 });
 
+test('runtime-base smoke names the exact index-missing expectation', () => {
+  const image = 'k8s-yaml-assistant:test-runtime-base';
+  assert.deepEqual(
+    parseContainerSmokeArguments([
+      '--image',
+      image,
+      '--expect-index-missing',
+    ]),
+    {
+      image,
+      mode: 'expect-index-missing',
+    },
+  );
+  assert.throws(() =>
+    parseContainerSmokeArguments(['--image', image, '--expect-not-ready']),
+  );
+});
+
 test('build context selection includes only tracked and reviewed Task files', () => {
   assert.deepEqual(
     selectBuildContextPaths(

@@ -15,7 +15,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { RELEASE_INDEX_EMBEDDING_MODEL } from '../src/release/manifest';
-import { applicationPath } from '../src/shared/application-path.mjs';
 
 const NODE_IMAGE_DIGEST =
   'sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d';
@@ -66,7 +65,6 @@ const APP_UID_GID = '10001:10001';
 const SMOKE_TMPFS_SIZE_BYTES = 64 * 1024 * 1024;
 const OBSERVATION_VOLUME_PATH = '/app/data/observability';
 const OBSERVATION_DATA_PATH = `${OBSERVATION_VOLUME_PATH}/segments`;
-const ASK_PATH = applicationPath('/api/ask');
 const CANDIDATE_INDEX_PATHS = new Set([
   'app/data/index/manifest.json',
   'app/data/index/chunks.jsonl',
@@ -604,19 +602,7 @@ function assertContainerIsolation(name: string): void {
   }
 }
 
-async function assertObservationRuntime(
-  name: string,
-  expectation: 'ready' | 'not-ready',
-): Promise<void> {
-  const request = nodeInContainer(
-    name,
-    `fetch('http://127.0.0.1:3000${ASK_PATH}',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(response=>console.log(response.status)).catch(()=>process.exit(2))`,
-  );
-  const expectedStatus = expectation === 'ready' ? '400' : '503';
-  if (request.status !== 0 || request.stdout.trim() !== expectedStatus) {
-    fail(`unexpected empty Ask response: ${request.stdout || request.stderr}`);
-  }
-
+function assertObservationRuntime(name: string): void {
   const probe = nodeInContainer(
     name,
     `const fs=require('node:fs');const stat=path=>{const value=fs.statSync(path);return {mode:value.mode&0o777,uid:value.uid,gid:value.gid}};console.log(JSON.stringify({volume:stat('${OBSERVATION_VOLUME_PATH}'),data:fs.existsSync('${OBSERVATION_DATA_PATH}')?stat('${OBSERVATION_DATA_PATH}'):null,entries:fs.existsSync('${OBSERVATION_DATA_PATH}')?fs.readdirSync('${OBSERVATION_DATA_PATH}'):[]}))`,
@@ -645,7 +631,7 @@ async function assertObservationRuntime(
     );
   }
   if (decoded.entries.length !== 0) {
-    fail('empty Ask smoke must not create an observation segment');
+    fail('runtime startup must not create an observation segment');
   }
 
   const logs = run('docker', ['logs', name], { allowFailure: true });
@@ -704,7 +690,7 @@ function assertRuntimeContents(
 
 async function smokeRuntime(
   image: string,
-  expectation: 'ready' | 'not-ready',
+  expectation: 'ready' | 'index-missing',
 ): Promise<void> {
   const expectReady = expectation === 'ready';
   if (expectReady) {
@@ -745,10 +731,6 @@ async function smokeRuntime(
       `VOYAGE_EMBEDDING_MODEL=${RELEASE_INDEX_EMBEDDING_MODEL}`,
       '--env',
       'VOYAGE_RERANK_MODEL=rerank-2.5',
-      '--env',
-      'VOYAGE_API_KEY=container-smoke-non-secret',
-      '--env',
-      'DEEPSEEK_API_KEY=container-smoke-non-secret',
       '--env',
       'INDEX_DIR=/app/data/index',
       '--env',
@@ -796,7 +778,7 @@ async function smokeRuntime(
       );
     }
 
-    await assertObservationRuntime(name, expectation);
+    assertObservationRuntime(name);
     assertContainerIsolation(name);
     assertRuntimeContents(name, expectReady);
     console.log(
@@ -811,12 +793,12 @@ async function smokeRuntime(
 
 export function parseContainerSmokeArguments(argv: readonly string[]): {
   image: string;
-  mode: 'build-runtime-base' | 'expect-not-ready' | 'expect-ready';
+  mode: 'build-runtime-base' | 'expect-index-missing' | 'expect-ready';
 } {
   let image = '';
   let mode:
     | 'build-runtime-base'
-    | 'expect-not-ready'
+    | 'expect-index-missing'
     | 'expect-ready'
     | undefined;
   for (let index = 0; index < argv.length; index += 1) {
@@ -827,9 +809,9 @@ export function parseContainerSmokeArguments(argv: readonly string[]): {
     } else if (argument === '--build-runtime-base') {
       if (mode) fail('container command accepts exactly one mode');
       mode = 'build-runtime-base';
-    } else if (argument === '--expect-not-ready') {
+    } else if (argument === '--expect-index-missing') {
       if (mode) fail('container command accepts exactly one mode');
-      mode = 'expect-not-ready';
+      mode = 'expect-index-missing';
     } else if (argument === '--expect-ready') {
       if (mode) fail('container command accepts exactly one mode');
       mode = 'expect-ready';
@@ -855,7 +837,7 @@ async function main(): Promise<void> {
   }
   await smokeRuntime(
     arguments_.image,
-    arguments_.mode === 'expect-ready' ? 'ready' : 'not-ready',
+    arguments_.mode === 'expect-ready' ? 'ready' : 'index-missing',
   );
 }
 

@@ -47,7 +47,7 @@
 
 | 脚本 | npm 入口 | 外部调用 | 写盘 | 边界与保留依据 |
 |---|---|---|---|---|
-| `container-smoke.ts` | `npm run container:build:runtime-base` / `npm run container:smoke:runtime-base` | Docker daemon（Docker 后台服务）和构建时使用的官方镜像仓库 | 只创建固定名称的本地测试镜像、随机名称的临时容器和系统临时目录 | 构建入口只复制 Git 跟踪文件与本 Task（任务）新增的容器文件到临时 context（构建上下文），排除工作区 ignored artifacts（被忽略产物）；冒烟入口以禁网、只读根文件系统和受限 `/tmp` 启动真实 `runtime-base` stage（运行时基础阶段），验证无索引时 `index_missing`，随后审计 uid/gid、文件和工具边界。不会调用模型或构建索引。 |
+| `container-smoke.ts` | `npm run container:build:runtime-base` / `npm run container:smoke:runtime-base` | Docker daemon（Docker 后台服务）和构建时使用的官方镜像仓库 | 只创建固定名称的本地测试镜像、随机名称的临时容器和系统临时目录 | 构建入口只复制 Git 跟踪文件与本 Task（任务）新增的容器文件到临时 context（构建上下文），排除工作区 ignored artifacts（被忽略产物）；冒烟入口以禁网、只读根文件系统和受限 `/tmp` 启动真实 `runtime-base` stage（运行时基础阶段），只请求 live/ready（存活 / 就绪）健康路由并精确验证无索引时 `index_missing`，随后审计 uid/gid、文件和工具边界。不会请求业务路由、注入模型密钥、调用模型或构建索引。 |
 
 ## 稳定写入与人工审核脚本
 
