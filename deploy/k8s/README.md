@@ -1,9 +1,9 @@
-状态：Task 4-7（任务 4-7）的既有生产实施证据保持不变。Task 16-17（任务 16-17）的公开体验、应用内 GitHub OAuth 2.0（GitHub 开放授权 2.0）、三态体验控制及持久额度与费用门禁候选已完成本地实现和审核；本目录只保存候选清单，尚未发布、部署或修改生产。
+状态：Task 4-7（任务 4-7）的既有生产实施证据保持不变。Task 16-17（任务 16-17）的三态体验控制、持久额度与费用门禁、公开入口及短期公网 IP 证书已完成生产非模型验收；GitHub OAuth 2.0（GitHub 开放授权 2.0）真实 callback（回调）因固定依赖的 3.5 秒出站超时而不稳定。本地修复候选已把该请求超时显式设为 15 秒并通过测试、类型检查和生产构建，但尚未发布、部署或完成生产复验，模型开关仍关闭。
 用途：定义生产 Kubernetes（容器编排系统）固定非敏感资源、应用模板及其审核和回退边界。
 
 # K3s 生产资源边界
 
-2026-07-27 至 2026-07-28 已完成既有私有生产基线与 `v0.1.1` 部署、回滚、恢复及节点重启验证；当前固定单副本 Deployment/Pod（工作负载 / 容器组）稳定运行 `v0.1.1`。Task 16-17（任务 16-17）候选包含入口、身份和控制库，但当前生产仍没有 Ingress（入口），公网 80/443/6443 不可达。
+2026-07-27 至 2026-07-28 已完成既有私有生产基线与 `v0.1.1` 部署、回滚、恢复及节点重启验证；2026-07-31 已发布并部署 `v0.2.0`，随后在保持同一镜像根摘要的前提下接入生产认证 Secret（密钥）、控制库 PVC（持久卷声明）和固定应用模板。当前生产通过 Traefik IngressRoute（入口路由）公开唯一基础路径 `/k8s-yaml-assistant`，使用绑定 `120.46.57.214` 的 Let’s Encrypt（证书颁发机构）短期证书；公网 80 只服务 ACME HTTP-01（自动证书管理环境 HTTP 控制权校验），公网 443 服务应用。
 
 同日已把 GitHub Actions runner `v2.336.0`（GitHub 自动化流水线运行器版本 2.336.0）安装并注册为 `huawei-k3s-prod-1`。首次真实隔离验证发现旧 drop-in（附加配置）的 `ReadWritePaths` 会遮蔽工作/诊断目录的有界 tmpfs（内存文件系统），且 `RuntimeDirectory`（运行时目录）最终把适配器运行时目录交给服务账号；首次修正又证明 `ExecStartPre`（启动前命令）无法修改下一执行阶段的私有挂载。最终配置由 tmpfs 挂载直接使用固定 `UID 996 / GID 988`（用户 / 组数字标识），已通过真实启动、写入和第二次服务重启验证。当前服务为 `active/enabled`（运行中 / 开机自启），GitHub 状态在线空闲。
 
@@ -37,15 +37,15 @@
 | `bootstrap/network-policy.yaml` | 限制应用入站，并只显式放行 DNS（域名系统）和公网 IPv4 的 443/TCP 出站 | `k8s-yaml-assistant-bootstrap` |
 | `app/deployment-template.yaml` | 固定应用的副本、资源、安全上下文、探针、卷和凭据引用，只允许部署适配器替换镜像摘要 | `k8s-yaml-assistant-deployer` |
 | `access/middlewares.yaml` / `access/routes.yaml` | 由 Traefik（入口控制器）直接暴露唯一语义化基础路径，并限制请求体、速率和并发 | Task 16（任务 16）入口实施 |
-| `tls/` | 固定公网 IP 证书签发、自动续期和唯一默认 TLSStore（传输层安全证书仓库）候选 | Task 16（任务 16）入口实施 |
+| `tls/` | 固定公网 IP 证书签发、自动续期和唯一默认 TLSStore（传输层安全证书仓库） | Task 16（任务 16）入口实施 |
 
-bootstrap（引导配置）只管理不随应用版本变化的固定资源。应用版本只能由 root-owned adapter（超级用户所有的适配器）把模板中的唯一镜像标记替换成 `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:<64-hex>` 后应用。入口和证书是独立候选资源，不由镜像替换适配器隐式修改。
+bootstrap（引导配置）只管理不随应用版本变化的固定资源。应用版本只能由 root-owned adapter（超级用户所有的适配器）把模板中的唯一镜像标记替换成 `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:<64-hex>` 后应用。入口和证书作为独立资源由 `k8s-yaml-assistant-public-entry` 与固定 cert-manager（证书管理器）安装字段分别管理，不由镜像替换适配器隐式修改。
 
-应用内 NextAuth.js（身份认证库）直接处理 GitHub 登录，任何有效 GitHub 用户均可登录；只有固定数字 GitHub 用户编号可进入 `/k8s-yaml-assistant/admin`。匿名浏览器使用服务端签名 Cookie（浏览器标识）获得 30 天 7 点体验包，登录后获得独立每日额度，`check` 不扣产品点数；清除 Cookie 可以重置匿名身份，因此该机制不作为机器人防护。模型能力由持久控制库的 `normal | interview | sleep`、主体点数、全局费用和最高优先级 `MODEL_ACCESS_ENABLED` 共同决定；协议值 `interview` 的页面名称为“开放展示模式”。首次配置固定 `MODEL_ACCESS_ENABLED=false`，新建控制库固定为 `sleep`，公开前必须分别验证匿名体验、登录、管理员身份和模型开关。
+应用内 NextAuth.js（身份认证库）直接处理 GitHub 登录，任何有效 GitHub 用户均可登录；只有固定数字 GitHub 用户编号可进入 `/k8s-yaml-assistant/admin`。匿名浏览器使用服务端签名 Cookie（浏览器标识）获得 30 天 7 点体验包，登录后获得独立每日额度，`check` 不扣产品点数；清除 Cookie 可以重置匿名身份，因此该机制不作为机器人防护。模型能力由持久控制库的 `normal | interview | sleep`、主体点数、全局费用和最高优先级 `MODEL_ACCESS_ENABLED` 共同决定；协议值 `interview` 的页面名称为“开放展示模式”。生产首次配置固定 `MODEL_ACCESS_ENABLED=false`，新建控制库固定为 `sleep`；匿名页面和已有登录会话下的管理员读取通过，本地候选已把 OAuth token exchange（开放授权令牌交换）超时从依赖默认的 3.5 秒显式放宽为 15 秒，仍须在新版本发布和部署后重新验收真实 GitHub callback（开放授权回调）。任何发布、部署、模型开放或调用仍需另行授权。
 
 ## Secret 职责与轮换
 
-仓库只固定引用且不保存 Secret（密钥）值；前三项已存在于生产，后一项仅为 Task 16（任务 16）候选引用：
+仓库只固定引用且不保存 Secret（密钥）值；以下四项均已存在于生产：
 
 | 名称 | 类型与 key | 职责 |
 | --- | --- | --- |
@@ -64,15 +64,27 @@ bootstrap（引导配置）只管理不随应用版本变化的固定资源。�
 
 `k8s-yaml-assistant-control` 只挂载到 `/app/data/control`，应用在卷内创建自己持有的 `0700` 私有子目录，并把 SQLite（嵌入式数据库）放在 `/app/data/control/private/control.sqlite3`，不修改可能由 `root` 持有的挂载根目录权限。数据库只保存模式、匿名化额度、费用账本和请求预留状态，不保存用户名、网络地址、YAML、问题、回答或 OAuth（开放授权）令牌。新库从 `sleep` 开始，账本保留 35 天。
 
+2026-07-31 的生产验收确认控制 PVC（持久卷声明）为 `Bound`（已绑定），卷内 `private` 目录为 `10001:10001 0700`，SQLite（嵌入式数据库）主文件、WAL（预写日志）和共享内存文件均为 `10001:10001 0600` 且不是符号链接。首次 HMAC（带密钥安全哈希）输入误用 Base64URL（网址安全型基础六十四编码），实际文件不存在证明控制库初始化失败；该键按 32 字节规范 Base64（基础六十四编码）契约轮换并滚动替换 Pod（容器组）后，数据库真实创建且模式为 `sleep`。验收期间 `MODEL_ACCESS_ENABLED=false`，只执行 live/ready（存活 / 就绪）、体验状态、认证提供器、OAuth（开放授权）回调尝试和 `/api/check` 非模型请求；控制库仍为 `sleep`，请求账本为 `0`，没有调用模型、重建索引或重启节点。
+
 索引固定在镜像 `/app/data/index` 中，依靠只读根文件系统读取，不挂载 PVC（持久卷声明），Pod（容器组）重启也不会重建索引。`/tmp` 保持既有上限为 64 MiB 的 emptyDir（临时卷），作为只读根文件系统下唯一有界可写临时路径。不得把索引、原始 YAML、模型回答或 Secret（密钥）写入 observation/control PVC（观测／控制持久卷声明）。
 
 K3s local-path（K3s 本地路径）卷与当前单节点处于同一节点故障域：PVC（持久卷声明）可以跨 Pod（容器组）重启保留，但不能抵御节点或系统盘故障。控制库不做异地备份；节点磁盘完全损坏时允许丢失这些低价值控制状态，历史额度和费用累计也会在新库内从零开始。新库从 `sleep` 开始，管理员必须显式恢复 `normal` 或限时开放展示后才会重新产生模型费用。Phase 3（阶段 3）必须验证 `fsGroup=10001` 的写权限、磁盘增长和滚动更新期间的单写入端不变量。
 
 ## 网络策略的实际能力
 
-应用只接受 `kube-system` 中带 Traefik（入口控制器）标签的 Pod（容器组）访问 3000/TCP；候选 IngressRoute（入口路由）只匹配 `/k8s-yaml-assistant`，并直接转发到应用 Service（服务）。根健康路径仅供集群探针使用，新镜像以单次同主机 HTTP `307` 临时重定向连接基础路径健康处理器；kubelet（节点代理）按官方契约跟随同主机重定向，入口仍不匹配根健康路径。出站只显式放行 CoreDNS（集群域名服务）的 53/UDP、53/TCP，以及排除私网和链路本地地址后的公网 IPv4 443/TCP。
+应用只接受 `kube-system` 中带 Traefik（入口控制器）标签的 Pod（容器组）访问 3000/TCP；IngressRoute（入口路由）只匹配 `/k8s-yaml-assistant`，并直接转发到应用 Service（服务）。根健康路径仅供集群探针使用，新镜像以单次同主机 HTTP `307` 临时重定向连接基础路径健康处理器；kubelet（节点代理）按官方契约跟随同主机重定向，入口仍不匹配根健康路径。出站只显式放行 CoreDNS（集群域名服务）的 53/UDP、53/TCP，以及排除私网和链路本地地址后的公网 IPv4 443/TCP。
 
 标准 NetworkPolicy（网络策略）不能按域名建立可靠 allowlist（允许名单）；当前 443 规则比 DeepSeek/Voyage 两个供应商域名更宽。它也不能保证阻止到所在节点的流量，策略是否实际执行取决于 K3s（轻量 Kubernetes）的网络插件。后续若必须按域名约束，应单独审核 egress proxy（出站代理），不能把当前规则描述成域名隔离。
+
+## Task 16-17（任务 16-17）公网入口与真实身份非敏感实施证据
+
+2026-07-31 经分阶段生产授权完成以下验收：
+
+- cert-manager（证书管理器）固定为 `v1.21.0`，官方静态清单 SHA-256（安全哈希算法）为 `6e499c3f1ab356abe79a7853911f80cb09c213885bfdf81092fdff142ba63c4a`；controller、cainjector、webhook（控制器、证书注入器、回调服务）均为 `1/1` 可用且零重启，六个 CRD（自定义资源定义）均已建立，回调 CA（证书颁发机构）注入完成。
+- 公网 80 开放后，Let’s Encrypt staging（预发布证书颁发机构）的 `CertificateRequest`（证书请求）为 `Ready=True`、`Order`（订单）为 `valid`，证书 IP SAN（主题备用名称）精确为 `120.46.57.214`。随后 production（生产）证书由 `YR1` 签发，生效时间为 `2026-07-31T13:40:56Z`、到期时间为 `2026-08-07T05:40:55Z`、自动续期时间为 `2026-08-05T00:52:55Z`。
+- 唯一默认 TLSStore（传输层安全证书仓库）、每分钟 120 次且突发 40 次的速率限制、16 个并发限制、256 KiB 请求体限制和唯一语义路径 IngressRoute（入口路由）已应用。公网 HTTPS（加密超文本传输协议）应用路径返回 `200` 且证书校验成功，HTTPS 根路径和明文 HTTP 应用路径均返回 `404`；未登录管理接口返回 `401`。
+- 生产 Auth.js（认证框架）提供器公布的 callback（回调）精确为 `https://120.46.57.214/k8s-yaml-assistant/api/auth/callback/github`，页面登录按钮也会直接进入 GitHub 授权链。已有会话曾显示 `kkxiaoa` 管理员入口并成功读取 `sleep` 状态，但真实回调重复尝试中有 5 次在 OAuth token exchange（开放授权令牌交换）阶段触发 `outgoing request timed out after 3500ms`；因此不能据已有会话宣称完整回调验收成功。五个认证环境变量均存在、长度符合当前契约且无首尾空白，Pod（容器组）对 `github.com` 和 `api.github.com` 的无凭据 HEAD（仅读取响应头）请求均为 `200`，阻断已定位为固定 `openid-client 5.7.1`（开放身份客户端 5.7.1 版）的 3.5 秒默认出站超时。本地修复候选通过 Provider（身份提供器）的既有 `httpOptions` 契约把超时固定为 15 秒，未增加重试、代理、环境变量或平行抽象；定向测试、完整测试、类型检查和生产构建均通过。该候选尚未进入生产，OAuth（开放授权）尝试未写入控制库身份或令牌，请求账本仍为 `0`。
+- 应用和 cert-manager（证书管理器）全部 Pod（容器组）保持零重启，生产镜像摘要保持 `sha256:ebfdefd9c2e057891eeb3b4b70cd3d823e7b75b67b8d62f9227bc128931cdaba`。本次没有模型调用、索引重建、baseline（基线）晋升或节点重启；`MODEL_ACCESS_ENABLED=false` 和 `sleep` 继续构成两层独立费用关闭边界。
 
 ## Task 4 试运行与核对
 

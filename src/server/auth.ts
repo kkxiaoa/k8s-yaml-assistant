@@ -72,6 +72,7 @@ export function createAuthOptions(
       GitHubProvider<GitHubIdentityProfile>({
         clientId: environment.GITHUB_ID ?? '',
         clientSecret: environment.GITHUB_SECRET ?? '',
+        httpOptions: { timeout: 15_000 },
         authorization: {
           url: 'https://github.com/login/oauth/authorize',
           params: { scope: 'read:user' },
