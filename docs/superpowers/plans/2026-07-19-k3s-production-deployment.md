@@ -760,6 +760,8 @@ git diff --check
 
 2026-07-28 发布阻断边界复盘：`v0.1.1` Draft Release（草稿发布版本）由 Release Please（发布自动化工具）生成只有真实 `Bug Fixes`（问题修复）的正文，发布证据流水线却要求仓库自定义且无稳定生产者的单一 `Known limitations`（已知限制）章节，因此在任何镜像构建、扫描、签名或上传前误阻断。修复删除 `CHANGELOG.md` 和发布说明的章节、占位词、路径、密钥形态及其他启发式文本门禁；`CHANGELOG.md` 只绑定经审核文件哈希，发布说明只要求非空并绑定哈希，发布链继续严格校验 tag/source/digest/signature/artifact identity（标签 / 源码 / 摘要 / 签名 / 制品身份）。Draft Release（草稿发布版本）的 `name/body/isDraft/isPrerelease`（名称 / 正文 / 草稿状态 / 预发布状态）等无直接消费者返回值同步收敛。Release（发布版本）、Deployment（部署）和 Rollback（回滚）历史改用 GitHub API pagination（GitHub 接口分页）读取完整清单，不再把 100 条单页上限当成总量上限；输入仍受现有文件字节和任务超时预算约束。真实 GitHub CLI（GitHub 命令行工具）验证还确认当前版本不能组合 `--slurp` 与内置 `--jq`，因此由 `gh api --paginate --slurp` 完成分页聚合，再交给独立 `jq` 转换。既有 `v0.1.1` 草稿仍指向包含旧校验器的精确源码提交，修复合入后需一次性采用经审核的恢复步骤绕过旧门禁，再重跑该草稿；本次本地修复不编辑草稿、不触发流水线、不发布或部署。
 
+2026-07-31 候选容器门禁复盘：Release Pull Request #21（发布合并请求 #21）合并后，Release lifecycle（发布生命周期）运行 `30601953560` 创建绑定源提交 `60eb28b1483f8cc09002b6a762bc39b90e133fec` 的 `v0.2.0` Draft Release（草稿发布版本）并构建候选镜像摘要 `sha256:a6782265141576cd0d5790a8554d119772e1c950690b0097897dd07efd1de187`。候选已经通过精确 `200/ready`，但随后同一 smoke runner（冒烟运行器）又用空 `/api/ask` 期望 `400`；独立的 `MODEL_ACCESS_ENABLED` 总开关先返回 `503`，导致业务准入状态误阻断镜像交付。门禁现删除这条重复业务请求及其伪模型密钥，只保留健康响应、索引状态、非 root（非超级用户）身份、只读文件系统、禁网、受限临时卷、观测目录权限和运行时内容边界。无索引入口改名为精确的 `--expect-index-missing`，不再用泛化的 `--expect-not-ready`。320/320 项完整测试、TypeScript（类型检查）、Next.js（应用框架）构建和差异格式检查通过；真实无索引镜像返回 `200/live` 与 `503/index_missing`，本地已有的 `v0.1.1` 含索引不可变镜像返回 `200/live` 与 `200/ready`，两者均为 `provider network=none`。本轮没有业务请求、模型调用、索引重建、GHCR push（镜像推送）、草稿编辑、Publish（正式发布）或部署。
+
 - [ ] **Step 6（步骤 6）：执行首次独立索引和候选发布**
 
 外部执行前必须核对：
