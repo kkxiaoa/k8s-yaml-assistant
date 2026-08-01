@@ -2,6 +2,7 @@
 
 > 状态：已通过 review（审核），作为 implementation plan（实施计划）的设计依据；2026-07-20 审核批准使用系统字体栈替代 IBM Plex 自带资产，2026-07-23 审核批准六项发布证据和 Cosign（签名与证明工具）无密钥证明方案，2026-07-24 审核批准 Release Please（发布自动化工具）单一版本所有权与独立索引产物流程，2026-07-26 审核批准把候选镜像 `HIGH/CRITICAL`（高危 / 严重）漏洞扫描前移到 Pull Request（合并请求）门禁，2026-07-27 审核批准发布阶段以单次 Trivy（容器漏洞扫描）完整报告同时承担证据与失败关闭门禁；同日 `v0.1.0` 已通过人工 Publish（正式发布）和 Attempt 5（第 5 次尝试）完成首次私有部署。2026-07-28 Task 15 Step 2（任务 15 步骤 2）依据生产 Traefik（入口控制器）和 oauth2-proxy（认证代理）实际版本证据，把受保护路由从 ForwardAuth（前置认证）修订为 oauth2-proxy reverse proxy（认证代理反向代理）；Step 3/5/6/7（步骤 3/5/6/7）的应用授权、最小隐私提示、本地验证和 Task 16（任务 16）交接已经通过用户 review（审核）。Step 4（步骤 4）的精确输入 token（令牌）前置上限和供应商费用硬额度证据作为显式延期风险继续未勾选；该审核不构成发布或部署授权。同日用户决定当前不注册域名，Task 16（任务 16）入口改为 `https://120.46.57.214/k8s-yaml-assistant` 和公网 IP 短期证书；该修订及 `set-access-mode`（设置访问模式）扩展设计已通过独立 review（审核），Step 2（步骤 2）的本地反例、候选实现和 review（审核）修正已经完成，固定 GitHub scope（GitHub 授权范围）为 `user:email read:org`，域名只保留为未来单独变更。生产安装、证书签发、真实 GitHub OAuth callback（GitHub 开放授权回调）、安全组和集群写入尚未执行。
 > 2026-07-31 修订：SWR（华为云容器镜像服务）企业版可用前，应用或回滚 Draft Release（草稿发布版本）通过对应证据核对后，使用仓库脚本完成精确摘要预热；预热成功后才可另行确认 Publish（正式发布），失败时保留草稿并停止。
+> 2026-08-01 修订：公开应用路由不使用 Traefik Buffering（Traefik 缓冲）中间件；固定版本会同时缓冲完整响应并破坏 Ask SSE（询问服务器发送事件）逐段输出。请求体字节上限由应用统一执行，入口继续保留速率和并发限制。
 > 用途：定义当前项目在华为云单机 K3s（轻量 Kubernetes）上的生产部署架构、实施边界和验收门禁。
 > 本文维护设计边界；实际实施状态和审核停止点以对应实施计划为准。
 
@@ -824,7 +825,7 @@ Interview Pass（面试临时通行证）保留为后续明确需求，而不是
 
 无论 ACCESS_MODE（访问模式）为何值，付费模型调用都必须具备：
 
-1. body limit（请求体上限）：Traefik（入口控制器）先限制总字节，应用再做流式有界读取和 runtime schema decode（运行时模式解码）。全局硬上限不得超过既有 observation design（观测设计）的 256 KiB；不同路由可更低。Content-Length 缺失或 chunked transfer（分块传输）也必须受限，超限返回 413。入口实现参考：[Traefik Buffering 文档](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/buffering/)。
+1. body limit（请求体上限）：应用在统一请求边界执行流式有界读取和 runtime schema decode（运行时模式解码）。全局硬上限不得超过既有 observation design（观测设计）的 256 KiB；不同路由可更低。Content-Length 缺失或 chunked transfer（分块传输）也必须受限，超限返回 413。公开路由不得挂载会同时缓冲完整响应的 Traefik Buffering（Traefik 缓冲）中间件，以保持 Ask SSE（询问服务器发送事件）逐段输出。
 2. edge rate limit（入口速率限制）：认证前按可信来源 IP（互联网协议地址）限制登录、Turnstile（人机验证）和通行证兑换；会话建立后按受控主体标识限制模型路由。Traefik（入口控制器）负责第一层，应用负责角色、路由权重和费用语义。只能信任 Traefik（入口控制器）覆盖后的代理头，不能直接信任客户端 X-Forwarded-For。参考：[Traefik RateLimit 文档](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)。
 3. concurrency limit（并发限制）：全局和单主体并发必须显式受限；真实值根据 8 GiB 内存、上游配额和延迟验证，匿名与 Interview Pass（面试临时通行证）的角色值等待计量设计。
 4. endpoint quota（端点配额）：/api/check 是本地校验，可使用独立速率限制；Ask/Generate/Fix（询问 / 生成 / 修复）的 token/cost（令牌 / 成本）权重、累计额度和角色差异由后续计量设计决定，不能用一个通用每分钟次数冒充费用控制。
@@ -1454,7 +1455,6 @@ sudo journalctl -u k3s --since "1 hour ago"
 - [Traefik TLSStore（传输层安全证书仓库）](https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/crd/tls/tlsstore/)
 - [Traefik ForwardAuth（Traefik 前置认证）](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/forwardauth/)
 - [Traefik RateLimit（Traefik 速率限制）](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
-- [Traefik Buffering（Traefik 请求缓冲与大小限制）](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/buffering/)
 - [oauth2-proxy 配置](https://oauth2-proxy.github.io/oauth2-proxy/configuration/overview/)
 - [Cloudflare Turnstile（Cloudflare 人机验证服务）概览](https://developers.cloudflare.com/turnstile/)
 - [Cloudflare Turnstile（Cloudflare 人机验证服务）接入与服务端校验](https://developers.cloudflare.com/turnstile/get-started/)
