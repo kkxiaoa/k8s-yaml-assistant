@@ -36,7 +36,7 @@
 | `bootstrap/control-pvc.yaml` | 为模式、额度、费用与请求预留状态申请独立 1 GiB local-path PVC（本地路径持久卷声明） | `k8s-yaml-assistant-bootstrap` |
 | `bootstrap/network-policy.yaml` | 限制应用入站，并只显式放行 DNS（域名系统）和公网 IPv4 的 443/TCP 出站 | `k8s-yaml-assistant-bootstrap` |
 | `app/deployment-template.yaml` | 固定应用的副本、资源、安全上下文、探针、卷和凭据引用，只允许部署适配器替换镜像摘要 | `k8s-yaml-assistant-deployer` |
-| `access/middlewares.yaml` / `access/routes.yaml` | 由 Traefik（入口控制器）直接暴露唯一语义化基础路径，并限制请求体、速率和并发 | Task 16（任务 16）入口实施 |
+| `access/middlewares.yaml` / `access/routes.yaml` / `access/http-redirect.yaml` | 由 Traefik（入口控制器）直接暴露唯一语义化基础路径，将该路径的明文 HTTP（超文本传输协议）请求重定向到 HTTPS（加密超文本传输协议），并限制请求体、速率和并发 | Task 16（任务 16）入口实施 |
 | `tls/` | 固定公网 IP 证书签发、自动续期和唯一默认 TLSStore（传输层安全证书仓库） | Task 16（任务 16）入口实施 |
 
 bootstrap（引导配置）只管理不随应用版本变化的固定资源。应用版本只能由 root-owned adapter（超级用户所有的适配器）把模板中的唯一镜像标记替换成 `ghcr.io/kkxiaoa/k8s-yaml-assistant@sha256:<64-hex>` 后应用。入口和证书作为独立资源由 `k8s-yaml-assistant-public-entry` 与固定 cert-manager（证书管理器）安装字段分别管理，不由镜像替换适配器隐式修改。
@@ -72,7 +72,7 @@ K3s local-path（K3s 本地路径）卷与当前单节点处于同一节点故�
 
 ## 网络策略的实际能力
 
-应用只接受 `kube-system` 中带 Traefik（入口控制器）标签的 Pod（容器组）访问 3000/TCP；IngressRoute（入口路由）只匹配 `/k8s-yaml-assistant`，并直接转发到应用 Service（服务）。根健康路径仅供集群探针使用，新镜像以单次同主机 HTTP `307` 临时重定向连接基础路径健康处理器；kubelet（节点代理）按官方契约跟随同主机重定向，入口仍不匹配根健康路径。出站只显式放行 CoreDNS（集群域名服务）的 53/UDP、53/TCP，以及排除私网和链路本地地址后的公网 IPv4 443/TCP。
+应用只接受 `kube-system` 中带 Traefik（入口控制器）标签的 Pod（容器组）访问 3000/TCP；HTTPS IngressRoute（加密入口路由）只匹配 `/k8s-yaml-assistant` 并转发到应用 Service（服务），HTTP IngressRoute（明文入口路由）只匹配同一应用路径并在转发前重定向到 HTTPS（加密超文本传输协议）。两条入口均不匹配根路径或 `/.well-known/acme-challenge/`；根健康路径仅供集群探针使用，新镜像以单次同主机 HTTP `307` 临时重定向连接基础路径健康处理器，kubelet（节点代理）按官方契约跟随同主机重定向。出站只显式放行 CoreDNS（集群域名服务）的 53/UDP、53/TCP，以及排除私网和链路本地地址后的公网 IPv4 443/TCP。
 
 标准 NetworkPolicy（网络策略）不能按域名建立可靠 allowlist（允许名单）；当前 443 规则比 DeepSeek/Voyage 两个供应商域名更宽。它也不能保证阻止到所在节点的流量，策略是否实际执行取决于 K3s（轻量 Kubernetes）的网络插件。后续若必须按域名约束，应单独审核 egress proxy（出站代理），不能把当前规则描述成域名隔离。
 

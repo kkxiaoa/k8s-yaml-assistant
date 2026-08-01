@@ -26,3 +26,13 @@ metadata:
 spec:
   buffering:
     maxRequestBodyBytes: 262144
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: k8s-yaml-assistant-https-redirect
+  namespace: k8s-yaml-assistant-prod
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true

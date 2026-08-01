@@ -27,6 +27,7 @@ const configMapPath = join(bootstrapDir, 'config-map.yaml');
 const controlClaimPath = join(bootstrapDir, 'control-pvc.yaml');
 const networkPolicyPath = join(bootstrapDir, 'network-policy.yaml');
 const accessMiddlewarePath = join(accessDir, 'middlewares.yaml');
+const httpRedirectRoutePath = join(accessDir, 'http-redirect.yaml');
 const accessRoutePath = join(accessDir, 'routes.yaml');
 const productionCertificatePath = join(tlsDir, 'certificate.yaml');
 const tlsStorePath = join(tlsDir, 'tls-store.yaml');
@@ -1308,7 +1309,11 @@ test('the public experience manifests preserve the risky deployment relationship
   const accessFiles = filesUnder(accessDir).map((path) =>
     path.slice(accessDir.length + 1),
   );
-  assert.deepEqual(accessFiles, ['middlewares.yaml', 'routes.yaml']);
+  assert.deepEqual(accessFiles, [
+    'http-redirect.yaml',
+    'middlewares.yaml',
+    'routes.yaml',
+  ]);
   const middlewares = parseYamlDocuments(
     readFileSync(accessMiddlewarePath, 'utf8'),
     accessMiddlewarePath,
@@ -1321,6 +1326,7 @@ test('the public experience manifests preserve the risky deployment relationship
       'k8s-yaml-assistant-rate-limit',
       'k8s-yaml-assistant-inflight',
       'k8s-yaml-assistant-request-body',
+      'k8s-yaml-assistant-https-redirect',
     ],
   );
   assert.equal(
@@ -1347,9 +1353,18 @@ test('the public experience manifests preserve the risky deployment relationship
     ).maxRequestBodyBytes,
     262144,
   );
+  assert.deepEqual(
+    nestedRecord(
+      nestedRecord(middlewares[3]!, 'spec', 'redirect middleware'),
+      'redirectScheme',
+      'redirect middleware spec',
+    ),
+    { scheme: 'https', permanent: true },
+  );
 
   const route = readKubernetesResource(accessRoutePath).resource;
   const routeSpec = nestedRecord(route, 'spec', 'IngressRoute');
+  assert.deepEqual(routeSpec.entryPoints, ['websecure']);
   const routeRule = yamlRecord(
     yamlArray(routeSpec.routes, 'IngressRoute routes')[0],
     'IngressRoute rule',
@@ -1373,6 +1388,48 @@ test('the public experience manifests preserve the risky deployment relationship
   assert.equal(
     nestedRecord(routeSpec, 'tls', 'IngressRoute').secretName,
     'k8s-yaml-assistant-ip-tls',
+  );
+
+  const httpRedirectRoute = readKubernetesResource(
+    httpRedirectRoutePath,
+  ).resource;
+  assert.equal(
+    resourceMetadata(httpRedirectRoute, 'HTTP redirect IngressRoute').name,
+    'k8s-yaml-assistant-http-redirect',
+  );
+  const httpRedirectSpec = nestedRecord(
+    httpRedirectRoute,
+    'spec',
+    'HTTP redirect IngressRoute',
+  );
+  assert.deepEqual(httpRedirectSpec.entryPoints, ['web']);
+  assert.equal(httpRedirectSpec.tls, undefined);
+  const httpRedirectRules = yamlArray(
+    httpRedirectSpec.routes,
+    'HTTP redirect IngressRoute routes',
+  );
+  assert.equal(httpRedirectRules.length, 1);
+  const httpRedirectRule = yamlRecord(
+    httpRedirectRules[0],
+    'HTTP redirect IngressRoute rule',
+  );
+  assert.equal(
+    httpRedirectRule.match,
+    'Path(`/k8s-yaml-assistant`) || PathPrefix(`/k8s-yaml-assistant/`)',
+  );
+  assert.deepEqual(
+    yamlArray(
+      httpRedirectRule.middlewares,
+      'HTTP redirect IngressRoute middlewares',
+    ),
+    [{ name: 'k8s-yaml-assistant-https-redirect' }],
+  );
+  assert.deepEqual(
+    yamlArray(
+      httpRedirectRule.services,
+      'HTTP redirect IngressRoute services',
+    ),
+    [{ name: 'k8s-yaml-assistant', port: 80 }],
   );
 
   const certificate = readKubernetesResource(
