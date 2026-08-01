@@ -12,13 +12,20 @@ import {
   type AnonymousIdentity,
 } from './anonymous-identity';
 import type { AuthenticatedIdentity } from './auth';
-import { getAuthenticatedIdentity } from './auth';
+import {
+  getAuthenticatedIdentity,
+  getStrictAuthenticatedIdentity,
+} from './auth';
 import type { ModelRoute } from './experience-control';
 import type { ModelUsageCollector } from './provider-usage';
 
 export type ModelActor =
   | { kind: 'authenticated'; identity: AuthenticatedIdentity }
   | { kind: 'anonymous'; identity: AnonymousIdentity };
+
+type ActorResolution =
+  | { ok: true; actor: ModelActor }
+  | { ok: false; response: Response };
 
 export function actorQuotaSubject(actor: ModelActor): QuotaSubject {
   return actor.kind === 'authenticated'
@@ -36,17 +43,30 @@ export function actorLimiterSubject(actor: ModelActor): string {
     : `anonymous:${actor.identity.id}`;
 }
 
-export async function resolveModelActor(): Promise<
-  | { ok: true; actor: ModelActor }
-  | { ok: false; response: Response }
-> {
+function unavailableActor(): ActorResolution {
+  return {
+    ok: false,
+    response: Response.json(
+      { error: { code: 'control_state_unavailable' } },
+      {
+        status: 503,
+        headers: { 'Cache-Control': 'no-store' },
+      },
+    ),
+  };
+}
+
+async function resolveActor(
+  authenticatedIdentity: () => Promise<AuthenticatedIdentity | null>,
+  fallbackToAnonymous: boolean,
+): Promise<ActorResolution> {
   try {
-    const identity = await getAuthenticatedIdentity();
+    const identity = await authenticatedIdentity();
     if (identity !== null) {
       return { ok: true, actor: { kind: 'authenticated', identity } };
     }
   } catch {
-    // Anonymous use remains available when the optional login path is unavailable.
+    if (!fallbackToAnonymous) return unavailableActor();
   }
   try {
     return {
@@ -54,17 +74,16 @@ export async function resolveModelActor(): Promise<
       actor: { kind: 'anonymous', identity: await getAnonymousIdentity() },
     };
   } catch {
-    return {
-      ok: false,
-      response: Response.json(
-        { error: { code: 'control_state_unavailable' } },
-        {
-          status: 503,
-          headers: { 'Cache-Control': 'no-store' },
-        },
-      ),
-    };
+    return unavailableActor();
   }
+}
+
+export function resolveModelActor(): Promise<ActorResolution> {
+  return resolveActor(getAuthenticatedIdentity, true);
+}
+
+export function resolveFeedbackActor(): Promise<ActorResolution> {
+  return resolveActor(getStrictAuthenticatedIdentity, false);
 }
 
 function errorResponse(

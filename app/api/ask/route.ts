@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import type Anthropic from '@anthropic-ai/sdk';
 import { decodeServingObservationConfig } from '@/observability/config';
@@ -156,6 +155,7 @@ export async function POST(req: Request): Promise<Response> {
     admission.release();
     return reserved.response;
   }
+  const requestId = reserved.reservation.requestId;
   const usage = new ModelUsageCollector();
   let accountingFinished = false;
   const finishAccounting = (outcome: 'success' | 'failure'): void => {
@@ -174,7 +174,6 @@ export async function POST(req: Request): Promise<Response> {
   try {
     try {
       const { getClient, prepareAsk } = await import('@/server/pipeline');
-      const requestId = randomUUID();
       prepared = await prepareAsk({
         question,
         editorContext,
@@ -219,7 +218,9 @@ export async function POST(req: Request): Promise<Response> {
             finalMessage.usage?.cache_read_input_tokens,
           );
           finishAccounting('success');
-          controller.enqueue(sse('done', {}));
+          controller.enqueue(
+            sse('done', { requestId }),
+          );
           closed = true;
           controller.close();
         } catch (error) {

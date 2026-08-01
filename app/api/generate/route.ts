@@ -61,7 +61,12 @@ export async function POST(req: Request): Promise<Response> {
       usage,
       'success',
     );
-    return NextResponse.json({ yaml, rounds, diagnostics });
+    return NextResponse.json({
+      yaml,
+      rounds,
+      diagnostics,
+      requestId: yaml === null ? null : reserved.reservation.requestId,
+    });
   } catch (error) {
     finishModelRequest(
       reserved.store,

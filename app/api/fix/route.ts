@@ -61,7 +61,11 @@ export async function POST(req: Request): Promise<Response> {
       usage,
       'success',
     );
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      requestId:
+        result.yaml === null ? null : reserved.reservation.requestId,
+    });
   } catch (error) {
     finishModelRequest(
       reserved.store,

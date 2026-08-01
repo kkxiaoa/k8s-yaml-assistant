@@ -7,12 +7,10 @@ import {
   SIDEBAR_PANEL_HEADER,
   SIDEBAR_TEXTAREA,
 } from "./styles";
-import { ExampleHint } from './ExampleHint';
 import { Tooltip } from './Tooltip';
+import { ResponseFeedback } from './ResponseFeedback';
 import type { AskMode, SourceHit } from "../lib/api";
 import { sourceAuthorityLabel, sourceLabel } from "@/retrieval/source-policy";
-
-const QUESTION_EXAMPLE = '当前字段可以填写哪些值？';
 
 interface MarkdownNode {
   type: string;
@@ -165,6 +163,7 @@ interface Props {
   question: string;
   answer: string;
   sources: SourceHit[];
+  feedbackRequestId: string | null;
   asking: boolean;
   disabled: boolean;
   loginRequired: boolean;
@@ -179,6 +178,7 @@ export function AskPanel({
   question,
   answer,
   sources,
+  feedbackRequestId,
   asking,
   disabled,
   loginRequired,
@@ -228,12 +228,6 @@ export function AskPanel({
           placeholder="输入关于当前 YAML 的问题…"
           className={`min-h-24 resize-y ${SIDEBAR_TEXTAREA}`}
         />
-        <ExampleHint
-          applyLabel="将提问示例填入输入框"
-          onApply={() => onChange(QUESTION_EXAMPLE)}
-        >
-          {QUESTION_EXAMPLE}
-        </ExampleHint>
         <div className="mt-2">
           <Tooltip content={actionHint} align="start" describeChild>
             <button
@@ -293,6 +287,7 @@ export function AskPanel({
             </ul>
           </div>
         )}
+        <ResponseFeedback requestId={feedbackRequestId} route="ask" />
       </div>
     </div>
   );
