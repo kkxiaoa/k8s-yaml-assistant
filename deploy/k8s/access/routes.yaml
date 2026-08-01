@@ -13,7 +13,6 @@ spec:
       middlewares:
         - name: k8s-yaml-assistant-rate-limit
         - name: k8s-yaml-assistant-inflight
-        - name: k8s-yaml-assistant-request-body
       services:
         - name: k8s-yaml-assistant
           port: 80
