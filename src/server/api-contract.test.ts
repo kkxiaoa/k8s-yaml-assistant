@@ -4,7 +4,13 @@ import { POST as checkPost } from '../../app/api/check/route';
 import { readApiRequest } from './api-contract';
 import { GLOBAL_MAX_BODY_BYTES } from './request-body';
 
-type ApiRoute = 'adminExperience' | 'ask' | 'check' | 'generate' | 'fix';
+type ApiRoute =
+  | 'adminExperience'
+  | 'ask'
+  | 'check'
+  | 'feedback'
+  | 'generate'
+  | 'fix';
 
 const VALID_REQUESTS = {
   adminExperience: { mode: 'interview', durationHours: 4 },
@@ -21,6 +27,10 @@ const VALID_REQUESTS = {
     },
   },
   check: { yaml: 'apiVersion: v1\nkind: Pod' },
+  feedback: {
+    requestId: '11111111-1111-4111-8111-111111111111',
+    rating: 'good',
+  },
   generate: { requirement: '创建一个 nginx Deployment' },
   fix: {
     yaml: 'apiVersion: v1\nkind: Pod',
@@ -66,6 +76,40 @@ test('业务与管理路由接受严格合法输入且补齐显式默认值', as
   for (const route of Object.keys(VALID_REQUESTS) as ApiRoute[]) {
     assert.equal((await decodeOutcome(route, VALID_REQUESTS[route])).ok, true);
   }
+  assert.deepEqual(
+    await decodeOutcome('feedback', {
+      requestId: '11111111-1111-4111-8111-111111111111',
+      rating: 'bad',
+      reason: 'insufficient_evidence',
+    }),
+    {
+      ok: true,
+      value: {
+        requestId: '11111111-1111-4111-8111-111111111111',
+        rating: 'bad',
+        reason: 'insufficient_evidence',
+      },
+    },
+  );
+  assert.equal(
+    (
+      await decodeOutcome('feedback', {
+        requestId: '11111111-1111-4111-8111-111111111111',
+        rating: null,
+      })
+    ).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await decodeOutcome('feedback', {
+        requestId: '11111111-1111-4111-8111-111111111111',
+        rating: 'bad',
+        reason: 'unintended_changes',
+      })
+    ).ok,
+    true,
+  );
 });
 
 test('顶层和嵌套 unknown field 均被拒绝', async () => {
@@ -121,6 +165,45 @@ test('错误类型、空白必填值、非法 mode/context/errors 被拒绝', as
     ['fix', { yaml: 'kind: Pod', errors: 'invalid' }],
     ['fix', { yaml: 'kind: Pod', errors: [{ path: 1, message: 'x' }] }],
     ['fix', { yaml: 'kind: Pod', errors: [{ path: '', message: '   ' }] }],
+    ['feedback', { requestId: 'not-a-uuid', rating: 'good' }],
+    [
+      'feedback',
+      {
+        requestId: '11111111-1111-4111-8111-111111111111',
+        rating: 'useful',
+      },
+    ],
+    [
+      'feedback',
+      {
+        requestId: '11111111-1111-4111-8111-111111111111',
+        rating: 'bad',
+      },
+    ],
+    [
+      'feedback',
+      {
+        requestId: '11111111-1111-4111-8111-111111111111',
+        rating: 'good',
+        reason: 'incorrect_or_incomplete',
+      },
+    ],
+    [
+      'feedback',
+      {
+        requestId: '11111111-1111-4111-8111-111111111111',
+        rating: null,
+        reason: 'other',
+      },
+    ],
+    [
+      'feedback',
+      {
+        requestId: '11111111-1111-4111-8111-111111111111',
+        rating: 'bad',
+        reason: 'raw_text',
+      },
+    ],
     ['adminExperience', { mode: 'interview', durationHours: 2 }],
     ['adminExperience', { mode: 'sleep', durationHours: 4 }],
   ];
@@ -182,6 +265,7 @@ test('每条路由字节预算均为正整数且不超过全局 256 KiB', async 
     adminExperience: 1024,
     ask: 256 * 1024,
     check: 144 * 1024,
+    feedback: 1024,
     generate: 72 * 1024,
     fix: 256 * 1024,
   };

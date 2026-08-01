@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RESPONSE_FEEDBACK_REASONS } from './experience-control';
 import {
   GLOBAL_MAX_BODY_BYTES,
   readJsonBody,
@@ -63,6 +64,22 @@ const FixRequestSchema = z.strictObject({
   errors: ValidationErrorsSchema.default([]),
 });
 
+const ResponseFeedbackRequestSchema = z.discriminatedUnion('rating', [
+  z.strictObject({
+    requestId: z.uuid(),
+    rating: z.null(),
+  }),
+  z.strictObject({
+    requestId: z.uuid(),
+    rating: z.literal('good'),
+  }),
+  z.strictObject({
+    requestId: z.uuid(),
+    rating: z.literal('bad'),
+    reason: z.enum(RESPONSE_FEEDBACK_REASONS),
+  }),
+]);
+
 const AdminExperienceRequestSchema = z.discriminatedUnion('mode', [
   z.strictObject({ mode: z.literal('normal') }),
   z.strictObject({ mode: z.literal('sleep') }),
@@ -76,6 +93,7 @@ const ApiRequestSchemas = {
   adminExperience: AdminExperienceRequestSchema,
   ask: AskRequestSchema,
   check: CheckRequestSchema,
+  feedback: ResponseFeedbackRequestSchema,
   generate: GenerateRequestSchema,
   fix: FixRequestSchema,
 } as const;
@@ -86,6 +104,7 @@ interface ApiRequestMap {
   adminExperience: z.infer<typeof AdminExperienceRequestSchema>;
   ask: z.infer<typeof AskRequestSchema>;
   check: z.infer<typeof CheckRequestSchema>;
+  feedback: z.infer<typeof ResponseFeedbackRequestSchema>;
   generate: z.infer<typeof GenerateRequestSchema>;
   fix: z.infer<typeof FixRequestSchema>;
 }
@@ -94,6 +113,7 @@ const API_BODY_LIMITS = {
   adminExperience: 1024,
   ask: GLOBAL_MAX_BODY_BYTES,
   check: 144 * 1024,
+  feedback: 1024,
   generate: 72 * 1024,
   fix: GLOBAL_MAX_BODY_BYTES,
 } as const satisfies Record<ApiRoute, number>;

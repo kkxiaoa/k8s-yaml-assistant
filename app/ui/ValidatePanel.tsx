@@ -6,6 +6,7 @@ import {
   SIDEBAR_PANEL_HEADER,
 } from './styles';
 import { Tooltip } from './Tooltip';
+import { ResponseFeedback } from './ResponseFeedback';
 
 interface Props {
   errors: VErr[] | null;
@@ -14,6 +15,7 @@ interface Props {
   fixDisabled?: boolean;
   fixLoginRequired?: boolean;
   fixActionHint?: string;
+  feedbackRequestId: string | null;
 }
 
 export function ValidatePanel({
@@ -23,6 +25,7 @@ export function ValidatePanel({
   fixDisabled,
   fixLoginRequired = false,
   fixActionHint,
+  feedbackRequestId,
 }: Props) {
   return (
     <div className={SIDEBAR_PANEL}>
@@ -73,6 +76,7 @@ export function ValidatePanel({
             )}
           </>
         )}
+        <ResponseFeedback requestId={feedbackRequestId} route="fix" />
       </div>
     </div>
   );

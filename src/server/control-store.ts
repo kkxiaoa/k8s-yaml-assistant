@@ -8,6 +8,7 @@ import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import {
   ANONYMOUS_TRIAL_CREDITS,
+  CONTROL_DATA_RETENTION_DAYS,
   GLOBAL_DAILY_BUDGET_MICROUSD,
   GLOBAL_MONTHLY_BUDGET_MICROUSD,
   INTERVIEW_DAILY_CREDITS,
@@ -15,17 +16,24 @@ import {
   MODEL_ROUTE_LEASE_MS,
   MODEL_ROUTE_RESERVE_MICROUSD,
   NORMAL_DAILY_CREDITS,
+  RESPONSE_FEEDBACK_REASONS,
+  RESPONSE_FEEDBACK_REASONS_BY_ROUTE,
   type AdminExperienceRequest,
+  type AdminExperienceOverviewResponse,
   type AdminExperienceResponse,
+  type AdminFeedbackSummary,
   type ExperienceMode,
   type ModelRoute,
   type ModelUnavailableReason,
+  type ResponseFeedbackReason,
+  type ResponseFeedbackSelection,
 } from './experience-control';
 import { decodeBase64Key } from './secret-key';
 
 type ControlEnvironment = Readonly<Record<string, string | undefined>>;
 type LedgerState = 'reserved' | 'settled' | 'charged_max';
-const LEDGER_RETENTION_MS = 35 * 24 * 60 * 60_000;
+const LEDGER_RETENTION_MS =
+  CONTROL_DATA_RETENTION_DAYS * 24 * 60 * 60_000;
 
 interface ExperienceRow {
   mode: ExperienceMode;
@@ -34,6 +42,16 @@ interface ExperienceRow {
 
 interface SumRow {
   total: number;
+}
+
+interface FeedbackSummaryRow extends SumRow {
+  route: string;
+  rating: string;
+  reason: string | null;
+}
+
+interface FeedbackTargetRow {
+  route: string;
 }
 
 export class ControlStateFault extends Error {
@@ -157,8 +175,8 @@ function initializeDatabase(path: string): Database.Database {
     db.pragma('synchronous = NORMAL');
     db.pragma('busy_timeout = 5000');
     db.pragma('foreign_keys = ON');
-    const version = db.pragma('user_version', { simple: true });
-    if (version !== 0 && version !== 1) {
+    let version = db.pragma('user_version', { simple: true });
+    if (version !== 0 && version !== 1 && version !== 2) {
       throw new ControlStateFault();
     }
     if (version === 0) {
@@ -202,6 +220,34 @@ function initializeDatabase(path: string): Database.Database {
         `);
       });
       initialize.immediate();
+      version = 1;
+    }
+    if (version === 1) {
+      const migrate = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE response_feedback (
+            request_id TEXT PRIMARY KEY
+              REFERENCES request_ledger(request_id) ON DELETE CASCADE,
+            rating TEXT NOT NULL,
+            reason TEXT,
+            CHECK (
+              (rating = 'good' AND reason IS NULL) OR
+              (rating = 'bad' AND reason IS NOT NULL AND reason IN (
+                'incorrect_or_incomplete',
+                'not_what_i_asked',
+                'insufficient_evidence',
+                'unintended_changes',
+                'unusable_result',
+                'slow_or_buggy',
+                'other'
+              ))
+            )
+          );
+
+          PRAGMA user_version = 2;
+        `);
+      });
+      migrate.immediate();
     }
     return db;
   } catch (error) {
@@ -311,6 +357,91 @@ function quotaLimit(
     : NORMAL_DAILY_CREDITS;
 }
 
+function isResponseFeedbackReason(
+  value: string | null,
+): value is ResponseFeedbackReason {
+  return (
+    value !== null &&
+    (RESPONSE_FEEDBACK_REASONS as readonly string[]).includes(value)
+  );
+}
+
+function isModelRoute(value: string): value is ModelRoute {
+  return value === 'ask' || value === 'generate' || value === 'fix';
+}
+
+function isFeedbackReasonAllowedForRoute(
+  route: ModelRoute,
+  reason: ResponseFeedbackReason,
+): boolean {
+  return (
+    RESPONSE_FEEDBACK_REASONS_BY_ROUTE[route] as readonly ResponseFeedbackReason[]
+  ).includes(reason);
+}
+
+function feedbackSummary(db: Database.Database): AdminFeedbackSummary {
+  const summary: AdminFeedbackSummary = {
+    retentionDays: CONTROL_DATA_RETENTION_DAYS,
+    total: { good: 0, bad: 0 },
+    routes: {
+      ask: { good: 0, bad: 0 },
+      generate: { good: 0, bad: 0 },
+      fix: { good: 0, bad: 0 },
+    },
+    badReasons: {
+      incorrect_or_incomplete: 0,
+      not_what_i_asked: 0,
+      insufficient_evidence: 0,
+      unintended_changes: 0,
+      unusable_result: 0,
+      slow_or_buggy: 0,
+      other: 0,
+    },
+  };
+  const rows = db
+    .prepare<[], FeedbackSummaryRow>(
+      `SELECT request_ledger.route AS route,
+              response_feedback.rating AS rating,
+              response_feedback.reason AS reason,
+              COUNT(*) AS total
+       FROM response_feedback
+       INNER JOIN request_ledger
+         ON request_ledger.request_id = response_feedback.request_id
+       GROUP BY request_ledger.route,
+                response_feedback.rating,
+                response_feedback.reason`,
+    )
+    .all();
+  for (const row of rows) {
+    const candidateReason = row.reason;
+    const reason = isResponseFeedbackReason(candidateReason)
+      ? candidateReason
+      : null;
+    if (
+      !isModelRoute(row.route) ||
+      (row.rating !== 'good' && row.rating !== 'bad') ||
+      (row.rating === 'good' && row.reason !== null) ||
+      !Number.isSafeInteger(row.total) ||
+      row.total < 0
+    ) {
+      throw new ControlStateFault();
+    }
+    if (
+      row.rating === 'bad' &&
+      (reason === null ||
+        !isFeedbackReasonAllowedForRoute(row.route, reason))
+    ) {
+      throw new ControlStateFault();
+    }
+    summary.routes[row.route][row.rating] += row.total;
+    summary.total[row.rating] += row.total;
+    if (row.rating === 'bad' && reason !== null) {
+      summary.badReasons[reason] += row.total;
+    }
+  }
+  return summary;
+}
+
 export class ControlStore {
   private readonly db: Database.Database;
   private readonly subjectKey: Buffer;
@@ -338,6 +469,27 @@ export class ControlStore {
             ? null
             : new Date(row.interview_expires_at).toISOString(),
       };
+    } catch (error) {
+      if (error instanceof ControlStateFault) throw error;
+      throw new ControlStateFault();
+    }
+  }
+
+  getAdminOverview(now = Date.now()): AdminExperienceOverviewResponse {
+    try {
+      const transaction = this.db.transaction(() => {
+        expireReservations(this.db, now);
+        const row = effectiveState(this.db, now);
+        return {
+          mode: row.mode,
+          interviewExpiresAt:
+            row.interview_expires_at === null
+              ? null
+              : new Date(row.interview_expires_at).toISOString(),
+          feedback: feedbackSummary(this.db),
+        };
+      });
+      return transaction.immediate();
     } catch (error) {
       if (error instanceof ControlStateFault) throw error;
       throw new ControlStateFault();
@@ -520,6 +672,70 @@ export class ControlStore {
       ) {
         throw error;
       }
+      throw new ControlStateFault();
+    }
+  }
+
+  setResponseFeedback(
+    input: {
+      requestId: string;
+      subject: QuotaSubject;
+      selection: ResponseFeedbackSelection;
+    },
+    now = Date.now(),
+  ): 'saved' | 'target_not_found' | 'invalid_selection' {
+    try {
+      const transaction = this.db.transaction(() => {
+        expireReservations(this.db, now);
+        const target = this.db
+          .prepare<[string, string], FeedbackTargetRow>(
+            `SELECT route
+             FROM request_ledger
+             WHERE request_id = ?
+               AND subject_hash = ?
+               AND state IN ('settled', 'charged_max')`,
+          )
+          .get(
+            input.requestId,
+            quotaSubjectHash(this.subjectKey, input.subject),
+          );
+        if (target === undefined) return 'target_not_found';
+        if (!isModelRoute(target.route)) throw new ControlStateFault();
+        if (
+          input.selection.rating === 'bad' &&
+          !isFeedbackReasonAllowedForRoute(
+            target.route,
+            input.selection.reason,
+          )
+        ) {
+          return 'invalid_selection';
+        }
+        if (input.selection.rating === null) {
+          this.db
+            .prepare('DELETE FROM response_feedback WHERE request_id = ?')
+            .run(input.requestId);
+          return 'saved';
+        }
+        this.db
+          .prepare(
+            `INSERT INTO response_feedback (request_id, rating, reason)
+             VALUES (?, ?, ?)
+             ON CONFLICT(request_id) DO UPDATE SET
+               rating = excluded.rating,
+               reason = excluded.reason`,
+          )
+          .run(
+            input.requestId,
+            input.selection.rating,
+            input.selection.rating === 'bad'
+              ? input.selection.reason
+              : null,
+          );
+        return 'saved';
+      });
+      return transaction.immediate();
+    } catch (error) {
+      if (error instanceof ControlStateFault) throw error;
       throw new ControlStateFault();
     }
   }

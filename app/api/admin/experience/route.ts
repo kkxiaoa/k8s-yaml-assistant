@@ -4,6 +4,7 @@ import {
   getControlStore,
 } from '@/server/control-store';
 import { readApiRequest } from '@/server/api-contract';
+import { hasValidApplicationOrigin } from '@/server/request-origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,34 +40,11 @@ async function requireAdmin(): Promise<
   return { ok: true };
 }
 
-function hasValidOrigin(request: Request): boolean {
-  const configured = process.env.APP_PUBLIC_ORIGIN;
-  if (configured === undefined) return false;
-  try {
-    const url = new URL(configured);
-    const developmentLoopback =
-      process.env.NODE_ENV === 'development' &&
-      url.protocol === 'http:' &&
-      ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    if (
-      url.origin !== configured ||
-      (url.protocol !== 'https:' && !developmentLoopback) ||
-      url.username ||
-      url.password
-    ) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-  return request.headers.get('origin') === configured;
-}
-
 export async function GET(): Promise<Response> {
   try {
     const admin = await requireAdmin();
     if (!admin.ok) return admin.response;
-    return Response.json(getControlStore().getAdminState(), {
+    return Response.json(getControlStore().getAdminOverview(), {
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch {
@@ -78,7 +56,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const admin = await requireAdmin();
     if (!admin.ok) return admin.response;
-    if (!hasValidOrigin(request)) {
+    if (!hasValidApplicationOrigin(request)) {
       return errorResponse('invalid_origin', 403);
     }
     if (

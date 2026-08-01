@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type {
+  AdminFeedbackSummary,
   AdminExperienceRequest,
   AdminExperienceResponse,
 } from '@/server/experience-control';
@@ -13,6 +14,7 @@ import {
   getGithubSignInUrl,
   setAdminExperience,
 } from '../lib/api';
+import { RESPONSE_FEEDBACK_REASON_SUMMARY_OPTIONS } from '../lib/response-feedback';
 import { useExperience } from '../lib/use-experience';
 
 const HOME_PATH = applicationPath('/');
@@ -32,6 +34,7 @@ type ShowcaseDurationHours = Extract<
 export default function AdminPage() {
   const { experience, errorCode } = useExperience();
   const [state, setState] = useState<AdminExperienceResponse | null>(null);
+  const [feedback, setFeedback] = useState<AdminFeedbackSummary | null>(null);
   const [durationHours, setDurationHours] =
     useState<ShowcaseDurationHours | null>(4);
   const [busy, setBusy] = useState(false);
@@ -41,7 +44,11 @@ export default function AdminPage() {
     if (experience?.user?.admin !== true) return;
     void getAdminExperience()
       .then((next) => {
-        setState(next);
+        setState({
+          mode: next.mode,
+          interviewExpiresAt: next.interviewExpiresAt,
+        });
+        setFeedback(next.feedback);
         setDurationHours(next.mode === 'interview' ? null : 4);
         setMessage(null);
       })
@@ -274,6 +281,63 @@ export default function AdminPage() {
           <p className="mt-5 text-sm text-muted" role="status">
             {message}
           </p>
+        )}
+      </section>
+
+      <section className="mt-6 rounded-lg border border-line bg-surface p-5">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="font-mono text-sm font-semibold text-fg">
+              回答反馈
+            </h2>
+            <p className="mt-1 text-xs text-muted">
+              {feedback
+                ? `最近 ${feedback.retentionDays} 天，仅汇总当前选择，不保存原始内容`
+                : '反馈汇总暂不可用'}
+            </p>
+          </div>
+          {feedback && (
+            <div className="text-right font-mono text-xs text-muted">
+              <span className="text-ok">良好 {feedback.total.good}</span>
+              <span className="ml-3 text-warn">
+                不佳 {feedback.total.bad}
+              </span>
+            </div>
+          )}
+        </div>
+        {feedback && (
+          <>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {(
+                [
+                  ['ask', 'Ask（询问）'],
+                  ['generate', 'Generate（生成）'],
+                  ['fix', 'Fix（修复）'],
+                ] as const
+              ).map(([route, label]) => (
+                <div key={route} className="rounded border border-line bg-ink p-3">
+                  <div className="font-mono text-xs text-fg">{label}</div>
+                  <div className="mt-2 flex gap-3 text-xs text-muted">
+                    <span>良好 {feedback.routes[route].good}</span>
+                    <span>不佳 {feedback.routes[route].bad}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 border-t border-line pt-4">
+              <h3 className="font-mono text-xs text-muted">不佳原因</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {RESPONSE_FEEDBACK_REASON_SUMMARY_OPTIONS.map((option) => (
+                  <span
+                    key={option.reason}
+                    className="rounded-full border border-line bg-ink px-3 py-1.5 text-xs text-muted"
+                  >
+                    {option.label} {feedback.badReasons[option.reason]}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </>
         )}
       </section>
     </main>
