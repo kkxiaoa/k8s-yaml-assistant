@@ -9,7 +9,10 @@ import {
   ControlStore,
   ReservationRejected,
 } from './control-store';
-import { MODEL_ROUTE_LEASE_MS } from './experience-control';
+import {
+  MODEL_ROUTE_LEASE_MS,
+  RESPONSE_FEEDBACK_REASONS,
+} from './experience-control';
 
 const NOW = Date.parse('2026-07-29T04:00:00.000Z');
 const directories: string[] = [];
@@ -28,6 +31,58 @@ function controlStore(): { directory: string; store: ControlStore } {
 
 function makeAvailable(store: ControlStore, now = NOW): void {
   store.setAdminState({ mode: 'normal' }, now);
+}
+
+function createVersionOneDatabase(path: string): void {
+  const database = new Database(path);
+  try {
+    database.exec(`
+      CREATE TABLE experience_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        mode TEXT NOT NULL CHECK (mode IN ('normal', 'interview', 'sleep')),
+        interview_expires_at INTEGER,
+        updated_at INTEGER NOT NULL
+      );
+      INSERT INTO experience_state (
+        id, mode, interview_expires_at, updated_at
+      ) VALUES (1, 'normal', NULL, ${NOW});
+
+      CREATE TABLE request_ledger (
+        request_id TEXT PRIMARY KEY,
+        subject_hash TEXT NOT NULL,
+        quota_day TEXT NOT NULL,
+        route TEXT NOT NULL CHECK (route IN ('ask', 'generate', 'fix')),
+        credits INTEGER NOT NULL CHECK (credits >= 0),
+        state TEXT NOT NULL CHECK (
+          state IN ('reserved', 'settled', 'charged_max')
+        ),
+        reserved_cost_microusd INTEGER NOT NULL CHECK (
+          reserved_cost_microusd >= 0
+        ),
+        settled_cost_microusd INTEGER NOT NULL CHECK (
+          settled_cost_microusd >= 0
+        ),
+        lease_expires_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+      CREATE INDEX request_ledger_subject_day
+        ON request_ledger (subject_hash, quota_day, state);
+      CREATE INDEX request_ledger_day
+        ON request_ledger (quota_day, state);
+      INSERT INTO request_ledger (
+        request_id, subject_hash, quota_day, route, credits, state,
+        reserved_cost_microusd, settled_cost_microusd,
+        lease_expires_at, created_at, completed_at
+      ) VALUES (
+        'existing-v1-request', 'existing-subject-hash', '2026-07-29',
+        'ask', 1, 'settled', 100000, 10, ${NOW}, ${NOW}, ${NOW}
+      );
+      PRAGMA user_version = 1;
+    `);
+  } finally {
+    database.close();
+  }
 }
 
 const USER_SUBJECT = {
@@ -101,6 +156,115 @@ test('版本初始化后半段失败时回滚此前创建的 schema', () => {
       .all() as Array<{ name: string }>;
     assert.deepEqual(tables, [{ name: 'request_ledger' }]);
     assert.equal(database.pragma('user_version', { simple: true }), 0);
+  } finally {
+    database.close();
+  }
+});
+
+test('v1 到 v2 事务迁移保留既有状态与账本', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'kya-control-test-'));
+  directories.push(directory);
+  const path = join(directory, 'control.sqlite3');
+  createVersionOneDatabase(path);
+
+  const store = new ControlStore(path, Buffer.alloc(32, 7));
+  assert.deepEqual(store.getAdminState(NOW), {
+    mode: 'normal',
+    interviewExpiresAt: null,
+  });
+  store.close();
+
+  const database = new Database(path, { fileMustExist: true });
+  try {
+    assert.equal(database.pragma('user_version', { simple: true }), 2);
+    assert.deepEqual(
+      database
+        .prepare(
+          `SELECT request_id, route, state
+           FROM request_ledger WHERE request_id = 'existing-v1-request'`,
+        )
+        .get(),
+      {
+        request_id: 'existing-v1-request',
+        route: 'ask',
+        state: 'settled',
+      },
+    );
+    assert.deepEqual(
+      database
+        .prepare(
+          `SELECT name FROM sqlite_schema
+           WHERE type = 'table' AND name = 'response_feedback'`,
+        )
+        .get(),
+      { name: 'response_feedback' },
+    );
+    for (const reason of RESPONSE_FEEDBACK_REASONS) {
+      database
+        .prepare(
+          `INSERT INTO response_feedback (request_id, rating, reason)
+           VALUES ('existing-v1-request', 'bad', ?)`,
+        )
+        .run(reason);
+      database
+        .prepare(
+          `DELETE FROM response_feedback
+           WHERE request_id = 'existing-v1-request'`,
+        )
+        .run();
+    }
+    assert.throws(() =>
+      database
+        .prepare(
+          `INSERT INTO response_feedback (request_id, rating, reason)
+           VALUES ('existing-v1-request', 'bad', NULL)`,
+        )
+        .run(),
+    );
+    assert.throws(() =>
+      database
+        .prepare(
+          `INSERT INTO response_feedback (request_id, rating, reason)
+           VALUES (
+             'existing-v1-request', 'good', 'incorrect_or_incomplete'
+           )`,
+        )
+        .run(),
+    );
+  } finally {
+    database.close();
+  }
+});
+
+test('v1 到 v2 迁移冲突时版本与既有数据不前移', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'kya-control-test-'));
+  directories.push(directory);
+  const path = join(directory, 'control.sqlite3');
+  createVersionOneDatabase(path);
+  const existing = new Database(path);
+  try {
+    existing.exec('CREATE TABLE response_feedback (marker TEXT)');
+  } finally {
+    existing.close();
+  }
+
+  assert.throws(() => new ControlStore(path, Buffer.alloc(32, 7)));
+
+  const database = new Database(path, {
+    readonly: true,
+    fileMustExist: true,
+  });
+  try {
+    assert.equal(database.pragma('user_version', { simple: true }), 1);
+    assert.deepEqual(
+      database
+        .prepare(
+          `SELECT request_id FROM request_ledger
+           WHERE request_id = 'existing-v1-request'`,
+        )
+        .get(),
+      { request_id: 'existing-v1-request' },
+    );
   } finally {
     database.close();
   }
@@ -314,6 +478,234 @@ test('全局费用预留、租约失败关闭和休眠对管理员同样生效',
   );
   assert.ok(expired.requestId);
   store.close();
+});
+
+test('反馈只关联当前主体的完成请求且选择可切换或取消', () => {
+  const { store } = controlStore();
+  makeAvailable(store);
+  const ask = store.reserve(
+    { requestId: 'feedback-ask', subject: USER_SUBJECT, route: 'ask' },
+    NOW,
+  );
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: ask.requestId,
+      subject: USER_SUBJECT,
+      selection: { rating: 'good' },
+    }, NOW),
+    'target_not_found',
+  );
+  store.settle(ask, 0, NOW);
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: ask.requestId,
+      subject: { ...USER_SUBJECT, id: '54321' },
+      selection: { rating: 'good' },
+    }, NOW),
+    'target_not_found',
+  );
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: ask.requestId,
+      subject: USER_SUBJECT,
+      selection: { rating: 'good' },
+    }, NOW),
+    'saved',
+  );
+  const generate = store.reserve(
+    {
+      requestId: 'feedback-generate',
+      subject: USER_SUBJECT,
+      route: 'generate',
+    },
+    NOW,
+  );
+  store.settle(generate, 0, NOW);
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: generate.requestId,
+      subject: USER_SUBJECT,
+      selection: { rating: 'bad', reason: 'insufficient_evidence' },
+    }, NOW),
+    'invalid_selection',
+  );
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: generate.requestId,
+      subject: USER_SUBJECT,
+      selection: { rating: 'good' },
+    }, NOW),
+    'saved',
+  );
+  const fix = store.reserve(
+    { requestId: 'feedback-fix', subject: USER_SUBJECT, route: 'fix' },
+    NOW,
+  );
+  store.settle(fix, 0, NOW);
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: fix.requestId,
+      subject: USER_SUBJECT,
+      selection: { rating: 'bad', reason: 'insufficient_evidence' },
+    }, NOW),
+    'invalid_selection',
+  );
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: fix.requestId,
+      subject: USER_SUBJECT,
+      selection: {
+        rating: 'bad',
+        reason: 'unintended_changes',
+      },
+    }, NOW),
+    'saved',
+  );
+  assert.deepEqual(store.getAdminOverview(NOW).feedback, {
+    retentionDays: 35,
+    total: { good: 2, bad: 1 },
+    routes: {
+      ask: { good: 1, bad: 0 },
+      generate: { good: 1, bad: 0 },
+      fix: { good: 0, bad: 1 },
+    },
+    badReasons: {
+      incorrect_or_incomplete: 0,
+      not_what_i_asked: 0,
+      insufficient_evidence: 0,
+      unintended_changes: 1,
+      unusable_result: 0,
+      slow_or_buggy: 0,
+      other: 0,
+    },
+  });
+
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: ask.requestId,
+      subject: USER_SUBJECT,
+      selection: { rating: 'bad', reason: 'insufficient_evidence' },
+    }, NOW),
+    'saved',
+  );
+  assert.deepEqual(store.getAdminOverview(NOW).feedback.total, {
+    good: 1,
+    bad: 2,
+  });
+  assert.deepEqual(store.getAdminOverview(NOW).feedback.badReasons, {
+    incorrect_or_incomplete: 0,
+    not_what_i_asked: 0,
+    insufficient_evidence: 1,
+    unintended_changes: 1,
+    unusable_result: 0,
+    slow_or_buggy: 0,
+    other: 0,
+  });
+  assert.equal(
+    store.setResponseFeedback({
+      requestId: ask.requestId,
+      subject: USER_SUBJECT,
+      selection: { rating: null },
+    }, NOW),
+    'saved',
+  );
+  assert.deepEqual(store.getAdminOverview(NOW).feedback.total, {
+    good: 1,
+    bad: 1,
+  });
+  assert.equal(
+    store.getAdminOverview(NOW).feedback.badReasons.insufficient_evidence,
+    0,
+  );
+  store.close();
+});
+
+test('反馈汇总累加同一路由的不同负反馈原因', () => {
+  const { store } = controlStore();
+  makeAvailable(store);
+  for (const [requestId, reason] of [
+    ['feedback-ask-one', 'incorrect_or_incomplete'],
+    ['feedback-ask-two', 'insufficient_evidence'],
+  ] as const) {
+    const reservation = store.reserve(
+      { requestId, subject: USER_SUBJECT, route: 'ask' },
+      NOW,
+    );
+    store.settle(reservation, 0, NOW);
+    if (requestId === 'feedback-ask-one') {
+      assert.equal(
+        store.setResponseFeedback({
+          requestId,
+          subject: USER_SUBJECT,
+          selection: { rating: 'bad', reason: 'unintended_changes' },
+        }, NOW),
+        'invalid_selection',
+      );
+    }
+    assert.equal(
+      store.setResponseFeedback({
+        requestId,
+        subject: USER_SUBJECT,
+        selection: { rating: 'bad', reason },
+      }, NOW),
+      'saved',
+    );
+  }
+
+  const feedback = store.getAdminOverview(NOW).feedback;
+  assert.deepEqual(feedback.total, { good: 0, bad: 2 });
+  assert.deepEqual(feedback.routes.ask, { good: 0, bad: 2 });
+  assert.equal(feedback.badReasons.incorrect_or_incomplete, 1);
+  assert.equal(feedback.badReasons.insufficient_evidence, 1);
+  store.close();
+});
+
+test('账本保留期清理会级联删除反馈', () => {
+  const { directory, store } = controlStore();
+  const oldNow = NOW - 36 * 24 * 60 * 60_000;
+  makeAvailable(store, oldNow);
+  const reservation = store.reserve(
+    {
+      requestId: 'expired-feedback',
+      subject: USER_SUBJECT,
+      route: 'fix',
+    },
+    oldNow,
+  );
+  store.settle(reservation, 0, oldNow);
+  assert.equal(
+    store.setResponseFeedback(
+      {
+        requestId: reservation.requestId,
+        subject: USER_SUBJECT,
+        selection: { rating: 'bad', reason: 'unusable_result' },
+      },
+      oldNow,
+    ),
+    'saved',
+  );
+  assert.deepEqual(store.getAdminOverview(NOW).feedback.total, {
+    good: 0,
+    bad: 0,
+  });
+  store.close();
+
+  const database = new Database(join(directory, 'control.sqlite3'), {
+    readonly: true,
+    fileMustExist: true,
+  });
+  try {
+    assert.deepEqual(
+      database.prepare('SELECT COUNT(*) AS count FROM request_ledger').get(),
+      { count: 0 },
+    );
+    assert.deepEqual(
+      database.prepare('SELECT COUNT(*) AS count FROM response_feedback').get(),
+      { count: 0 },
+    );
+  } finally {
+    database.close();
+  }
 });
 
 test('账本不保存原始 GitHub 身份并清理超过 35 天的已完成项', () => {

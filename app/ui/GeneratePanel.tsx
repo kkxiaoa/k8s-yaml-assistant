@@ -7,6 +7,7 @@ import {
 } from "./styles";
 import { ExampleHint } from './ExampleHint';
 import { Tooltip } from './Tooltip';
+import { ResponseFeedback } from './ResponseFeedback';
 
 const GENERATION_EXAMPLE =
   '名为 web 的 Deployment，3 副本，镜像 nginx:1.27，容器端口 80，并通过 ClusterIP Service 暴露 80。';
@@ -17,6 +18,7 @@ interface Props {
   disabled: boolean;
   loginRequired: boolean;
   actionHint?: string;
+  feedbackRequestId: string | null;
   onRequirementChange: (requirement: string) => void;
   onGenerate: (requirement: string) => void;
 }
@@ -27,6 +29,7 @@ export function GeneratePanel({
   disabled,
   loginRequired,
   actionHint,
+  feedbackRequestId,
   onRequirementChange,
   onGenerate,
 }: Props) {
@@ -66,6 +69,7 @@ export function GeneratePanel({
             </button>
           </Tooltip>
         </div>
+        <ResponseFeedback requestId={feedbackRequestId} route="generate" />
       </div>
     </div>
   );

@@ -166,7 +166,7 @@ await check('Ask route 只注入安全 recorder 且不恢复原始持久化入�
     'utf8',
   );
 
-  assert.match(routeSource, /randomUUID\(\)/);
+  assert.doesNotMatch(routeSource, /randomUUID\(\)/);
   assert.match(routeSource, /decodeServingObservationConfig\(process\.env\)/);
   assert.match(routeSource, /createLocalObservationSink\(/);
   assert.match(routeSource, /createServingObservationRecorder\(/);

@@ -163,3 +163,14 @@ export const authOptions = createAuthOptions();
 export async function getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
   return identityFromSession(await getServerSession(authOptions));
 }
+
+export async function getStrictAuthenticatedIdentity(): Promise<
+  AuthenticatedIdentity | null
+> {
+  const session = await getServerSession(authOptions);
+  const identity = identityFromSession(session);
+  if (session !== null && identity === null) {
+    throw new Error('authenticated identity invalid');
+  }
+  return identity;
+}

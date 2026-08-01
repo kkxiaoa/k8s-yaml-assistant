@@ -1,5 +1,59 @@
 export type ExperienceMode = 'normal' | 'interview' | 'sleep';
 export type ModelRoute = 'ask' | 'generate' | 'fix';
+export const RESPONSE_FEEDBACK_REASONS = [
+  'incorrect_or_incomplete',
+  'not_what_i_asked',
+  'insufficient_evidence',
+  'unintended_changes',
+  'unusable_result',
+  'slow_or_buggy',
+  'other',
+] as const;
+export type ResponseFeedbackReason =
+  (typeof RESPONSE_FEEDBACK_REASONS)[number];
+export const RESPONSE_FEEDBACK_REASONS_BY_ROUTE = {
+  ask: [
+    'incorrect_or_incomplete',
+    'not_what_i_asked',
+    'insufficient_evidence',
+    'unusable_result',
+    'slow_or_buggy',
+    'other',
+  ],
+  generate: [
+    'incorrect_or_incomplete',
+    'not_what_i_asked',
+    'unusable_result',
+    'slow_or_buggy',
+    'other',
+  ],
+  fix: [
+    'incorrect_or_incomplete',
+    'not_what_i_asked',
+    'unintended_changes',
+    'unusable_result',
+    'slow_or_buggy',
+    'other',
+  ],
+} as const satisfies Readonly<
+  Record<ModelRoute, readonly ResponseFeedbackReason[]>
+>;
+export type ResponseFeedbackSelection =
+  | { rating: null }
+  | { rating: 'good' }
+  | { rating: 'bad'; reason: ResponseFeedbackReason };
+
+export interface ResponseFeedbackCounts {
+  good: number;
+  bad: number;
+}
+
+export interface AdminFeedbackSummary {
+  retentionDays: number;
+  total: ResponseFeedbackCounts;
+  routes: Record<ModelRoute, ResponseFeedbackCounts>;
+  badReasons: Record<ResponseFeedbackReason, number>;
+}
 
 export type ExperienceQuota =
   | {
@@ -41,6 +95,11 @@ export interface ExperienceResponse {
 export interface AdminExperienceResponse {
   mode: ExperienceMode;
   interviewExpiresAt: string | null;
+}
+
+export interface AdminExperienceOverviewResponse
+  extends AdminExperienceResponse {
+  feedback: AdminFeedbackSummary;
 }
 
 export type AdminExperienceRequest =
@@ -97,5 +156,6 @@ export const NORMAL_DAILY_CREDITS = 10;
 export const INTERVIEW_DAILY_CREDITS = 50;
 export const ANONYMOUS_TRIAL_CREDITS = 7;
 export const ANONYMOUS_TRIAL_DURATION_MS = 30 * 24 * 60 * 60_000;
+export const CONTROL_DATA_RETENTION_DAYS = 35;
 export const GLOBAL_DAILY_BUDGET_MICROUSD = 1_000_000;
 export const GLOBAL_MONTHLY_BUDGET_MICROUSD = 20_000_000;

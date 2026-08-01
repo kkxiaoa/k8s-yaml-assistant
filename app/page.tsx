@@ -69,6 +69,9 @@ export default function Home() {
   const [answer, setAnswer] = useState('');
   const [sources, setSources] = useState<SourceHit[]>([]);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [feedbackRequestIds, setFeedbackRequestIds] = useState<
+    Record<ModelRoute, string | null>
+  >({ ask: null, generate: null, fix: null });
   const [restoredAction, setRestoredAction] = useState<ModelRoute | null>(
     null,
   );
@@ -208,6 +211,14 @@ export default function Home() {
       );
   }
 
+  function clearFeedback(route: ModelRoute): void {
+    setFeedbackRequestIds((current) => ({ ...current, [route]: null }));
+  }
+
+  function exposeFeedback(route: ModelRoute, requestId: string): void {
+    setFeedbackRequestIds((current) => ({ ...current, [route]: requestId }));
+  }
+
   async function check() {
     setBusy('check');
     setErrors(null);
@@ -260,9 +271,10 @@ export default function Home() {
     setSources([]);
     setRequestError(null);
     setRestoredAction(null);
+    clearFeedback('ask');
 
     try {
-      await askStream(
+      const requestId = await askStream(
         q,
         mode,
         {
@@ -278,6 +290,7 @@ export default function Home() {
           onDelta: (t) => setAnswer((a) => a + t),
         },
       );
+      exposeFeedback('ask', requestId);
     } catch (error) {
       reportRequestError(error);
     } finally {
@@ -308,9 +321,11 @@ export default function Home() {
     setBusy('gen');
     setRequestError(null);
     setRestoredAction(null);
+    clearFeedback('generate');
     try {
-      const { yaml: y } = await generateYaml(requestedRequirement);
+      const { yaml: y, requestId } = await generateYaml(requestedRequirement);
       loadYaml(y);
+      if (requestId !== null) exposeFeedback('generate', requestId);
     } catch (error) {
       reportRequestError(error);
     } finally {
@@ -334,9 +349,11 @@ export default function Home() {
     setBusy('fix');
     setRequestError(null);
     setRestoredAction(null);
+    clearFeedback('fix');
     try {
-      const { yaml: y } = await fixYaml(yaml, errors);
+      const { yaml: y, requestId } = await fixYaml(yaml, errors);
       loadYaml(y);
+      if (requestId !== null) exposeFeedback('fix', requestId);
     } catch (error) {
       reportRequestError(error);
     } finally {
@@ -449,6 +466,7 @@ export default function Home() {
             disabled={modelActionDisabled('generate')}
             loginRequired={loginRequiredFor('generate')}
             actionHint={modelActionHint('generate')}
+            feedbackRequestId={feedbackRequestIds.generate}
             onRequirementChange={setRequirement}
             onGenerate={generate}
           />
@@ -459,11 +477,13 @@ export default function Home() {
             fixDisabled={modelActionDisabled('fix')}
             fixLoginRequired={loginRequiredFor('fix')}
             fixActionHint={modelActionHint('fix')}
+            feedbackRequestId={feedbackRequestIds.fix}
           />
           <AskPanel
             question={question}
             answer={answer}
             sources={sources}
+            feedbackRequestId={feedbackRequestIds.ask}
             asking={busy === 'ask'}
             disabled={modelActionDisabled('ask')}
             loginRequired={loginRequiredFor('ask')}

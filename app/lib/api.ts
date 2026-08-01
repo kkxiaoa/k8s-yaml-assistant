@@ -9,8 +9,10 @@ import type {
 import { applicationPath } from '@/shared/application-path.mjs';
 import type {
   AdminExperienceRequest,
+  AdminExperienceOverviewResponse,
   AdminExperienceResponse,
   ExperienceResponse,
+  ResponseFeedbackSelection,
 } from '@/server/experience-control';
 
 export interface SourceHit {
@@ -46,8 +48,9 @@ const apiErrorMessages: Readonly<Record<string, string>> = {
   quota_exhausted:
     '当前体验额度不足；匿名用户可登录获得每日额度，登录用户可在额度重置后继续。',
   control_state_unavailable: '体验状态暂不可用，模型功能已安全关闭。',
-  invalid_origin: '管理请求来源无效，请刷新页面后重试。',
-  invalid_content_type: '管理请求格式无效，请刷新页面后重试。',
+  invalid_origin: '请求来源无效，请刷新页面后重试。',
+  invalid_content_type: '请求格式无效，请刷新页面后重试。',
+  feedback_target_not_found: '该结果已过期或不属于当前会话，无法记录反馈。',
   model_access_disabled:
     '模型功能当前已关闭；Schema（结构模式）检查仍可使用。',
   concurrency_limited: '当前请求正在处理中，请稍后再试。',
@@ -192,6 +195,20 @@ interface AskHandlers {
   onDelta: (text: string) => void;
 }
 
+const REQUEST_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function responseRequestId(value: unknown): string {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ApiRequestError('empty_response');
+  }
+  const requestId = (value as Record<string, unknown>).requestId;
+  if (typeof requestId !== 'string' || !REQUEST_ID_PATTERN.test(requestId)) {
+    throw new ApiRequestError('empty_response');
+  }
+  return requestId;
+}
+
 function parseSseEvents(buffer: string): {
   events: Array<{ event: string; data: string }>;
   rest: string;
@@ -216,7 +233,7 @@ export async function askStream(
   mode: AskMode,
   context: EditorContext,
   handlers: AskHandlers,
-): Promise<void> {
+): Promise<string> {
   const res = await fetch(applicationPath('/api/ask'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -231,6 +248,7 @@ export async function askStream(
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buffer = '';
+  let requestId: string | null = null;
 
   for (;;) {
     const { value, done } = await reader.read();
@@ -246,6 +264,8 @@ export async function askStream(
         handlers.onSources(JSON.parse(evt.data) as SourceHit[]);
       } else if (evt.event === 'delta') {
         handlers.onDelta(JSON.parse(evt.data) as string);
+      } else if (evt.event === 'done') {
+        requestId = responseRequestId(JSON.parse(evt.data) as unknown);
       } else if (evt.event === 'error') {
         let code = 'upstream_error';
         try {
@@ -257,11 +277,39 @@ export async function askStream(
       }
     }
   }
+  if (requestId === null) throw new ApiRequestError('empty_response');
+  return requestId;
 }
 
 export interface GenResult {
   yaml: string | null;
   rounds: number;
+  requestId: string | null;
+}
+
+function decodeGenResult(value: unknown): GenResult {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ApiRequestError('empty_response');
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    (record.yaml !== null && typeof record.yaml !== 'string') ||
+    !Number.isSafeInteger(record.rounds) ||
+    (record.rounds as number) < 0
+  ) {
+    throw new ApiRequestError('empty_response');
+  }
+  if (record.yaml === null) {
+    if (record.requestId !== null) {
+      throw new ApiRequestError('empty_response');
+    }
+    return { yaml: null, rounds: record.rounds as number, requestId: null };
+  }
+  return {
+    yaml: record.yaml,
+    rounds: record.rounds as number,
+    requestId: responseRequestId(record),
+  };
 }
 
 /** 自然语言需求 → 生成合法资源 YAML(后端带"生成→校验→修正"自检闭环)。 */
@@ -272,7 +320,7 @@ export async function generateYaml(requirement: string): Promise<GenResult> {
     body: JSON.stringify({ requirement }),
   });
   await requireSuccessfulResponse(res);
-  return (await res.json()) as GenResult;
+  return decodeGenResult((await res.json()) as unknown);
 }
 
 /** 修正有校验错误的资源 YAML(后端带自检闭环)。 */
@@ -286,7 +334,33 @@ export async function fixYaml(
     body: JSON.stringify({ yaml, errors }),
   });
   await requireSuccessfulResponse(res);
-  return (await res.json()) as GenResult;
+  return decodeGenResult((await res.json()) as unknown);
+}
+
+export async function submitResponseFeedback(
+  requestId: string,
+  selection: ResponseFeedbackSelection,
+): Promise<ResponseFeedbackSelection> {
+  const response = await fetch(applicationPath('/api/feedback'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId, ...selection }),
+  });
+  await requireSuccessfulResponse(response);
+  const payload = (await response.json()) as unknown;
+  if (
+    payload === null ||
+    typeof payload !== 'object' ||
+    Array.isArray(payload) ||
+    (payload as Record<string, unknown>).rating !== selection.rating ||
+    (selection.rating === 'bad'
+      ? (payload as Record<string, unknown>).reason !== selection.reason ||
+        Object.keys(payload).length !== 2
+      : Object.keys(payload).length !== 1)
+  ) {
+    throw new ApiRequestError('empty_response');
+  }
+  return selection;
 }
 
 export async function getExperience(): Promise<ExperienceResponse> {
@@ -297,12 +371,12 @@ export async function getExperience(): Promise<ExperienceResponse> {
   return (await response.json()) as ExperienceResponse;
 }
 
-export async function getAdminExperience(): Promise<AdminExperienceResponse> {
+export async function getAdminExperience(): Promise<AdminExperienceOverviewResponse> {
   const response = await fetch(applicationPath('/api/admin/experience'), {
     cache: 'no-store',
   });
   await requireSuccessfulResponse(response);
-  return (await response.json()) as AdminExperienceResponse;
+  return (await response.json()) as AdminExperienceOverviewResponse;
 }
 
 export async function setAdminExperience(
