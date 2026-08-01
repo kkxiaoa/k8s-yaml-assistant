@@ -16,5 +16,6 @@ data/eval/runs
 data/eval/traces
 data/aliases/drafts
 coverage
+assets/branding
 *.log
 .DS_Store

@@ -159,7 +159,12 @@ export function AppHeader({ experience, onLogin }: Props) {
 
   return (
     <header className="relative z-40 flex items-center gap-4 border-b border-line bg-surface/50 px-5 py-3 backdrop-blur">
-      <span className="text-brand">◆</span>
+      <img
+        src={applicationPath('/icon.svg')}
+        alt=""
+        aria-hidden="true"
+        className="size-5 shrink-0"
+      />
       <span className="font-mono text-sm font-semibold tracking-tight text-fg">
         K8s YAML Assistant
       </span>
