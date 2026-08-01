@@ -3,6 +3,13 @@
 > 状态：当前维护。
 > 用途：记录面向使用者的版本变化、部署边界和已知限制。
 
+## [0.3.1](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.3.0...v0.3.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* preserve streaming through Traefik ([#38](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/38)) ([8c63b57](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/8c63b571fe71d0f17f42346a56f4aa1e0620b74c))
+
 ## [0.3.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.2.0...v0.3.0) (2026-08-01)
 
 
