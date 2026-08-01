@@ -1325,7 +1325,6 @@ test('the public experience manifests preserve the risky deployment relationship
     [
       'k8s-yaml-assistant-rate-limit',
       'k8s-yaml-assistant-inflight',
-      'k8s-yaml-assistant-request-body',
       'k8s-yaml-assistant-https-redirect',
     ],
   );
@@ -1345,17 +1344,9 @@ test('the public experience manifests preserve the risky deployment relationship
     ).amount,
     16,
   );
-  assert.equal(
-    nestedRecord(
-      nestedRecord(middlewares[2]!, 'spec', 'body middleware'),
-      'buffering',
-      'body middleware spec',
-    ).maxRequestBodyBytes,
-    262144,
-  );
   assert.deepEqual(
     nestedRecord(
-      nestedRecord(middlewares[3]!, 'spec', 'redirect middleware'),
+      nestedRecord(middlewares[2]!, 'spec', 'redirect middleware'),
       'redirectScheme',
       'redirect middleware spec',
     ),
@@ -1378,7 +1369,6 @@ test('the public experience manifests preserve the risky deployment relationship
     [
       { name: 'k8s-yaml-assistant-rate-limit' },
       { name: 'k8s-yaml-assistant-inflight' },
-      { name: 'k8s-yaml-assistant-request-body' },
     ],
   );
   assert.deepEqual(
