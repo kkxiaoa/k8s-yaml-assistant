@@ -3,6 +3,24 @@
 > 状态：当前维护。
 > 用途：记录面向使用者的版本变化、部署边界和已知限制。
 
+## [0.3.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.2.0...v0.3.0) (2026-08-01)
+
+
+### Features
+
+* add application branding icons ([#34](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/34)) ([48a4ef6](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/48a4ef630adfd452744223a20e6dc54114ec4778))
+* enable production model access gate ([#36](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/36)) ([85642fd](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/85642fda3faaf01a0f75079a442cdfaf3fbac178))
+* redirect application HTTP traffic to HTTPS ([#37](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/37)) ([50f7b5c](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/50f7b5c3d7735e97c8e7f69cdf27df9b4d5eec87))
+
+
+### Bug Fixes
+
+* extend GitHub OAuth callback timeout ([#32](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/32)) ([858ce33](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/858ce33312a46e18cb0b2ba6d008f946822b152b))
+* import preheated image by release digest ([#29](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/29)) ([7ed5613](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/7ed56138364e983accffb971ae2e1ca02e0681da))
+* make control store writes atomic ([#33](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/33)) ([c376645](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/c37664505c751334a2d330c9a309f6e665d5ab95))
+* normalize draft release readback ([#27](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/27)) ([58f598f](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/58f598f80b9f9eb7957c1bb4d8d0e2fa262cb185))
+* preserve image root during K3s preheat ([#28](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/28)) ([cf5fc64](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/cf5fc6401dc73d48cc7367ab0bd94c1e3d25ec16))
+
 ## [0.2.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.1.1...v0.2.0) (2026-07-30)
 
 
