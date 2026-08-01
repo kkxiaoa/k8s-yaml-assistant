@@ -1120,7 +1120,7 @@ test('the public experience manifests preserve the risky deployment relationship
       APP_PUBLIC_ORIGIN: configData.APP_PUBLIC_ORIGIN,
     },
     {
-      MODEL_ACCESS_ENABLED: 'false',
+      MODEL_ACCESS_ENABLED: 'true',
       CONTROL_DB_PATH: '/app/data/control/private/control.sqlite3',
       NEXTAUTH_URL:
         'https://120.46.57.214/k8s-yaml-assistant/api/auth',
