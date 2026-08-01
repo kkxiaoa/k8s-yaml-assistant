@@ -49,7 +49,10 @@
 
 以下状态是当前主线和停止点的唯一摘要；运行证据与完整步骤保留在直接引用的实施计划中，不在其他入口文档复制。
 
-- Production Deployment（生产部署）的私有部署阶段已按审核结论收敛。2026-07-29 用户确认以 `docs/superpowers/specs/2026-07-29-public-experience-control-design.md` 和对应实施计划取代尚未部署的 oauth2-proxy（认证代理）、`private/portfolio`（私有 / 作品集展示）双模式及 `set-access-mode`（设置访问模式）候选。新的 Task 16-17（任务 16-17）统一公开界面、30 天匿名低额度完整体验、任意 GitHub（代码托管平台）用户登录增额、持久个人额度、Open Showcase Mode（开放展示模式）、Sleep Mode（休眠模式）和全局费用预算；控制库 OBS（对象存储服务）备份因数据价值低且运维复杂度高，在部署前从候选清退，回答反馈也明确不进入本阶段。匿名身份只使用服务端签名 Cookie（浏览器标识）和匿名化账本，不声称防机器人。体验状态现按 `ask`、`generate`、`fix` 分别表达真实运行时依赖和各自点数：Voyage（向量服务）不可用不再连带关闭只依赖 DeepSeek（回答模型）的 `generate`、`fix`。修订后的候选已通过完整本地门禁和用户 review（审核），Task 18（任务 18）质量审核随后按独立授权执行。公网身份现固定为 `120.46.57.214` 与 `/k8s-yaml-assistant`，域名只作为未来备选。包含该应用实现的 `v0.2.0` 镜像已按下述证据发布并部署；生产 OAuth（开放授权）Secret（密钥）、控制库 SQLite（嵌入式数据库）持久卷、关闭模型的 ConfigMap（普通配置）、固定 Deployment（工作负载）模板、公开入口、证书初始签发和自动续期调度均已完成生产非模型验收。正式证书仍为首次签发的 `revision: 1`，第一次真实自动续期计划在 `2026-08-05T00:52:55Z` 执行，尚未形成续期闭环。真实 GitHub callback（开放授权回调）曾因固定依赖的 3.5 秒出站超时不稳定；把令牌交换超时固定为 15 秒的 PR（合并请求）#32、控制库原子性修复 #33 和品牌图标 #34 均已合并 `main`，但尚未发布或部署，生产仍运行 `v0.2.0` 旧镜像且模型开关继续关闭。
+- Task 16-17（任务 16-17）已按 `docs/superpowers/specs/2026-07-29-public-experience-control-design.md` 和对应计划取代未部署的 oauth2-proxy（认证代理）、`private/portfolio`（私有 / 作品集展示）双模式及 `set-access-mode`（设置访问模式）候选。当前统一公开界面提供 30 天匿名低额度完整体验、任意 GitHub（代码托管平台）用户登录增额、持久个人额度、Open Showcase Mode（开放展示模式）、Sleep Mode（休眠模式）和全局费用预算；控制库 OBS（对象存储服务）备份已因低价值高复杂度清退。体验状态按 `ask`、`generate`、`fix` 分别表达真实依赖，Task 18（任务 18）的已知质量风险由用户在本轮公开候选中明确接受，但没有晋升任何 baseline（基线）。
+- 2026-08-01 `v0.3.1` 已成为远端 `main` 和 Git tag（Git 标签），提交为 `841ea38c5202b3fa88e32494df6aa48f33084f30`。PR（合并请求）#38 的 Traefik `buffering`（Traefik 缓冲）修复已经按独立生产授权应用，旧请求体 Middleware（中间件）已删除；用户随后完成真实 Ask（询问）浏览器验收并明确确认 SSE（服务器发送事件）逐段输出恢复。生产流式输出闭环完成，当前不再等待路由或模型验收操作。
+- 2026-08-01 用户确认从最新 `main` 进入 G1（反馈第一闭环），并批准 `docs/superpowers/specs/2026-08-01-public-repository-transition-design.md` 记录单仓库公开方案：G1 完成后先做私有备份和开源收口，再清洗同一仓库历史并覆盖当前远端，不新建长期并行仓库。全历史移除 `AGENTS.md`、`CLAUDE.md` 和 `scripts/k3s-image-preheat.sh`，当前树移除并忽略 `docs/`、`HANDOFF.md` 与上述路径；README（项目说明）的当前版本和历史敏感版本均定向清理开发日志、内部路线与私有文档引用。
+- 历史清洗必须逐提交保持 author/committer（作者 / 提交者）的姓名、邮箱和时间，保留空提交及可保留的拓扑；message（提交说明）只做必要清理。现有仓库名、Runner（工作流运行器）注册、标签、部署适配器和发布部署基本链路保持不变。历史重写、远端强制推送、临时工作流/规则调整、任何发布部署、生产修改、GHCR（GitHub 容器镜像仓库）包可见性、Pro（专业版）退订和最终公开均不因方案获批而自动授权，按设计分别再次确认。Task 18（任务 18）、C2-C4、D/E/F（阶段 D/E/F）继续延期，不得夹带实现。
 - 四份 2026-07-12 纠偏计划、Phase B（阶段 B）工程清理和 Case Governance（评估用例治理）已经完成结构实现与审核；2026-07-29 已使用发布候选的精确 8,410 条索引执行新版本完整模型评估，因人工审核未通过而未晋升任何 baseline（基线）。
 - `v0.1.0` 已携带 8,410 条正式索引和六项发布证据完成不可变发布，并通过运行 `30265452918` Attempt 5（第 5 次尝试）首次部署到私有 K3s（轻量 Kubernetes）。随后发现的 production observation root（生产观测根目录）权限阻断已由卷内 `0700` 私有子目录修复，修复随 `v0.1.1` 源提交 `ac9eb22100e300e8b3babd3bdc26ad8e45ea169d` 发布。
 - 经本次明确授权，精确绑定该源提交、包含六项发布证据的 `v0.1.1` 已于 2026-07-28 Publish（正式发布）并创建实际不可变标签。`Deploy published release`（部署已发布版本）运行 `30296287472` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5628234264` 均成功。随后人工确认回滚 Release（发布版本）`360812512` 已 Publish（正式发布），运行 `30325880287` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5633580284` 把生产回滚到 `v0.1.0`。经再次明确授权，恢复 Release（发布版本）`360824879` 已于 `2026-07-28T03:56:06Z` Publish（正式发布）；运行 `30327301138` Attempt 1（第 1 次尝试）及 GitHub deployment（GitHub 部署记录）`5633826683` 均成功，生产当前恢复并固定在 `v0.1.1` 镜像摘要 `sha256:9d734264c4df1257d25a478e612ff2c3cbf61b1c918504e0da3a65e650cebe37`，仓库 `Latest`（最新发布）仍为普通 `v0.1.1` Release（发布版本）。
@@ -362,32 +365,51 @@ Stage 是能力分类，不代表执行时序。
 1. 已完成并审核：`superpowers/specs/2026-07-19-k3s-production-deployment-design.md` 的 Phase 0-3（阶段 0-3）明确华为云单机 K3s（轻量 Kubernetes）、GHCR（GitHub 容器镜像仓库）、单人 draft Release（草稿发布版本）人工确认、生产 self-hosted runner（自托管运行器）、镜像内置索引和安全 observation（观测）边界；其中未部署的 Phase 4-5（阶段 4-5）双访问模式候选已被 2026-07-29 公共体验控制设计替代。
 2. 已完成并审核：Phase 0（阶段 0）本地与服务器只读审计；Phase 1（阶段 1）的固定版本 K3s（轻量 Kubernetes）变更包、安装加固和节点外分离备份。非敏感证据记录在 `deploy/k3s/README.md`。
 3. Phase 0-2（阶段 0-2）、特权 deployment adapter（部署适配器）Task 1-7（任务 1-7）和 Task 14（任务 14）的私有发布、部署、人工回滚、恢复及节点重启证据已经完成实现与审核；Step 5（步骤 5）的长期观测生命周期保持部分验收，Step 6（步骤 6）的真实自动恢复演练因没有合格候选明确延期。在线索引使用共享连续 `Float32Array` 和 fail-closed（失败关闭）加载，并通过文件哈希验证 `chunks.jsonl` 和 `embeddings.f32`。
-4. 新 Task 16-17（任务 16-17）的本地身份、三态控制、额度/费用、统一页面和直接入口候选已经按 `superpowers/specs/2026-07-29-public-experience-control-design.md` 与对应计划完成并通过 review（审核），控制库 OBS（对象存储服务）备份已在部署前清退，三项模型操作状态也已按 DeepSeek（回答模型）与 Voyage（向量服务）的真实依赖拆分。Task 18（任务 18）修尺后 Generation/Fix（生成 / 修复）模型复测通过；v5（第 5 版）Faith（忠实度）完整运行只有 `61/88` 有依据完整通过，且三条应拒答用例实际全部作答，仍未通过。20×5 票完整 Judge（裁判校准）运行达到主一致率门槛，但有 3 条忠实度和 1 条回答行为不可判定、1 个策略维度分歧、9 张格式无效票及两处待审核人工尺子边界，因此完整质量门禁未通过。全部行为标签均为 `answer`，尚不能校准真实拒答或非回答识别；新增跨资源尺子仍有四条问题用例，首个候选方案已经按门禁淘汰，仍未晋升新 baseline（基线）。2026-07-31 用户明确接受上述现阶段风险后，候选应用镜像已按独立授权 Publish（正式发布）并部署；生产 OAuth App（开放授权应用）凭据 Secret（密钥）、控制 PVC（持久卷声明）、关闭模型的配置、固定 Deployment（工作负载）模板、cert-manager（证书管理器）、短期公网 IP 证书、Traefik IngressRoute（入口路由）和安全组 80/443 随后按分阶段授权安装。公开路径、证书初始签发、自动续期调度与未登录负向边界均完成非模型验收；第一次真实自动续期尚未发生。真实 GitHub callback（开放授权回调）的 3.5 秒令牌交换超时修复及随后两项应用变更已随 PR（合并请求）#32-#34 合并 `main`，但生产仍运行 `v0.2.0` 旧镜像，阻断须经新版本发布、预热、部署和真实回调复验后解除。该接受和部署不改变指标或晋升 baseline（基线）；模型开关保持关闭，任何发布、部署、模型调用、索引重建、baseline（基线）晋升或节点重启仍须另行明确授权。
+4. Task 16-17（任务 16-17）的应用内身份、三态控制、额度/费用、统一页面和直接公网入口已经完成实现、审核和生产部署；控制库 OBS（对象存储服务）备份已清退，三项模型操作状态按 DeepSeek（回答模型）与 Voyage（向量服务）的真实依赖拆分，生产模型总开关已开启。Task 18（任务 18）修尺后 Generation/Fix（生成 / 修复）通过；Faith（忠实度）、Judge（裁判校准）、拒答和跨资源检索的剩余风险由用户明确接受为当前公开候选边界，但继续保留为后续任务且不晋升 baseline（基线）。`v0.3.1` 和生产 Traefik（入口控制器）路由修复已经完成，用户真实浏览器验收确认 Ask SSE（询问服务器发送事件）逐段输出恢复。
 5. SWR（华为云容器镜像服务）企业版可用前，应用或回滚 Draft Release（草稿发布版本）通过人工证据核对后，必须在 Publish（正式发布）前运行 `bash scripts/k3s-image-preheat.sh <目标草稿标签>`。应用草稿的目标摘要来自 `release-manifest.json`，规范回滚草稿的目标摘要来自标签；脚本成功只证明该精确镜像根摘要已导入生产 K3s（轻量 Kubernetes），不替代部署流水线对发布来源、证明和台账的校验。失败时保留草稿并停止，不能继续 Publish（正式发布）。执行脚本涉及生产节点写入，仍须获得当次明确授权；后续 Publish（正式发布）和部署继续使用各自独立授权。
-6. 当前停止点：PR（合并请求）#32-#34 已合并 `main`，生产仍固定为 `v0.2.0` 旧镜像；公开入口和证书初始验收完成，首次自动续期计划在 `2026-08-05T00:52:55Z` 执行但尚未形成续期闭环。恢复部署主线时，须分别授权新版本发布前预热、Publish（正式发布）和生产部署，再执行真实 GitHub callback（开放授权回调）复验；首次续期后只读确认 `revision` 增加和有效期后移。当前不自动开始这些操作，先等待用户安排高优先级任务。部署不把项目扩张为通用 Kubernetes 运维平台。
+6. 当前停止点：生产流式输出闭环已由用户确认完成；从 `v0.3.1` 的最新远端 `main` 进入 G1（反馈第一闭环）。公开迁移设计已获方案确认但尚未执行，G1 代码不得夹带历史清洗、README（项目说明）重写、许可证或延期阶段实现。首次证书自动续期仍按独立只读任务确认；Task 18（任务 18）继续延期，不自动恢复。
 
-### Phase C：剩余质量债
+### 简历投递前短周期路线（2026-08-01 优先级覆盖）
 
-1. 贯通 embedding、rerank、answer、judge 的 raw usage，并记录 pricing/version 后再计算 cost。
-2. 在新 baseline 下重新判断仍存在的 retrieval/rerank bad case。
-3. 有证据时设计 rerank 优化；无同语言关键词证据时继续不做 BM25/RRF。
-4. 按 ROI 扩展 reviewed alias，不做 Pod/Deployment 全字段 alias。
+长期能力分类仍保留 Phase C-G（阶段 C-G），但未来两天不按字母顺序执行。当前唯一短期顺序为：
+
+1. 已完成：生产路由已停止使用响应缓冲，旧 Middleware（中间件）已删除，用户真实浏览器验收确认 Ask SSE（询问服务器发送事件）恢复。
+2. 已完成方案前置：当前树、完整历史、Actions（自动化流水线）、生产拓扑、依赖/许可证和公开工作流的首轮只读审计已经形成 `docs/superpowers/specs/2026-08-01-public-repository-transition-design.md`。G1 完成后仍须按该设计执行正式工具扫描和逐项验收，不能把方案审计当成清洗完成。
+3. 实施 G1（反馈第一闭环）：Ask/Generate/Fix（询问 / 生成 / 修复）的成功结果使用统一 Good/Bad Response（回答良好 / 回答不佳）交互；优先复用现有请求账本身份完成服务端关联，不新增无独立风险消费者的平行身份；接口只接受服务端已知关联标识和封闭枚举，同一结果只保留当前选择；管理页提供按功能汇总的直接消费者。不得保存 YAML（配置文件）、问题、回答、OAuth（开放授权）令牌或真实身份，不提供自由文本，不自动进入 bad case（问题用例）、eval（评估）或 baseline（基线）。生产控制库已经是 schema version 1（数据结构第 1 版），新增反馈状态必须以事务完成 v1 到 v2 迁移并保留既有数据，不能重写初始 schema（数据结构）假装尚未部署。反馈和关联观测须有明确保留与删除语义，且不得静默延长现有 7 天 observation（观测）保留期。
+4. G1 完成后按公开迁移设计完成开源收口：选择并加入明确许可证，增加安全报告与贡献边界，重写当前 README（项目说明）并定向清理历史敏感版本；从当前树移除内部 docs（文档）等私有材料，全历史移除三项指定文件，使用专用密钥扫描工具复核完整可控历史，并人工审核旧 Actions（自动化流水线）日志/产物。历史强制推送与临时工作流/规则调整另行授权。
+5. 远端历史覆盖及私有状态验收完成后，再次取得用户明确授权才可把仓库切换为 public（公开）；切换后立即只读复核 `main` 与标签规则集、Actions（自动化流水线）权限、外部贡献者工作流、Release（发布版本）附件、OAuth（开放授权）、GHCR（GitHub 容器镜像仓库）、Runner（工作流运行器）和在线演示。若发现真实凭据，先吊销或轮换；不得先公开后依赖平台扫描补救。项目回查通过后才决定是否退订 Pro（专业版）。
+6. 两天窗口不足时，只删减 Issue Template（问题模板）、Code of Conduct（行为准则）和装饰性图表；不得删减许可证、完整历史密钥审计、生产演示验收或 G1 数据完整性。D/E（阶段 D/E）只进入公开 Roadmap（路线图），不以玩具 provider（数据提供器）或少量硬编码页面冒充完成。
+7. 公开前重新读取权威外部契约，不从本记录反向发明平台语义：GitHub 的 [仓库可见性变更](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility)、[仓库许可证](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository) 与 [敏感数据清理](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)，以及 Kubernetes 官方文档仓库的 [CC-BY-4.0 许可证](https://github.com/kubernetes/website/blob/main/LICENSE)。
+
+### Phase C：剩余质量债（公开后按依赖恢复）
+
+1. C1：贯通 embedding、rerank、answer、judge（向量嵌入、重排、回答、裁判）的 raw usage（原始用量），并记录 pricing/version（价格 / 版本）后再计算 cost（费用）。它可独立实施，但当前没有比 G1 和公开收口更早的两天期消费者，因此延期到公开后。
+2. C2-C4：只在有效新 baseline（基线）和 Task 18（任务 18）人工结论收敛后重新判断 retrieval/rerank bad case（检索 / 重排问题用例）、设计有证据的 rerank（重排）优化并按 ROI（投入产出比）扩展 reviewed alias（已审核别名）。没有同语言关键词失召回证据时继续不做 BM25/RRF，不做 Pod/Deployment（容器组 / 工作负载）全字段别名。
+3. C1 不得被用作恢复 C2-C4 的旁路；任何模型复测、索引重建或 baseline（基线）晋升继续单独授权。
 
 ### Phase D：Stage 6.2 Official Docs
+
+状态与优先级：项目公开后的首个默认能力增量，长期优先于 E；两天窗口内只写入 Roadmap（路线图），不实施。
 
 1. 从 schema 无法回答的行为语义、使用条件和限制 case 出发定义范围。
 2. 实现 versioned docs provider、manifest、chunking、引用锚点和更新策略。
 3. 增加 docs retrieval 与 grounded-answer cases。
 4. 证明新增知识源提高目标 case，且不破坏 schema/policy 分层。
+5. Kubernetes 官方文档内容采用 CC-BY-4.0（知识共享署名 4.0）许可证；实施前必须把版本固定、来源署名、再分发边界和第三方内容清单纳入直接消费者契约，不能把抓取页面当作无许可证内部数据。
 
 ### Phase E：Stage 6.3 Examples
+
+状态与优先级：D 的 provider/manifest/provenance（数据提供器 / 清单 / 来源）边界稳定后再进入；两天窗口内不实施。
 
 1. 选择可追溯、版本匹配的 YAML example 和反例。
 2. examples 进入统一 corpus，但按 task-aware context selection 服务 Generate/Fix。
 3. 用资源值断言和跨资源关系 eval 验证收益。
 4. 若 policy 需要约束 Generate/Fix，另设 policy lint/compliance 层，不塞进 schema validation。
+5. 当前 Generation/Fix（生成 / 修复）已通过现有评估，E 在投递前的边际收益低于可访问的公开仓库和稳定演示；不得为了赶进度加入手写送分示例。
 
 ### Phase F：Stage 5.3 Claim-level Grounding
+
+状态与优先级：依赖 D/E 提供更完整的来源边界和稳定评估器，保持后期任务；不进入当前开源前路线。
 
 1. 定义可解析的 claim 与 citation reference。
 2. 实现 claim extraction、claim-source verification 和 unsupported claim 输出。
@@ -398,12 +420,10 @@ Stage 是能力分类，不代表执行时序。
 
 当前安全 Ask serving observation（询问在线观测）子能力已完成实现并通过部署 Task 6 review（任务 6 审核）；这不修改上方 Stage 7.2（阶段 7.2）的“未开始”状态。该子能力也不包含 answer feedback（回答反馈）、Generate/Fix（生成 / 修复）采纳信号、审核式回灌或闭环报告。
 
-1. 定义 serving observation envelope 和 request correlation，不复用 eval run 语义。
-2. 记录 query、source、answer、latency/cost 前先实现 Secret/token/YAML 敏感字段脱敏。
-3. 明确默认开关、采样、保留周期、删除机制和本地/远程边界。
-4. 接入 UI feedback 和 Generate/Fix 采纳信号。
-5. 反馈先生成可审核候选，人工确认后进入 bad case 或新 eval case。
-6. 输出按失败类型、修复状态和版本变化的闭环报告。
+1. G1（公开前必做）：按上方短周期契约接入低敏感、封闭枚举、具有管理端汇总消费者的 UI feedback（界面反馈），覆盖 Ask/Generate/Fix（询问 / 生成 / 修复）成功结果；不记录原始内容，不自动回灌。
+2. G2（有真实反馈量后触发）：把负反馈与现有安全 observation（观测）关联为待审核 candidate（候选项）。如果现有观测不足以复现，只能由用户明确同意后主动提交经脱敏的最小材料；人工确认后才能进入 bad case（问题用例）或新 eval case（评估用例）。
+3. G3（G2 稳定后）：输出按失败类型、修复状态和版本变化的闭环报告，并与 C1 的真实用量 / 费用数据关联；不自动改变 baseline（基线）或 Holdout（留出集）。
+4. G1-G3 共同边界：定义独立于 eval run（评估运行）的 serving observation envelope 和 request correlation（在线观测信封与请求关联）；在记录 query、source、answer、latency/cost（问题、来源、回答、延迟 / 费用）前先完成 Secret/token/YAML（密钥 / 令牌 / 配置文件）脱敏、默认开关、采样、保留周期、删除机制和本地 / 远程边界。G1 不得借反馈之名提前打开原始内容留存。
 
 ### Phase H：全量语料规模化训练（后期）
 
