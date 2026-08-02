@@ -39,6 +39,7 @@ const REQUIRED_IGNORES = [
   'node_modules',
   '.next',
   'data/index',
+  'data/schemas/snapshots',
   'data/observability',
   'data/eval/runs',
   'data/eval/traces',

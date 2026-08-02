@@ -25,6 +25,7 @@ import {
   decodeReleaseManifest,
   deriveIndexArtifactIdentity,
   resolveDraftReleaseIdentity,
+  resolveReleaseHistoryBoundary,
   resolveReleasePreparation,
   resolveReleaseSourceState,
   verifyDraftRelease,
@@ -117,6 +118,12 @@ function currentReleaseSourceState() {
   });
 }
 
+function currentReleaseHistoryBoundary(): string | null {
+  return resolveReleaseHistoryBoundary(
+    JSON.parse(readFileSync('release-please-config.json', 'utf8')) as unknown,
+  );
+}
+
 function currentReleaseIdentity() {
   const sourceState = currentReleaseSourceState();
   if (sourceState.status === 'placeholder') {
@@ -198,6 +205,7 @@ function gate(options: Options): void {
     ),
     headCommit: options['head-sha']!,
     currentTagCommit: tagCommit,
+    releaseHistoryBoundaryCommit: currentReleaseHistoryBoundary(),
   });
   if (decision.historyBoundaryCommit !== null) {
     const ancestry = spawnSync(

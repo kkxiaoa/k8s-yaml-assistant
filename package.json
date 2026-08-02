@@ -52,6 +52,7 @@
     "better-sqlite3": "12.11.1",
     "dotenv": "17.4.2",
     "js-yaml": "4.3.0",
+    "monaco-editor": "0.56.0",
     "next": "16.2.12",
     "next-auth": "4.24.15",
     "react": "19.2.7",
@@ -73,6 +74,7 @@
     "typescript": "6.0.3"
   },
   "overrides": {
+    "dompurify": "3.4.12",
     "postcss": "8.5.23",
     "sharp": "0.35.3"
   }

@@ -2,7 +2,7 @@
 
 ## Generated Kubernetes schemas
 
-`data/schemas/generated/` 包含从集群 OpenAPI（开放应用程序接口规范）归一化得到的 Schema（模式定义）快照。当前精选闭包包含来自以下上游项目的 API（应用程序接口）结构和字段说明：
+`data/schemas/generated/` 包含从集群 OpenAPI（开放应用程序接口规范）快照归一化并审核提交的 Schema（模式定义）精选闭包。当前闭包包含来自以下上游项目的 API（应用程序接口）结构和字段说明：
 
 | 上游项目 | 项目地址 | 许可证 |
 | --- | --- | --- |

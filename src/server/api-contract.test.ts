@@ -289,10 +289,10 @@ test('每条路由字节预算均为正整数且不超过全局 256 KiB', async 
 });
 
 test('路由返回不回显请求内容的稳定 400/413 错误', async () => {
-  const rawSecret = 'TestRouteBodySecret123';
+  const sensitiveValue = 'TestRouteBodyValue123';
   const invalidRequest = new Request('http://localhost/api/check', {
     method: 'POST',
-    body: JSON.stringify({ yaml: 'kind: Pod', unexpected: rawSecret }),
+    body: JSON.stringify({ yaml: 'kind: Pod', unexpected: sensitiveValue }),
   });
   const invalidResponse = await checkPost(invalidRequest);
   assert.equal(invalidResponse.status, 400);
@@ -300,7 +300,7 @@ test('路由返回不回显请求内容的稳定 400/413 错误', async () => {
   assert.deepEqual(JSON.parse(invalidText), {
     error: { code: 'invalid_request' },
   });
-  assert.equal(invalidText.includes(rawSecret), false);
+  assert.equal(invalidText.includes(sensitiveValue), false);
 
   const oversizedResponse = await checkPost(
     new Request('http://localhost/api/check', {

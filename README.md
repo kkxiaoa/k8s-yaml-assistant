@@ -109,16 +109,16 @@ npm run deploy:check
 
 ```bash
 # Kubernetes OpenAPI（开放应用程序接口规范）
-npm run ingest:schemas -- --source kubernetes --input openapi.json
+npm run ingest:schemas -- --source kubernetes --input openapi.json --out data/schemas/snapshots/kubernetes
 
 # 单个 CRD（自定义资源定义）
-npm run ingest:schemas -- --source crd --input path/to/resource.yaml
+npm run ingest:schemas -- --source crd --input path/to/resource.yaml --out data/schemas/snapshots/example-crd
 
 # 当前 kubeconfig 指向集群的 OpenAPI v3（开放应用程序接口规范版本 3）
-npm run ingest:schemas -- --source cluster-discovery --out data/schemas/generated
+npm run ingest:schemas -- --source cluster-discovery --out data/schemas/snapshots/cluster
 ```
 
-每次输出都是一份带清单的完整快照。仓库只跟踪 `data/schemas/curated.json` 所选资源及其 `$ref` 传递闭包；完整集群快照和向量索引保持在版本控制之外。
+`--out` 必须指向空目录或由上一份 `manifest.json` 明确拥有的快照目录。仓库只跟踪 `data/schemas/curated.json` 所选资源及其 `$ref` 传递闭包；完整快照和向量索引保持在版本控制之外。
 
 ## 评估与交付证据
 

@@ -31,7 +31,7 @@
 
 | 入口 | 作用 | 写盘边界 |
 | --- | --- | --- |
-| `npm run ingest:schemas -- ...` | 从 OpenAPI（开放应用程序接口规范）、集群或 CRD（自定义资源定义）生成 Schema（模式定义）快照 | 只写调用方指定的输出目录 |
+| `npm run ingest:schemas -- ... --out <directory>` | 从 OpenAPI（开放应用程序接口规范）、集群或 CRD（自定义资源定义）生成 Schema（模式定义）快照 | 必须显式指定空目录或已有受管快照目录 |
 | `npm run index:build` | 构建持久化向量索引 | 只写显式 `INDEX_DIR`；身份命中时跳过 |
 | `npm run release:manifest -- ...` | 创建和验证发布身份、附件与证明 | 只写调用方指定的输出文件 |
 | `npm run deployment:authorize -- ...` | 创建和验证有界生产部署授权 | 只写调用方指定的授权、身份或状态文件 |
