@@ -284,11 +284,8 @@ function validateReleasePleaseConfig(): void {
   assert.equal(rootPackage['include-component-in-tag'], false);
   assert.equal(rootPackage.draft, true);
   assert.equal(rootPackage['bump-minor-pre-major'], true);
-  if (versionManifest['.'] === '0.0.0') {
-    assert.equal(rootPackage['release-as'], '0.1.0');
-  } else {
-    assert.equal(rootPackage['release-as'], undefined);
-  }
+  assert.equal(versionManifest['.'], '0.4.0');
+  assert.equal(rootPackage['release-as'], '0.4.1');
 
   const packageJson = json(join(root, 'package.json'));
   const packageLock = json(join(root, 'package-lock.json'));
