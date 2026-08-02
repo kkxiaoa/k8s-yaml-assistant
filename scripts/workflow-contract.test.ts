@@ -30,7 +30,6 @@ const releasePleaseManifestPath = join(root, '.release-please-manifest.json');
 const codeownersPath = join(root, '.github', 'CODEOWNERS');
 const dockerfilePath = join(root, 'Dockerfile');
 
-const releaseHistoryBoundary = '1538f2db0bfd45cf28aebfc4eeb090f2957754a9';
 const applicationImage = 'ghcr.io/kkxiaoa/k8s-yaml-assistant';
 const indexImage = 'ghcr.io/kkxiaoa/k8s-yaml-assistant-index';
 
@@ -271,7 +270,7 @@ function assertCodeowners(): void {
 function validateReleasePleaseConfig(): void {
   const config = json(releasePleaseConfigPath);
   assert.equal(config['bootstrap-sha'], undefined);
-  assert.equal(config['last-release-sha'], releaseHistoryBoundary);
+  assert.equal(config['last-release-sha'], undefined);
   const versionManifest = json(releasePleaseManifestPath);
   const rootPackage = object(
     object(config.packages, 'release-please packages')['.'],
@@ -284,8 +283,7 @@ function validateReleasePleaseConfig(): void {
   assert.equal(rootPackage['include-component-in-tag'], false);
   assert.equal(rootPackage.draft, true);
   assert.equal(rootPackage['bump-minor-pre-major'], true);
-  assert.equal(versionManifest['.'], '0.4.0');
-  assert.equal(rootPackage['release-as'], '0.4.1');
+  assert.equal(rootPackage['release-as'], undefined);
 
   const packageJson = json(join(root, 'package.json'));
   const packageLock = json(join(root, 'package-lock.json'));
@@ -351,21 +349,6 @@ function validatePrWorkflow(value: JsonObject, source: string): void {
     );
   }
   assert.equal(verify['runs-on'], 'ubuntu-24.04');
-  const historyOverride = namedStep(
-    verify,
-    'Require release history override removal',
-    'PR verify',
-  );
-  assert.equal(
-    historyOverride.if,
-    "github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--branches--main')",
-  );
-  assert.equal(typeof historyOverride.run, 'string');
-  assertContains(historyOverride.run as string, [
-    'release-please-config.json',
-    'last-release-sha',
-    'release PR must remove the history rewrite override',
-  ]);
   assert.doesNotMatch(JSON.stringify(verify), /\bghcr\.io\b/u);
   assert.deepEqual(
     object(
