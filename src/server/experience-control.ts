@@ -152,9 +152,9 @@ export const MODEL_ROUTE_LEASE_MS: Readonly<Record<ModelRoute, number>> = {
   fix: 10 * 60_000,
 };
 
-export const NORMAL_DAILY_CREDITS = 10;
+export const NORMAL_DAILY_CREDITS = 30;
 export const INTERVIEW_DAILY_CREDITS = 50;
-export const ANONYMOUS_TRIAL_CREDITS = 7;
+export const ANONYMOUS_TRIAL_CREDITS = 30;
 export const ANONYMOUS_TRIAL_DURATION_MS = 30 * 24 * 60 * 60_000;
 export const CONTROL_DATA_RETENTION_DAYS = 35;
 export const GLOBAL_DAILY_BUDGET_MICROUSD = 1_000_000;

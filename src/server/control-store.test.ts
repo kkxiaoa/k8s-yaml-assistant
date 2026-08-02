@@ -300,7 +300,7 @@ test('管理员状态行缺失时更新失败关闭', () => {
 test('普通与开放展示额度共享当日累计，管理员只绕过个人点数', () => {
   const { store } = controlStore();
   makeAvailable(store);
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 30; index += 1) {
     const reservation = store.reserve(
       {
         requestId: `normal-${index}`,
@@ -329,7 +329,7 @@ test('普通与开放展示额度共享当日累计，管理员只绕过个人�
     { mode: 'interview', durationHours: 4 },
     NOW,
   );
-  for (let index = 0; index < 40; index += 1) {
+  for (let index = 0; index < 20; index += 1) {
     const reservation = store.reserve(
       {
         requestId: `interview-${index}`,
@@ -357,7 +357,7 @@ test('普通与开放展示额度共享当日累计，管理员只绕过个人�
   store.close();
 });
 
-test('匿名体验包跨自然日共用七点且与登录额度隔离', () => {
+test('匿名体验包跨自然日共用三十点且与登录额度隔离', () => {
   const { store } = controlStore();
   makeAvailable(store);
   const anonymous = {
@@ -367,25 +367,21 @@ test('匿名体验包跨自然日共用七点且与登录额度隔离', () => {
   } as const;
   assert.deepEqual(store.experienceAccess(anonymous, NOW).quota, {
     limited: true,
-    limit: 7,
-    remaining: 7,
+    limit: 30,
+    remaining: 30,
     resetsAt: null,
   });
 
-  for (const [route, credits] of [
-    ['generate', 3],
-    ['fix', 3],
-    ['ask', 1],
-  ] as const) {
+  for (let index = 0; index < 10; index += 1) {
     const reservation = store.reserve(
       {
-        requestId: `anonymous-${route}`,
+        requestId: `anonymous-generate-${index}`,
         subject: anonymous,
-        route,
+        route: 'generate',
       },
       NOW,
     );
-    store.settle(reservation, credits, NOW);
+    store.settle(reservation, 0, NOW);
   }
   assert.deepEqual(
     store.experienceAccess(
@@ -394,15 +390,28 @@ test('匿名体验包跨自然日共用七点且与登录额度隔离', () => {
     ).quota,
     {
       limited: true,
-      limit: 7,
+      limit: 30,
       remaining: 0,
       resetsAt: null,
     },
   );
+  assert.equal(
+    rejectionCode(() =>
+      store.reserve(
+        {
+          requestId: 'anonymous-over',
+          subject: anonymous,
+          route: 'ask',
+        },
+        NOW + 24 * 60 * 60_000,
+      ),
+    ),
+    'quota_exhausted',
+  );
   store.setAdminState({ mode: 'interview', durationHours: 4 }, NOW);
   assert.deepEqual(store.experienceAccess(anonymous, NOW).quota, {
     limited: true,
-    limit: 7,
+    limit: 30,
     remaining: 0,
     resetsAt: null,
   });
