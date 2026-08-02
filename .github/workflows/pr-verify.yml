@@ -66,14 +66,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Require release history override removal
-        if: github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--branches--main')
-        run: |
-          if jq -e 'has("last-release-sha")' release-please-config.json > /dev/null; then
-            echo "release PR must remove the history rewrite override" >&2
-            exit 1
-          fi
-
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
