@@ -3,6 +3,13 @@
 > 状态：当前维护。
 > 用途：记录面向使用者的版本变化、部署边界和已知限制。
 
+## [0.4.1](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.4.0...v0.4.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* link published release evidence ([#45](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/45)) ([574cec4](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/574cec476e9350864256e7166ec402d704a382bd))
+
 ## [0.4.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.3.1...v0.4.0) (2026-08-01)
 
 
