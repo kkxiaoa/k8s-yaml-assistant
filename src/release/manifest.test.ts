@@ -16,6 +16,7 @@ import {
   deriveIndexArtifactIdentity,
   releaseNotesSha256,
   resolveDraftReleaseIdentity,
+  resolveReleaseHistoryBoundary,
   resolveReleasePreparation,
   resolveReleaseIdentity,
   resolveReleaseSourceState,
@@ -542,10 +543,35 @@ test('release preparation distinguishes development, release merge and active dr
         associatedPullRequests: [],
         headCommit: 'b'.repeat(40),
         currentTagCommit: sourceCommit,
+        releaseHistoryBoundaryCommit: null,
       }),
       {
         action: 'prepare',
         historyBoundaryCommit: sourceCommit,
+      },
+    );
+  });
+
+  await t.test('history rewrite uses the configured release boundary', () => {
+    const rewrittenBoundary = 'b'.repeat(40);
+    assert.deepEqual(
+      resolveReleasePreparation({
+        sourceState: releaseSourceState(),
+        releases: [
+          listedRelease({
+            tagName: 'v0.1.0',
+            targetCommitish: sourceCommit,
+            isDraft: false,
+          }),
+        ],
+        associatedPullRequests: [],
+        headCommit: 'c'.repeat(40),
+        currentTagCommit: sourceCommit,
+        releaseHistoryBoundaryCommit: rewrittenBoundary,
+      }),
+      {
+        action: 'prepare',
+        historyBoundaryCommit: rewrittenBoundary,
       },
     );
   });
@@ -558,6 +584,7 @@ test('release preparation distinguishes development, release merge and active dr
         associatedPullRequests: [releasePullRequest()],
         headCommit: sourceCommit,
         currentTagCommit: null,
+        releaseHistoryBoundaryCommit: null,
       }),
       {
         action: 'create-draft',
@@ -585,6 +612,7 @@ test('release preparation distinguishes development, release merge and active dr
         associatedPullRequests: [],
         headCommit: 'b'.repeat(40),
         currentTagCommit: null,
+        releaseHistoryBoundaryCommit: null,
       }),
       {
         action: 'defer',
@@ -604,6 +632,7 @@ test('release preparation distinguishes development, release merge and active dr
         associatedPullRequests: [],
         headCommit: sourceCommit,
         currentTagCommit: null,
+        releaseHistoryBoundaryCommit: null,
       }),
       {
         action: 'prepare',
@@ -687,6 +716,18 @@ test('release preparation fails closed on ambiguous or broken lifecycle state', 
       ],
       currentTagCommit: null,
     },
+    {
+      releases: [],
+      associatedPullRequests: [releasePullRequest()],
+      currentTagCommit: null,
+      releaseHistoryBoundaryCommit: 'b'.repeat(40),
+    },
+    {
+      releases: [activeDraft],
+      associatedPullRequests: [],
+      currentTagCommit: null,
+      releaseHistoryBoundaryCommit: 'b'.repeat(40),
+    },
   ];
 
   for (const input of invalidInputs) {
@@ -694,6 +735,7 @@ test('release preparation fails closed on ambiguous or broken lifecycle state', 
       resolveReleasePreparation({
         sourceState: releaseSourceState(),
         headCommit: sourceCommit,
+        releaseHistoryBoundaryCommit: null,
         ...input,
       }),
     );
@@ -715,7 +757,22 @@ test('release preparation fails closed on ambiguous or broken lifecycle state', 
       associatedPullRequests: [],
       headCommit: sourceCommit,
       currentTagCommit: null,
+      releaseHistoryBoundaryCommit: null,
     }),
+  );
+});
+
+test('release history boundary reads only the upstream override', () => {
+  assert.equal(resolveReleaseHistoryBoundary({ packages: {} }), null);
+  assert.equal(
+    resolveReleaseHistoryBoundary({
+      'last-release-sha': sourceCommit,
+      packages: {},
+    }),
+    sourceCommit,
+  );
+  assert.throws(() =>
+    resolveReleaseHistoryBoundary({ 'last-release-sha': 'main' }),
   );
 });
 

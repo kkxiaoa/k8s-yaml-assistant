@@ -10,6 +10,7 @@ __pycache__
 .ruff_cache
 data/index
 data/index-*
+data/schemas/snapshots
 data/observability
 data/control
 data/eval/runs

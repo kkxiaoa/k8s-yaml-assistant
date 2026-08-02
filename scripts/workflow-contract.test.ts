@@ -30,7 +30,7 @@ const releasePleaseManifestPath = join(root, '.release-please-manifest.json');
 const codeownersPath = join(root, '.github', 'CODEOWNERS');
 const dockerfilePath = join(root, 'Dockerfile');
 
-const releaseBootstrapSha = '273704fb72133abed5d70678d0259de9c600c21c';
+const releaseHistoryBoundary = '1538f2db0bfd45cf28aebfc4eeb090f2957754a9';
 const applicationImage = 'ghcr.io/kkxiaoa/k8s-yaml-assistant';
 const indexImage = 'ghcr.io/kkxiaoa/k8s-yaml-assistant-index';
 
@@ -270,7 +270,8 @@ function assertCodeowners(): void {
 
 function validateReleasePleaseConfig(): void {
   const config = json(releasePleaseConfigPath);
-  assert.equal(config['bootstrap-sha'], releaseBootstrapSha);
+  assert.equal(config['bootstrap-sha'], undefined);
+  assert.equal(config['last-release-sha'], releaseHistoryBoundary);
   const versionManifest = json(releasePleaseManifestPath);
   const rootPackage = object(
     object(config.packages, 'release-please packages')['.'],
@@ -353,6 +354,21 @@ function validatePrWorkflow(value: JsonObject, source: string): void {
     );
   }
   assert.equal(verify['runs-on'], 'ubuntu-24.04');
+  const historyOverride = namedStep(
+    verify,
+    'Require release history override removal',
+    'PR verify',
+  );
+  assert.equal(
+    historyOverride.if,
+    "github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--branches--main')",
+  );
+  assert.equal(typeof historyOverride.run, 'string');
+  assertContains(historyOverride.run as string, [
+    'release-please-config.json',
+    'last-release-sha',
+    'release PR must remove the history rewrite override',
+  ]);
   assert.doesNotMatch(JSON.stringify(verify), /\bghcr\.io\b/u);
   assert.deepEqual(
     object(

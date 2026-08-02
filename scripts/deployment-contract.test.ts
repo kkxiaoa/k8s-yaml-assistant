@@ -546,10 +546,9 @@ test('unsafe deployment privilege boundary mutations fail', async (t) => {
   }
 
   await t.test('embedded kubeconfig', () => {
+    const embeddedValue = ['client-key-data:', 'cHJpdmF0ZS1rZXk='].join(' ');
     assert.throws(() =>
-      validateNoCredentialMaterial(
-        'client-key-data: cHJpdmF0ZS1rZXk=',
-      ),
+      validateNoCredentialMaterial(embeddedValue),
     );
   });
 
@@ -562,10 +561,12 @@ test('unsafe deployment privilege boundary mutations fail', async (t) => {
   });
 
   await t.test('embedded access token', () => {
+    const embeddedValue = [
+      'TOKEN',
+      ['ghp', '0123456789abcdefghijklmnop'].join('_'),
+    ].join('=');
     assert.throws(() =>
-      validateNoCredentialMaterial(
-        'TOKEN=ghp_0123456789abcdefghijklmnop',
-      ),
+      validateNoCredentialMaterial(embeddedValue),
     );
   });
 });

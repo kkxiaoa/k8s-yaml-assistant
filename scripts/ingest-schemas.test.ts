@@ -50,6 +50,23 @@ mkdirSync(input);
 try {
   writeInput(input, 'Pod');
   writeInput(input, 'Service');
+  assert.throws(
+    () =>
+      execFileSync(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          'scripts/ingest-schemas.ts',
+          '--source',
+          'dir',
+          '--input',
+          input,
+        ],
+        { cwd: process.cwd(), stdio: 'pipe' },
+      ),
+    /Missing --out/u,
+  );
   ingest(input, outDir);
   assert.equal(existsSync(join(outDir, 'resources', 'core.v1.Pod.json')), true);
   assert.equal(

@@ -11,6 +11,7 @@ dist/
 build/
 *.tsbuildinfo
 data/schemas/generated/
+data/schemas/snapshots/
 # 持久化索引:派生自 CORPUS + 嵌入模型,体积大(~33MB f32)。由 index:build / CI 重建,不入 git。
 data/index/
 data/index-ab/

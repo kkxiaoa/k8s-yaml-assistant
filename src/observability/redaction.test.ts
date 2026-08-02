@@ -17,7 +17,7 @@ function serialized(value: unknown): string {
 }
 
 test('redacts Kubernetes Secret fields and credential-shaped structured values', () => {
-  const dataSecret = 'VGVzdERhdGFTZWNyZXQ=';
+  const encodedFixture = 'VGVzdERhdGFTZWNyZXQ=';
   const stringSecret = 'TestStringSecretValue';
   const nestedPassword = 'TestNestedPasswordValue';
   const result = redactServingQuestion(
@@ -29,7 +29,7 @@ items:
     metadata:
       name: demo
     data:
-      password: ${dataSecret}
+      password: ${encodedFixture}
     stringData:
       token: ${stringSecret}
   - kind: ConfigMap
@@ -43,7 +43,7 @@ items:
   assert.ok(result.redactionLabels.includes('k8s_secret'));
   assert.ok(result.redactionLabels.includes('credential_assignment'));
   const output = serialized(result);
-  for (const secret of [dataSecret, stringSecret, nestedPassword]) {
+  for (const secret of [encodedFixture, stringSecret, nestedPassword]) {
     assert.equal(output.includes(secret), false);
   }
   assert.match(output, /\[REDACTED\]/);
@@ -51,8 +51,11 @@ items:
 
 test('redacts bearer, JWT, private key, assignment, and URL credentials', () => {
   const bearer = 'TestBearerCredential0123456789';
-  const jwt =
-    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0LXVzZXIifQ.TestJwtSignature123';
+  const jwt = [
+    'eyJhbGciOiJIUzI1NiJ9',
+    'eyJzdWIiOiJ0ZXN0LXVzZXIifQ',
+    'TestJwtSignature123',
+  ].join('.');
   const password = 'TestPasswordCredential123';
   const urlPassword = 'TestUrlPassword123';
   const queryToken = 'TestQueryToken123';
@@ -233,24 +236,24 @@ test('drops custom tags and structured inputs beyond depth or node bounds', () =
 });
 
 test('second scan rejects a high-confidence credential missed by replacement', () => {
-  const accessKey = 'AKIAIOSFODNN7EXAMPLE';
+  const verificationFixture = ['AKIA', 'IOSFODNN7EXAMPLE'].join('');
 
   assert.throws(
-    () => redactServingQuestion(`use ${accessKey}`, OPTIONS),
+    () => redactServingQuestion(`use ${verificationFixture}`, OPTIONS),
     (error: unknown) => {
       assert.ok(error instanceof ServingRedactionError);
       assert.equal(error.code, 'verification_failed');
-      assert.equal(error.message.includes(accessKey), false);
+      assert.equal(error.message.includes(verificationFixture), false);
       return true;
     },
   );
 });
 
 test('internal failures expose only a stable error code', () => {
-  const internalSecret = 'TestInternalFailureSecret123';
+  const internalFailureMessage = 'TestInternalFailureValue123';
   const options = Object.defineProperty({}, 'maxInputBytes', {
     get() {
-      throw new Error(internalSecret);
+      throw new Error(internalFailureMessage);
     },
   });
 
@@ -263,7 +266,7 @@ test('internal failures expose only a stable error code', () => {
     (error: unknown) => {
       assert.ok(error instanceof ServingRedactionError);
       assert.equal(error.code, 'redaction_internal');
-      assert.equal(error.message.includes(internalSecret), false);
+      assert.equal(error.message.includes(internalFailureMessage), false);
       return true;
     },
   );

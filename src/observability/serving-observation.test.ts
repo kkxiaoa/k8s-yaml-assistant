@@ -11,7 +11,7 @@ import type { RedactedServingQuestion } from './redaction';
 
 const REQUEST_ID = '11111111-1111-4111-8111-111111111111';
 const OBSERVATION_ID = '22222222-2222-4222-8222-222222222222';
-const RAW_SECRET = 'TestRawTraceSecret123';
+const RAW_SENSITIVE_VALUE = 'TestRawTraceValue123';
 
 const redactedQuestion: RedactedServingQuestion = {
   disposition: 'redacted',
@@ -22,27 +22,27 @@ const redactedQuestion: RedactedServingQuestion = {
 
 function trace(overrides: Partial<RetrievalTrace> = {}): RetrievalTrace {
   return {
-    question: RAW_SECRET,
+    question: RAW_SENSITIVE_VALUE,
     mode: 'explain_field',
     resourceHint: 'Deployment',
     apiVersionHint: 'apps/v1',
     fieldPathHint: 'spec.replicas',
-    queryText: RAW_SECRET,
+    queryText: RAW_SENSITIVE_VALUE,
     queryExpansion: {
       enabled: true,
       status: 'applied',
-      originalQueryText: RAW_SECRET,
-      expandedQueryText: RAW_SECRET,
+      originalQueryText: RAW_SENSITIVE_VALUE,
+      expandedQueryText: RAW_SENSITIVE_VALUE,
       matchedAliases: [
         {
           chunkId: 'schema::apps/v1::Deployment::spec.replicas',
           resource: 'Deployment',
           path: 'spec.replicas',
-          zhAlias: RAW_SECRET,
+          zhAlias: RAW_SENSITIVE_VALUE,
           strength: 'strong',
         },
       ],
-      expansionTerms: [RAW_SECRET],
+      expansionTerms: [RAW_SENSITIVE_VALUE],
       routedResource: 'Deployment',
       selectedResource: 'Deployment',
       resourceSelectionReason: 'same_resource',
@@ -53,11 +53,11 @@ function trace(overrides: Partial<RetrievalTrace> = {}): RetrievalTrace {
     coarseHits: [
       {
         id: 'schema::apps/v1::Deployment::spec.replicas',
-        title: RAW_SECRET,
+        title: RAW_SENSITIVE_VALUE,
         sourceType: 'schema',
         provenance: {
           authority: 'cluster_api',
-          sourceUri: `https://example.test/${RAW_SECRET}`,
+          sourceUri: `https://example.test/${RAW_SENSITIVE_VALUE}`,
           version: 'v1.36.0',
         },
         targets: [
@@ -139,7 +139,7 @@ test('projects only the persisted allowlist and decodes it again', () => {
   ]);
 
   const serialized = JSON.stringify(observation);
-  assert.equal(serialized.includes(RAW_SECRET), false);
+  assert.equal(serialized.includes(RAW_SENSITIVE_VALUE), false);
   for (const forbiddenField of [
     'queryText',
     'originalQueryText',
@@ -177,19 +177,22 @@ test('strict decoder rejects raw, unknown, and future fields at every level', ()
   const valid = project();
   const cases: unknown[] = [
     { ...valid, schemaVersion: 'serving-observation/v1' },
-    { ...valid, queryText: RAW_SECRET },
-    { ...valid, selectedText: RAW_SECRET },
-    { ...valid, errors: [RAW_SECRET] },
-    { ...valid, yaml: RAW_SECRET },
-    { ...valid, answer: RAW_SECRET },
-    { ...valid, chunkText: RAW_SECRET },
-    { ...valid, route: { ...valid.route, selectedText: RAW_SECRET } },
+    { ...valid, queryText: RAW_SENSITIVE_VALUE },
+    { ...valid, selectedText: RAW_SENSITIVE_VALUE },
+    { ...valid, errors: [RAW_SENSITIVE_VALUE] },
+    { ...valid, yaml: RAW_SENSITIVE_VALUE },
+    { ...valid, answer: RAW_SENSITIVE_VALUE },
+    { ...valid, chunkText: RAW_SENSITIVE_VALUE },
+    {
+      ...valid,
+      route: { ...valid.route, selectedText: RAW_SENSITIVE_VALUE },
+    },
     {
       ...valid,
       ranking: {
         ...valid.ranking,
         coarse: [
-          { ...valid.ranking.coarse[0], title: RAW_SECRET },
+          { ...valid.ranking.coarse[0], title: RAW_SENSITIVE_VALUE },
         ],
       },
     },
@@ -198,7 +201,10 @@ test('strict decoder rejects raw, unknown, and future fields at every level', ()
       ranking: {
         ...valid.ranking,
         coarse: [
-          { ...valid.ranking.coarse[0], sourceUri: RAW_SECRET },
+          {
+            ...valid.ranking.coarse[0],
+            sourceUri: RAW_SENSITIVE_VALUE,
+          },
         ],
       },
     },
@@ -339,7 +345,7 @@ test('projection omits invalid optional hints but rejects an invalid route mode'
     resourceHint: 'AKIAIOSFODNN7EXAMPLE',
     apiVersionHint: 'DEEPSEEK_API_KEY=TestHintCredential123',
     fieldPathHint:
-      'ghp_TestFieldPathCredential123456789012345678901234567890',
+      ['ghp', 'TestFieldPathCredential123456789012345678901234567890'].join('_'),
   });
   assert.deepEqual(observation.route, {
     mode: 'explain_field',

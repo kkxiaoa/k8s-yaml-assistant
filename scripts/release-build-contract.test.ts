@@ -13,6 +13,8 @@ const root = process.cwd();
 const expectedNodeVersion = '24.18.0';
 const expectedNodeTypesVersion = '24.13.3';
 const expectedJsYamlVersion = '4.3.0';
+const expectedMonacoEditorVersion = '0.56.0';
+const expectedDompurifyVersion = '3.4.12';
 const expectedNextVersion = '16.2.12';
 const expectedPostcssVersion = '8.5.23';
 const expectedSharpVersion = '0.35.3';
@@ -26,6 +28,8 @@ type ReleaseBuildBundle = {
   packageJson: JsonObject;
   lockRoot: JsonObject;
   resolvedJsYaml: JsonObject;
+  resolvedMonacoEditor: JsonObject;
+  resolvedDompurifyVersions: string[];
   resolvedNext: JsonObject;
   resolvedPostcssVersions: string[];
   resolvedSharpVersions: string[];
@@ -69,6 +73,11 @@ async function readActualBundle(): Promise<ReleaseBuildBundle> {
     packageJson: readJson(join(root, 'package.json')),
     lockRoot: packages[''] as JsonObject,
     resolvedJsYaml: packages['node_modules/js-yaml'] as JsonObject,
+    resolvedMonacoEditor: packages['node_modules/monaco-editor'] as JsonObject,
+    resolvedDompurifyVersions: Object.entries(packages)
+      .filter(([path]) => /(?:^|\/)node_modules\/dompurify$/u.test(path))
+      .map(([, value]) => (value as JsonObject).version as string)
+      .sort(),
     resolvedNext: packages['node_modules/next'] as JsonObject,
     resolvedPostcssVersions: Object.entries(packages)
       .filter(([path]) => /(?:^|\/)node_modules\/postcss$/u.test(path))
@@ -112,6 +121,17 @@ function validateReleaseBuild(bundle: ReleaseBuildBundle): void {
   assert.equal(dependencies?.['js-yaml'], expectedJsYamlVersion);
   assert.equal(lockDependencies?.['js-yaml'], expectedJsYamlVersion);
   assert.equal(bundle.resolvedJsYaml.version, expectedJsYamlVersion);
+  assert.equal(dependencies?.['monaco-editor'], expectedMonacoEditorVersion);
+  assert.equal(
+    lockDependencies?.['monaco-editor'],
+    expectedMonacoEditorVersion,
+  );
+  assert.equal(
+    bundle.resolvedMonacoEditor.version,
+    expectedMonacoEditorVersion,
+  );
+  assert.equal(overrides?.dompurify, expectedDompurifyVersion);
+  assert.deepEqual(bundle.resolvedDompurifyVersions, [expectedDompurifyVersion]);
   assert.equal(dependencies?.next, expectedNextVersion);
   assert.equal(lockDependencies?.next, expectedNextVersion);
   assert.equal(bundle.resolvedNext.version, expectedNextVersion);
@@ -147,6 +167,8 @@ function cloneReleaseBuildBundle(
     packageJson: structuredClone(source.packageJson),
     lockRoot: structuredClone(source.lockRoot),
     resolvedJsYaml: structuredClone(source.resolvedJsYaml),
+    resolvedMonacoEditor: structuredClone(source.resolvedMonacoEditor),
+    resolvedDompurifyVersions: [...source.resolvedDompurifyVersions],
     resolvedNext: structuredClone(source.resolvedNext),
     resolvedPostcssVersions: [...source.resolvedPostcssVersions],
     resolvedSharpVersions: [...source.resolvedSharpVersions],
@@ -188,6 +210,26 @@ test('release build contract rejects version, output, and font regressions', asy
     const candidate = cloneReleaseBuildBundle(source);
     const dependencies = candidate.packageJson.dependencies as JsonObject;
     dependencies['js-yaml'] = '4.2.0';
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('Monaco Editor returns to the vulnerable release', () => {
+    const candidate = cloneReleaseBuildBundle(source);
+    const dependencies = candidate.packageJson.dependencies as JsonObject;
+    dependencies['monaco-editor'] = '0.55.1';
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('DOMPurify security override is removed', () => {
+    const candidate = cloneReleaseBuildBundle(source);
+    const overrides = candidate.packageJson.overrides as JsonObject;
+    delete overrides.dompurify;
+    assert.throws(() => validateReleaseBuild(candidate));
+  });
+
+  await t.test('lockfile resolves a vulnerable DOMPurify copy', () => {
+    const candidate = cloneReleaseBuildBundle(source);
+    candidate.resolvedDompurifyVersions = ['3.4.8', expectedDompurifyVersion];
     assert.throws(() => validateReleaseBuild(candidate));
   });
 

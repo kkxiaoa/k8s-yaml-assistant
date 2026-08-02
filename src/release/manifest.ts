@@ -254,11 +254,19 @@ interface ResolveReleasePreparationInput {
   associatedPullRequests: unknown;
   headCommit: string;
   currentTagCommit: string | null;
+  releaseHistoryBoundaryCommit: string | null;
 }
 
 interface ReleasePreparationDecision {
   action: 'prepare' | 'create-draft' | 'defer';
   historyBoundaryCommit: string | null;
+}
+
+export function resolveReleaseHistoryBoundary(value: unknown): string | null {
+  const config = z
+    .object({ 'last-release-sha': CommitSchema.optional() })
+    .parse(value);
+  return config['last-release-sha'] ?? null;
 }
 
 export function resolveReleasePreparation(
@@ -273,6 +281,10 @@ export function resolveReleasePreparation(
     input.currentTagCommit === null
       ? null
       : CommitSchema.parse(input.currentTagCommit);
+  const releaseHistoryBoundaryCommit =
+    input.releaseHistoryBoundaryCommit === null
+      ? null
+      : CommitSchema.parse(input.releaseHistoryBoundaryCommit);
   const releaseMerges = pullRequests.filter(
     (pullRequest) =>
       pullRequest.author === 'github-actions[bot]' &&
@@ -310,6 +322,7 @@ export function resolveReleasePreparation(
       activeDraft.tagName !== input.sourceState.identity.tag ||
       activeDraft.isPrerelease ||
       currentTagCommit !== null ||
+      releaseHistoryBoundaryCommit !== null ||
       releaseMerge
     ) {
       throw new TypeError('active application draft conflicts with source state');
@@ -324,7 +337,8 @@ export function resolveReleasePreparation(
     if (
       input.sourceState.status !== 'release' ||
       currentReleases.length !== 0 ||
-      currentTagCommit !== null
+      currentTagCommit !== null ||
+      releaseHistoryBoundaryCommit !== null
     ) {
       throw new TypeError('release PR merge conflicts with current release state');
     }
@@ -335,7 +349,11 @@ export function resolveReleasePreparation(
   }
 
   if (input.sourceState.status === 'placeholder') {
-    if (applicationReleases.length !== 0 || currentTagCommit !== null) {
+    if (
+      applicationReleases.length !== 0 ||
+      currentTagCommit !== null ||
+      releaseHistoryBoundaryCommit !== null
+    ) {
       throw new TypeError('placeholder source conflicts with release history');
     }
     return {
@@ -365,7 +383,8 @@ export function resolveReleasePreparation(
   }
   return {
     action: 'prepare',
-    historyBoundaryCommit: currentTagCommit,
+    historyBoundaryCommit:
+      releaseHistoryBoundaryCommit ?? currentTagCommit,
   };
 }
 
