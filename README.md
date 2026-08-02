@@ -2,7 +2,7 @@
 
 面向 Kubernetes YAML 编写工作流的 AI Copilot（人工智能编写辅助）。它在 Monaco Editor（代码编辑器）中结合当前 YAML、光标上下文、集群 OpenAPI Schema（开放应用程序接口模式定义）和组织策略，提供有依据、可拒答、可校验的字段解释、错误解释、资源生成与修复建议。
 
-[在线演示](https://120.46.57.214/k8s-yaml-assistant) · [版本记录](CHANGELOG.md) · [安全策略](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
+[在线演示](https://120.46.57.214/k8s-yaml-assistant) · [发布版本与构建证据](https://github.com/kkxiaoa/k8s-yaml-assistant/releases) · [版本记录](CHANGELOG.md) · [安全策略](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
 
 > 在线演示的模型能力受模式、个人额度和全局费用门禁控制；无需模型的 YAML 检查始终是独立能力。
 
