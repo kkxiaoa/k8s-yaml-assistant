@@ -16,6 +16,9 @@ data:
   CONTROL_DB_PATH: /app/data/control/private/control.sqlite3
   NEXTAUTH_URL: https://120.46.57.214/k8s-yaml-assistant/api/auth
   APP_PUBLIC_ORIGIN: https://120.46.57.214
+  NODE_USE_ENV_PROXY: "1"
+  HTTPS_PROXY: http://95.40.183.32:3128
+  NO_PROXY: localhost,127.0.0.1,::1,.svc,.cluster.local,api.deepseek.com,api.voyageai.com
   NODE_ENV: production
   PORT: "3000"
   HOSTNAME: 0.0.0.0
