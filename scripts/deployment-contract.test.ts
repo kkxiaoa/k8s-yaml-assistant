@@ -647,6 +647,9 @@ test('the public experience manifests preserve the risky deployment relationship
       CONTROL_DB_PATH: configData.CONTROL_DB_PATH,
       NEXTAUTH_URL: configData.NEXTAUTH_URL,
       APP_PUBLIC_ORIGIN: configData.APP_PUBLIC_ORIGIN,
+      NODE_USE_ENV_PROXY: configData.NODE_USE_ENV_PROXY,
+      HTTPS_PROXY: configData.HTTPS_PROXY,
+      NO_PROXY: configData.NO_PROXY,
     },
     {
       MODEL_ACCESS_ENABLED: 'true',
@@ -654,6 +657,10 @@ test('the public experience manifests preserve the risky deployment relationship
       NEXTAUTH_URL:
         'https://120.46.57.214/k8s-yaml-assistant/api/auth',
       APP_PUBLIC_ORIGIN: 'https://120.46.57.214',
+      NODE_USE_ENV_PROXY: '1',
+      HTTPS_PROXY: 'http://95.40.183.32:3128',
+      NO_PROXY:
+        'localhost,127.0.0.1,::1,.svc,.cluster.local,api.deepseek.com,api.voyageai.com',
     },
   );
   assert.equal(configData.ACCESS_MODE, undefined);
@@ -833,6 +840,39 @@ test('the public experience manifests preserve the risky deployment relationship
   const egressText = JSON.stringify(policySpec.egress);
   assert.match(egressText, /"port":443/u);
   assert.match(egressText, /"169\.254\.0\.0\/16"/u);
+
+  const proxyEgressRules = yamlArray(
+    policySpec.egress,
+    'NetworkPolicy egress',
+  ).filter((entry) => {
+    const rule = yamlRecord(entry, 'NetworkPolicy egress rule');
+    return yamlArray(rule.ports, 'NetworkPolicy egress ports').some(
+      (portEntry) =>
+        yamlRecord(portEntry, 'NetworkPolicy egress port').port === 3128,
+    );
+  });
+  assert.equal(proxyEgressRules.length, 1);
+  const proxyEgressRule = yamlRecord(
+    proxyEgressRules[0],
+    'proxy egress rule',
+  );
+  assert.deepEqual(proxyEgressRule.ports, [
+    { protocol: 'TCP', port: 3128 },
+  ]);
+  const proxyEgressPeers = yamlArray(
+    proxyEgressRule.to,
+    'proxy egress peers',
+  );
+  assert.equal(proxyEgressPeers.length, 1);
+  const proxyIpBlock = nestedRecord(
+    yamlRecord(proxyEgressPeers[0], 'proxy egress peer'),
+    'ipBlock',
+    'proxy egress peer',
+  );
+  const proxyUrl = new URL(String(configData.HTTPS_PROXY));
+  assert.equal(proxyUrl.protocol, 'http:');
+  assert.equal(proxyUrl.port, '3128');
+  assert.equal(proxyIpBlock.cidr, proxyUrl.hostname + '/32');
 
   const accessFiles = filesUnder(accessDir).map((path) =>
     path.slice(accessDir.length + 1),

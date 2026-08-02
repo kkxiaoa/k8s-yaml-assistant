@@ -47,3 +47,9 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+    - to:
+        - ipBlock:
+            cidr: 95.40.183.32/32
+      ports:
+        - protocol: TCP
+          port: 3128
