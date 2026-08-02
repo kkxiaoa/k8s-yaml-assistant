@@ -3,6 +3,19 @@
 > 状态：当前维护。
 > 用途：记录面向使用者的版本变化、部署边界和已知限制。
 
+## [0.5.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.4.1...v0.5.0) (2026-08-02)
+
+
+### Features
+
+* increase public experience quotas ([#47](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/47)) ([6ff6879](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/6ff6879359fc130d60117d4b390ae9820fec7f2d))
+
+
+### Bug Fixes
+
+* extend GitHub OAuth request timeout ([#49](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/49)) ([b8e6f1c](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/b8e6f1cfc864c522a3ea969f78bda56a16374e0f))
+* route GitHub OAuth through egress proxy ([#50](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/50)) ([8ec5e0f](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/8ec5e0ff8aff8319c59d0dba2d0efde8e758df77))
+
 ## [0.4.1](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.4.0...v0.4.1) (2026-08-02)
 
 
