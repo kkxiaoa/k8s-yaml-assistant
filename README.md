@@ -1,357 +1,157 @@
 # K8s YAML Authoring Copilot
 
-面向 Kubernetes YAML 编写场景的 AI 辅助工具。当前阶段不做泛化 K8s 运维助手,重点解决用户在编辑器里写 YAML 时的四类任务:
+面向 Kubernetes YAML 编写工作流的 AI Copilot（人工智能编写辅助）。它在 Monaco Editor（代码编辑器）中结合当前 YAML、光标上下文、集群 OpenAPI Schema（开放应用程序接口模式定义）和组织策略，提供有依据、可拒答、可校验的字段解释、错误解释、资源生成与修复建议。
 
-- 解释字段和当前配置
-- 检查并修复 YAML
-- 根据自然语言生成资源 YAML
-- 给出可追溯的答案依据
+[在线演示](https://120.46.57.214/k8s-yaml-assistant) · [版本记录](CHANGELOG.md) · [安全策略](SECURITY.md) · [贡献指南](CONTRIBUTING.md)
 
+> 在线演示的模型能力受模式、个人额度和全局费用门禁控制；无需模型的 YAML 检查始终是独立能力。
 
-## 当前能力
+## 能力
 
-| 能力 | 入口 | 状态 |
-|------|------|------|
-| 编辑器内 YAML 编写 | `npm run dev` | ✅ |
-| Schema 检查 | Web `/api/check`;CLI `npm run check` | 匿名可用，不扣产品点数且不调用模型 |
-| 模型修复 | Web `/api/fix` | 匿名体验包或登录额度、全局费用与模式门禁 |
-| 生成资源 YAML | Web `/api/generate`;CLI `npm run gen` | Web 受体验门禁；CLI 保持开发入口 |
-| 上下文化问答 | Web `/api/ask` | 匿名体验包或登录额度、全局费用与模式门禁 |
-| 答案依据展示 | SSE `sources` + 前端“答案依据” | ✅ |
-| 健康检查 | Web `/api/health/live`、`/api/health/ready` | liveness（存活状态）只检查进程；readiness（就绪状态）校验本地 schema/policy/alias/index（模式 / 策略 / 别名 / 索引）闭包 |
-| 检索评估 | `npm run eval` | 契约已纠偏，待按 tuning（调优集）/ Holdout（留出集）/ full（完整集）重跑并审核 baseline（基线） |
-| Grounded Answer / Judge 评估 | `npm run eval:faith`、`npm run eval:judge` | 契约已纠偏，待重建 calibration（校准集）并审核 baseline（基线） |
-| Generation / Fix 评估 | `npm run eval:gen`、`npm run eval:fix` | evaluator（评估器）已纠偏，待按角色套件重跑并审核 baseline（基线） |
-| schema ingestion 骨架 | `npm run ingest:schemas` | ✅ |
+| 场景             | 行为                                                                          | 失败语义                                       |
+| ---------------- | ----------------------------------------------------------------------------- | ---------------------------------------------- |
+| Ask（询问）      | 结合问题、当前资源、光标路径、选区和校验错误检索依据，再流式回答              | 索引缺失、身份不匹配或来源不足时显式失败或拒答 |
+| Validate（校验） | 使用本地生成的 Schema（模式定义）检查 YAML                                    | 不调用模型，不修改输入                         |
+| Generate（生成） | 根据自然语言生成 Kubernetes 资源，并在返回前执行 Schema（模式定义）校验与修正 | 无法得到合法结果时返回结构化错误               |
+| Fix（修复）      | 根据真实校验错误修复 YAML，并重新校验目标值                                   | 不把仅有 `kind` 或字段路径视为修复成功         |
+| Feedback（反馈） | 对本次生成、修复或回答记录正负反馈；负反馈可附通用原因                        | 反馈与回答主体分离，不改变原响应内容           |
 
-## Web 使用
+Web（网页）界面提供：
+
+- Monaco Editor（代码编辑器）中的 YAML 编写与示例切换；
+- Ask / Validate / Generate / Fix（询问 / 校验 / 生成 / 修复）四条工作流；
+- GitHub OAuth 2.0（GitHub 开放授权 2.0）登录、匿名体验额度和管理员模式控制；
+
+## 为什么答案可核对
+
+项目把不同来源的职责分开，而不是让模型把所有内容混成一段文字：
+
+- `data/schemas/generated/` 是字段事实层，保存资源入口和 `$ref` 定义闭包；
+- `data/policies.json` 是组织策略层，不覆盖 Kubernetes Schema（模式定义）事实；
+- `data/aliases/` 只为已审核的字段别名补充查询表达；
+- 检索结果使用 `sourceType + provenance + targets` 表达来源、出处和目标字段；
+- Ask（询问）先发送 `sources` 事件，再发送 `delta` 事件，前端可以在答案完成前展示依据；
+- readiness（就绪检查）会验证 Schema（模式定义）、策略、别名和索引身份，运行时不会偷偷重建索引。
+
+## 架构
+
+```text
+OpenAPI / CRD
+      │
+      ▼
+schema ingestion ──► generated schema registry ──► validation
+                              │
+policies + reviewed aliases ──┼──► corpus + immutable index
+                              │                │
+                              └────────────────┴──► retrieval
+                                                     │
+Monaco editor context ───────────────────────────────┼──► Ask SSE
+                                                     ├──► Generate loop
+                                                     └──► Fix loop
+```
+
+主要实现位置：
+
+- `app/`：Next.js（React 全栈框架）页面和 API（应用程序接口）；
+- `src/knowledge/`：Schema（模式定义）、策略和语料装配；
+- `src/retrieval/`：字段精确命中、查询扩展、向量检索和重排；
+- `src/server/`：Ask / Validate / Generate / Fix（询问 / 校验 / 生成 / 修复）共享流水线；
+- `src/eval/`：检索、忠实度、生成和修复评估；
+- `deploy/`：K3s（轻量 Kubernetes）、应用清单和受限生产部署适配器；
+- `.github/workflows/`：合并请求门禁、索引构建、发布证据和生产部署授权链。
+
+## 本地运行
+
+要求 Node.js `24.18.0`。
 
 ```bash
 npm ci
 cp .env.example .env
-# 模型紧急开关默认关闭；开启后匿名浏览器获得低额度体验包，登录后获得独立每日额度。
 npm run dev
 ```
 
-生产模式需要先构建再启动：
+默认地址通常为：
+
+```text
+http://localhost:3000/k8s-yaml-assistant
+```
+
+`.env.example` 默认关闭模型访问。此时可以匿名使用 Validate（校验）；Ask / Generate / Fix（询问 / 生成 / 修复）需要按示例配置 DeepSeek、Voyage AI、索引、控制库和体验门禁。真实凭据只写入未提交的 `.env`，不要写入命令参数、仓库、日志或 YAML。
+
+生产构建：
 
 ```bash
 npm run build
 npm run start
 ```
 
-`dev` 和 `start` 只负责启动 Web 服务；Ask、Generate 和 Fix 请求到达对应 API（应用程序接口）后才会调用外部模型或检索服务。
+## 本地门禁
 
-打开 Next.js 输出的本地地址,默认通常是:
-
-```text
-http://localhost:3000/k8s-yaml-assistant
-```
-
-如果端口被占用,Next.js 会自动切到下一个可用端口。
-
-Web 端当前包含:
-
-- Monaco YAML 编辑器
-- GitHub OAuth 2.0（开放授权协议）登录与体验状态
-- 30 天匿名低额度模型体验包与登录增额
-- `生成资源`
-- `检查与修复`
-- `解释当前配置`
-- `答案依据`
-- 管理员专用的普通、开放展示和休眠模式管理页
-
-问答请求会携带当前 YAML、`kind`、`apiVersion`、选中文本、光标路径和校验错误,用于更贴近当前编辑上下文地检索与回答。
-
-## CLI 使用
+以下命令不调用模型，也不重建索引：
 
 ```bash
-# 字段问答
-npm run ask -- "reclaimPolicy 能填哪些值?默认是什么?"
-npm run ask -- "怎么允许 PVC 扩容?"
-
-# YAML 检查
-npm run check -- examples/storageclass-invalid.yaml
-npm run check -- examples/storageclass-valid.yaml
-
-# 生成 + 自检修正闭环
-npm run gen -- "用 AWS EBS CSI、保留策略、延迟绑定、允许扩容的 StorageClass,名字 prod-ssd"
+npm test
+npm run typecheck
+npm run build
+npm run schemas:check
+npm run aliases:check
+npm run corpus:closure
+npm run eval:check
+npm run workflow:check
+npm run deploy:check
 ```
 
-| 命令 | 外部调用 | 写盘边界 |
-|---|---|---|
-| `npm run ask -- "..."` | 索引命中时调用 Voyage 查询 embedding（向量嵌入）、rerank（重排）和 DeepSeek 回答；索引缺失或失效时在调用供应商前失败关闭 | 只读 `INDEX_DIR` 中经过身份和文件哈希校验的持久化索引；运行时不重建索引 |
-| `npm run check -- <yaml>` | DeepSeek tool loop（工具循环）；工具内部执行本地 schema validation（模式校验） | 不修改输入文件 |
-| `npm run gen -- "..."` | DeepSeek generation/repair loop（生成 / 修复循环） | 不写文件；最终 YAML 输出到终端 |
+调用 `npm run eval`、`npm run eval:faith`、`npm run eval:judge`、`npm run eval:gen` 或 `npm run eval:fix` 会访问外部模型或检索供应商并产生费用。评估运行、逐用例轨迹和观测分段默认不提交。
 
-这些 CLI（命令行界面）命令会产生真实 API（应用程序接口）请求和费用。
-执行 `npm run ask` 前必须准备有效索引，可显式运行 `npm run index:build`。语料内容、元数据、嵌入模型和索引文件哈希均匹配时，问答命令复用持久化索引；任一身份不匹配、文件损坏或索引不完整时明确失败，不读取旧格式，也不在运行时隐式重建。
+## Schema ingestion（模式定义摄取）
 
-## 核心架构
-
-```text
-data/schemas/generated/resources/*.json
-data/schemas/generated/definitions/*.json
-data/schemas/curated.json
-data/policies.json
-data/aliases/schema-field-aliases.jsonl
-        ↓
-src/knowledge/{schemas,schema-corpus,policy-corpus,corpus}.ts
-        ↓
-src/retrieval/{exact-field,query-expansion,retrieve,router,rerank}.ts
-        ↓
-src/server/pipeline.ts
-        ↓
-app/api/{ask,check,fix,generate}
-        ↓
-app/ Monaco Web UI
-```
-
-关键设计:
-
-- schema 是字段事实层,同时服务问答语料和 YAML 校验。
-- policy 是组织约束层,在 Ask 中与 schema 分层表达,不冒充 schema validation。
-- `curated.json` 控制当前训练语料范围;不再读取 `data/schemas/*.json` 手写 fixture。
-- `resources/` 保存资源入口 schema,`definitions/` 保存 OpenAPI `$ref` registry,运行时本地解析引用,不请求网络。
-- reviewed alias 为中文问题补充真实英文字段术语,serving 与 eval 共用同一 query expansion。
-- 问答返回 SSE:先发送 `sources`,再发送答案 `delta`。
-- 检索会结合用户问题、当前资源、光标字段、选中文本和校验错误。
-- 生成和修复通过 agentic loop 执行“生成/修复 → schema 校验 → 再修正”。
-
-## Schema Ingestion
-
-不要靠手动 import 或根目录 fixture 扩展资源覆盖。项目支持把外部 schema 标准化生成到:
-
-```text
-data/schemas/generated/
-  resources/
-  definitions/
-  manifest.json
-```
-
-系统不再回退到 `data/schemas/*.json` fixture。缺少 generated 产物时会直接失败,应重新运行 ingestion。
-
-示例:
+资源覆盖通过 ingestion pipeline（摄取流水线）扩展，不在源码中手写大规模字段集合：
 
 ```bash
-# 从 CRD YAML 生成 SchemaDoc
-npm run ingest:schemas -- --source crd --input path/to/my-crd.yaml
-
-# 从 Kubernetes OpenAPI JSON 生成内置资源 SchemaDoc
+# Kubernetes OpenAPI（开放应用程序接口规范）
 npm run ingest:schemas -- --source kubernetes --input openapi.json
 
-# 从集群 OpenAPI 导出的 JSON 生成 SchemaDoc
-npm run ingest:schemas -- --source cluster --input openapi.json
+# 单个 CRD（自定义资源定义）
+npm run ingest:schemas -- --source crd --input path/to/resource.yaml
 
-# 从当前 kubeconfig 指向的集群拉取完整 OpenAPI v3 discovery
+# 当前 kubeconfig 指向集群的 OpenAPI v3（开放应用程序接口规范版本 3）
 npm run ingest:schemas -- --source cluster-discovery --out data/schemas/generated
 ```
 
-标准化后的数据结构:
+每次输出都是一份带清单的完整快照。仓库只跟踪 `data/schemas/curated.json` 所选资源及其 `$ref` 传递闭包；完整集群快照和向量索引保持在版本控制之外。
 
-```ts
-interface SchemaDoc {
-  resource: string;
-  apiVersion: string;
-  group?: string;
-  version?: string;
-  kind: string;
-  schema: SchemaNode;
-  source: 'builtin' | 'cluster' | 'crd';
-}
-```
+## 评估与交付证据
 
-`resources/*.json` 保留资源 schema 入口,`definitions/*.json` 保留如 `io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta`、`io.k8s.api.core.v1.PodSpec` 这类共享 definition。应用运行时通过本地 registry 解析 `$ref`,避免把通用 schema 复制进每个资源文件。
+仓库包含四条相互独立的质量评估链：
 
-每个 `--out` 目录表示一次完整生成快照。新版 `manifest.json` 会列出 `ingest:schemas` 明确拥有的资源和定义文件；再次写入同一目录时，只删除上一份清单拥有、当前快照不再生成的文件。未归属文件会保留，若与新目标同名则在写盘前失败。
+- Retrieval（检索）：命中率、排序和来源闭包；
+- Faithfulness（忠实度）：回答声明是否由检索内容支持；
+- Generation（生成）：生成值、目标约束和校验闭环；
+- Fix（修复）：错误定位、目标值和跨资源关系。
 
-旧版只记录数量的清单，以及“没有清单但已经包含 JSON”的输出目录，不具备可验证的所有权，命令会在修改文件前拒绝。迁移时先写入空的临时 `--out` 目录，审核新清单和文件差异后再显式更新目标生成产物，最后运行 `npm run schemas:check`；命令不会静默认领或清空旧目录。
+评估用例区分 tuning（调优集）、Holdout（留出集）和 full（完整集）；只有完整运行且通过人工审核的结果才能晋升为 baseline（基线）。仓库不发布未经复核的分数。
 
-### 数据维护命令
+发布链在 GitHub Actions（自动化流水线）中构建不可变索引和镜像，并生成 SBOM（软件物料清单）、SLSA provenance（供应链来源证明）与 Sigstore（无密钥签名）证明。正式 Release（发布版本）发布后，生产任务只消费托管阶段生成并验证的有界授权，不检出合并请求代码。
 
-| 命令 | 外部调用 | 写盘与用途 |
-|---|---|---|
-| `npm run ingest:schemas -- ...` | 文件来源无；`--source cluster-discovery` 通过 `kubectl` 访问当前集群 | 默认写入 `data/schemas/generated/`；按 manifest（清单）所有权更新资源和定义，并清理本次已失效的自有文件 |
-| `npm run schemas:check` | 无 | 只读；按运行时惰性解析方式遍历当前 generated schemas（生成的模式定义），拒绝缺失、非法及直接成环引用，并检查联合类型分支可消费 |
-| `npm run aliases:check [-- --draft <path>]` | 无 | 只读；默认校验正式 alias registry（别名注册表），`--draft` 校验生成草稿；两者均核对目标、语料及评估用例的可追溯性 |
-| `npm run aliases:generate` | DeepSeek；每个目标失败时最多尝试 3 次 | 独占写入 `data/aliases/drafts/` 下带时间戳的 draft artifact（草稿产物）；不修改正式注册表 |
-| `npm run aliases:review -- <draft> [--apply]` | 无 | 默认只预览已人工审核草稿与正式注册表的合并结果；显式 `--apply` 才原子合并，且保留草稿未覆盖的正式记录 |
-| `npm run corpus:stats` | 无 | 只读；输出语料规模、资源覆盖、身份版本及 manifest hash（清单哈希） |
-| `npm run corpus:closure [-- --list]` | 无 | 只读；计算 curated whitelist（精选白名单）的 `$ref` 传递闭包 |
-| `npm run index:build` | index miss（索引未命中）时调用 Voyage document embedding（文档向量嵌入） | 默认写入 `data/index/` 的 v4 文件哈希索引；写入后立即回读校验，索引身份命中时跳过重建 |
+## 隐私与成本
 
-Alias（别名）人工审核流程：
+- Validate（校验）只处理本地 Schema（模式定义），不调用模型；
+- Ask / Generate / Fix（询问 / 生成 / 修复）会把完成任务所需的问题、YAML 上下文和校验信息发送给配置的外部供应商；
+- 本地 serving observation（在线观测）默认关闭；启用后只允许严格脱敏、采样和有保留周期的字段集合，不保存完整 YAML、问题、回答、Cookie（浏览器会话）或 OAuth（开放授权）令牌；
+- 模型能力受紧急开关、运行模式、主体额度和全局费用预算共同控制。
 
-```bash
-npm run aliases:generate
-npm run aliases:check -- --draft data/aliases/drafts/schema-field-aliases.TIMESTAMP.jsonl
-# 人工删除拒绝项，修正保留项，并填写 reviewed=true、reviewedAt
-npm run aliases:review -- data/aliases/drafts/schema-field-aliases.TIMESTAMP.jsonl
-npm run aliases:review -- data/aliases/drafts/schema-field-aliases.TIMESTAMP.jsonl --apply
-npm run aliases:check
-```
+在处理生产 Secret（密钥）或其他敏感清单前，应先在可信环境中完成脱敏，并确认供应商的数据处理条款。
 
-草稿目录默认被版本控制忽略。未审核记录会阻止合并；预览命令不会写盘，只有显式 `--apply` 才更新正式注册表。`ingest:schemas` 会覆盖当前清单拥有的同名文件并删除其中已失效的文件；`index:build` 会在索引失效时覆盖目标索引目录。执行这些写入命令前应先确认输入、目标目录和版本控制状态。
+## 已知限制
 
-## 评估与验证
+- 只面向 YAML 编写、理解、检查、修复和生成，不是集群运行时排障或自动执行 `kubectl` 的运维助手；
+- 当前覆盖是精选资源闭包，不承诺所有 Kubernetes 版本和第三方 CRD（自定义资源定义）；
+- 光标字段定位依赖编辑器上下文推断，复杂或不完整 YAML 中可能定位到相邻字段；
+- Ask / Generate / Fix（询问 / 生成 / 修复）的可用性受外部供应商、索引身份和费用门禁影响；
+- 参考生产拓扑是单节点、单副本，不承诺高可用。
 
-### 本地质量门禁
+## 参与项目
 
-```bash
-npx tsc --noEmit -p tsconfig.json
-npm test
-npm run eval:check
-npm run build
-```
+提交代码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题不要提交公开 Issue（议题），请按 [SECURITY.md](SECURITY.md) 的私密渠道报告。
 
-`npm test` 使用 Node.js 内置测试运行器和 `tsx` 加载器，自动发现全部 `*.test.ts` 并按文件串行执行。定向诊断时显式传入测试文件：
-
-```bash
-npm test -- src/retrieval/router.test.ts
-```
-
-这些命令不调用模型、embedding（向量嵌入）或 rerank（重排）。`npm run build` 使用系统字体栈，不下载外部字体。
-
-### Eval（评估）调用与成本边界
-
-| 命令 | 外部调用 | 主要写盘 | 用途与边界 |
-|---|---|---|---|
-| `npm run eval` / `npm run eval -- 5` | 有效索引命中后调用 Voyage query embedding（查询向量嵌入）与 rerank（重排）；index miss（索引未命中）时失败关闭且不调用模型 | `data/eval/runs/`、`data/eval/traces/` | 默认运行 retrieval tuning suite（检索调优套件）；可选数字保留为 `k` |
-| `npm run eval -- --holdout` / `npm run eval -- 5 --full` | 同上 | `data/eval/runs/`、`data/eval/traces/` | 显式运行 Holdout（留出集）或 full（完整集）检索评估 |
-| `npm run eval:faith` | Voyage embedding/rerank（向量嵌入 / 重排）；DeepSeek 回答与 judge（裁判） | `data/eval/runs/`、`data/eval/traces/` | 默认运行 Grounded Answer tuning suite（有依据回答调优套件） |
-| `npm run eval:faith -- --holdout` / `npm run eval:faith -- --full` | 同上 | `data/eval/runs/`、`data/eval/traces/` | 显式运行 Holdout（留出集）或 full（完整集）有依据回答评估 |
-| `npm run eval:faith -- <N>` / `--policy` | 同上 | `data/eval/runs/`、`data/eval/traces/` | smoke/policy subset（冒烟 / 策略子集），固定排除 Holdout（留出集），只用于诊断且不可晋升 baseline（基线） |
-| `npm run build:calibration` | 无 | 覆盖 `data/eval/judge-calibration.jsonl` | 从已完成的非 smoke faith runs/traces（非冒烟忠实度运行 / 轨迹）与人工标签生成 judge calibration snapshot（裁判校准快照）；拒绝 Holdout（留出集）轨迹 |
-| `npm run eval:judge` | DeepSeek judge（裁判），默认每个 case（用例）计划 5 票 | `data/eval/runs/`、`data/eval/traces/` | 完整 calibration eval（校准评估）；先执行 `build:calibration` |
-| `npm run eval:gen` / `npm run eval:fix` | DeepSeek generation/fix/repair（生成 / 修复 / 再修复）请求 | `data/eval/runs/`、`data/eval/traces/` | 默认运行 tuning suite（调优套件）；repair（再修复）会增加请求轮次 |
-| `npm run eval:gen -- --holdout` / `npm run eval:gen -- --full`；`npm run eval:fix -- --holdout` / `npm run eval:fix -- --full` | 同上 | `data/eval/runs/`、`data/eval/traces/` | 显式运行各自的 Holdout（留出集）或 full（完整集）评估 |
-| `npm run eval:compare -- <runId>` | 无 | 无 | 本地读取 run（运行记录）与同 kind baseline（同类型基线），不修改 artifact（产物） |
-| `npm run eval:promote -- <runId>` | 无 | `data/eval/baselines/<kind>.json` | 人工审核后显式晋升；不会由 eval（评估）或 compare（对比）自动执行 |
-| `npm run badcases:faith -- <runId> [--write]` | 无 | 默认不写；`--write` 覆盖 `data/eval/bad-cases.jsonl` | 预览或合并 faith bad cases（忠实度问题用例），写入前校验证据链；Holdout（留出集）轨迹不生成回灌候选 |
-
-调用外部服务的命令会产生实际 API（应用程序接口）请求和费用。runner（运行器）会在执行前打印 case count（用例数量），judge/repair（裁判 / 修复）的实际尝试次数保存在 trace（轨迹）；当前尚未贯通统一 usage/cost（用量 / 成本）统计，因此执行真实 eval（评估）前应按用例数量、票数和最大修复轮次估算调用量。
-
-retrieval、faith、generation、fix（检索、忠实度、生成、修复）统一默认选择 `tuning`，即 development + regression（开发用例 + 回归用例）。`--holdout` 只运行留出用例；`--full` 保持提交顺序运行全部用例，只应在调优冻结后执行，并且只有 `scope='full'` 的已完成运行可进入 baseline（基线）审核。
-
-这些参数只改变选择集，不会切换为 dry run（试运行）：retrieval/faith/generation/fix（检索 / 忠实度 / 生成 / 修复）的 `--holdout` 和 `--full` 仍会按上表调用真实外部服务并产生费用。`npm run eval:check` 只做本地契约与分布校验，不调用模型。
-
-当前提交数据由 `npm run eval:check` 核对：Retrieval（检索）83 条、Grounded Answer（有依据回答）88 条、Generation（生成）27 条、Fix（修复）9 条。Grounded Answer 包含 83 条检索引用、2 条错误解释和 3 条独立拒答；四类主评估各有 1 条 Holdout（留出集）。当前 case origin（用例来源）仍全部为 `human`，`schema_generated` 和 `bad_case` 暂无样本，不为填满分桶造题。错误解释的自动门禁覆盖真实校验输入、检索依据和 Faithfulness（忠实度），尚未完整自动判定 correctness（正确性）；首次 `--full` 运行必须人工审核对应 trace（轨迹）的完整性和修复方向。
-
-### 实验诊断命令
-
-| 命令 | 外部调用 | 写盘与边界 |
-|---|---|---|
-| `npm run aliases:ab [-- --all]` | Voyage query embedding/rerank（查询向量嵌入 / 重排）；index miss（索引未命中）时还会在内存中嵌入全量语料 | 不写 bad case（问题用例）或 baseline（基线）；默认只消费 target gate（目标门禁）通过的非 Holdout（非留出）用例，`--all` 比较 tuning suite（调优套件） |
-| `npm run voyage:ab` | Voyage query embedding/rerank（查询向量嵌入 / 重排） | 不写文件；要求 `data/index` 与 `data/index-ab` 已分别存在兼容索引，只用于模型对照诊断 |
-
-这两个命令属于实验诊断，不生成正式 `EvalRun`，其输出不能用于 baseline（基线）晋升。维护者级生命周期和保留依据见 `scripts/README.md`。
-
-### Run、Trace、Compare 与 Promote
-
-每次 eval 使用独立 runId，并写入：
-
-```text
-data/eval/runs/<runId>.json
-data/eval/traces/<runId>.<kind>.jsonl
-```
-
-run 记录 dataset、模型/corpus/index/prompt/config identity、metric definition version、状态和 trace 相对路径；trace 保存逐 case 输入、结果、outcome 和结构化错误阶段。baseline 只在显式 promote 后写入：
-
-```text
-data/eval/baselines/<kind>.json
-```
-
-compare 只有在 kind、dataset id/hash/caseCount、metric definition version 兼容，且 retrieval 的 `k` 相同时才输出 improved/regressed。模型、corpus、index、prompt 等配置变化作为实验变量展示；required metric 缺失属于阻断性 harness gap，`null` observation 显示为 N/A，不生成方向结论。
-
-promote（晋升）只接受 completed（已完成）、完整 scope（运行范围）、当前 metric registry（指标注册表）、required metric（必需指标）非 null、trace selection（轨迹选择）完整且 harness error（评估框架错误）为 0 的 run（运行记录）。retrieval/faith/generation/fix（检索、忠实度、生成、修复）必须显式为 `full`；`tuning` 和 `holdout` 均被拒绝。judge（裁判）必须匹配当前完整 calibration snapshot（校准快照）。baseline（基线）是可移植 snapshot（快照），不保存 run/trace（运行 / 轨迹）路径或工作区绝对路径。
-
-模型或基础设施出错时，先保留并检查本次证据：
-
-```bash
-cat data/eval/runs/<runId>.json
-less data/eval/traces/<runId>.<kind>.jsonl
-```
-
-先查看 run 的 `status/failure`，再按 trace 的 `outcome/error.stage/error.message` 定位 case。不要删除或复用原 runId；修复后重新执行会生成新 runId，不会覆盖原 run/trace。
-
-当前契约纠偏已完成结构实现，正式 baseline 尚待新版本 full run 和逐项人工审核；旧 baseline 与当前 identity/metric registry 不可直接比较。
-
-评估数据与运行产物的边界:
-
-```text
-data/eval/
-  bad-cases.jsonl                 # 可提交的问题台账
-  judge-calibration-labels.jsonl  # 可提交的人工 calibration 标签
-  judge-calibration.jsonl         # build:calibration 生成的 judge 输入快照
-  baselines/<kind>.json           # 人工晋升后提交的可移植 baseline snapshot
-  runs/<runId>.json               # 本地 EvalRun,不提交
-  traces/<runId>.<kind>.jsonl     # 本地逐 case TraceEnvelope,不提交
-
-data/observability/
-  serving-observations.<UTC-date>.<sequence>.jsonl  # 受控 serving observation 分段,不提交
-```
-
-`EvalRun.artifactPaths.trace` 保存相对 `data/eval/` 的 POSIX 路径,由运行时解析到当前工作区。`runs/`、`traces/` 由对应 runner（运行器）按需创建；`data/observability/` 仅在完整合法的 local mode（本地模式）初始化时创建。旧 artifact（产物）格式和旧 `serving-traces.jsonl` 均不兼容读取或迁移。baseline（基线）不复制 run（运行）文件,也不保存 ignored trace（被忽略的轨迹）路径。
-
-说明:
-
-- `npm run build` 不下载外部字体；容器禁网构建在生产 Dockerfile（容器构建文件）完成后单独验证。
-- 除 `npm test` 外，TypeScript npm 脚本通过 `tsx` CLI（命令行界面）启动；部分沙箱环境可能会拦截其 IPC pipe（进程间通信管道）创建。
-
-## 环境变量
-
-从 `.env.example` 复制本地配置；`.env` 不得提交。API Key（应用程序接口密钥）不得出现在仓库、文档、日志或 observation（观测）文件中。
-
-| 变量 | 作用与边界 |
-|---|---|
-| `DEEPSEEK_API_KEY` | Ask/Generate/Fix（询问 / 生成 / 修复）和相关 CLI（命令行界面）的 DeepSeek 凭据 |
-| `VOYAGE_API_KEY` | embedding/rerank（向量嵌入 / 重排）凭据 |
-| `DEEPSEEK_BASE_URL` | 必填 HTTPS（安全超文本传输协议）兼容端点；禁止 URL（网址）凭据、查询参数和片段 |
-| `DEEPSEEK_ANSWER_MODEL` | 必填且固定为 `deepseek-v4-flash`；只控制 Ask/Generate/Fix（询问 / 生成 / 修复），不控制离线 judge（裁判） |
-| `VOYAGE_EMBEDDING_URL` / `VOYAGE_RERANK_URL` | 必填 HTTPS（安全超文本传输协议）向量嵌入 / 重排端点 |
-| `VOYAGE_EMBEDDING_MODEL` | 必填 embedding model（向量嵌入模型）身份；发布值为 `voyage-3`，必须与 index identity（索引身份）一致 |
-| `VOYAGE_RERANK_MODEL` | 必填且固定为 `rerank-2.5` |
-| `INDEX_DIR` | 必填索引目录；本地示例为 `data/index`，容器内由 ConfigMap（普通配置）固定只读绝对路径 |
-| `ENABLE_QUERY_EXPANSION` | 必填且只接受 `true` 或 `false` |
-| `MODEL_ACCESS_ENABLED` | 模型紧急开关；只有精确 `true` 才继续其余准入，示例和首次生产部署固定为 `false` |
-| `GITHUB_ID` / `GITHUB_SECRET` | GitHub OAuth App（GitHub 开放授权应用）客户端凭据；登录只请求 `read:user` |
-| `NEXTAUTH_SECRET` | 八小时加密会话密钥；不得与其他用途共用 |
-| `ADMIN_GITHUB_ID` | 唯一管理员的稳定数字 GitHub 用户编号，不接受登录名 |
-| `CONTROL_SUBJECT_HMAC_KEY` | 32 字节严格 Base64（基础六十四编码）密钥，用于登录主体匿名化和匿名体验 Cookie（浏览器标识）签名 |
-| `CONTROL_DB_PATH` | SQLite（嵌入式数据库）路径；本地状态位于被忽略的 `data/control/private` |
-| `NEXTAUTH_URL` | 身份接口的完整基础地址，必须包含 `/k8s-yaml-assistant/api/auth` |
-| `APP_PUBLIC_ORIGIN` | 管理写入的精确 `Origin`（来源）允许值；生产只接受 HTTPS，本地 `npm run dev` 只额外接受回环 HTTP |
-| `SERVING_OBSERVATION_MODE` | Ask serving observation（询问在线观测）开关；未配置或 `off` 时不创建观测文件 |
-
-上述非敏感运行时配置缺失、未知或非法时会 fail closed（失败关闭）。Secret（密钥）只检查对应能力是否可用，不进入可序列化配置快照。新控制库固定从 Sleep Mode（休眠模式）开始；即使打开模型紧急开关，模式、个人额度和全局费用仍会独立阻断。在线回答显式使用 `deepseek-v4-flash`，离线 judge（裁判）独立使用 `deepseek-v4-pro`。
-
-### Ask serving observation（询问在线观测）
-
-默认 `SERVING_OBSERVATION_MODE=off`。设置为 `local` 前必须同时显式提供下列全部数值配置；缺失、格式错误、超过 hard cap（硬上限）或字段关系非法都会 fail closed（失败关闭）观测记录器，但 Ask 主流程继续运行：
-
-| 变量 | 约束 |
-|---|---|
-| `SERVING_OBSERVATION_SAMPLE_RATE` | `[0, 1]`；使用服务端 request ID（请求标识）的稳定 SHA-256（安全哈希算法）桶采样，不读取内容决定是否采样 |
-| `SERVING_OBSERVATION_MAX_FILE_BYTES` | 正整数且不超过 128 MiB；必须不大于总容量 |
-| `SERVING_OBSERVATION_MAX_TOTAL_BYTES` | 正整数且不超过 1 GiB |
-| `SERVING_OBSERVATION_RETENTION_DAYS` | `1..30` 的整数 |
-| `SERVING_OBSERVATION_MAX_INPUT_BYTES` | 正整数且不超过 256 KiB；限制进入脱敏器的 question（问题文本）字节数 |
-| `SERVING_OBSERVATION_MAX_TEXT_BYTES` | 正整数且不超过 16 KiB；必须不大于输入上限 |
-
-记录内容只包含严格 `serving-observation/v2` schema（模式）允许的脱敏 question（问题文本）或丢弃状态、受控 route hint（路由提示）、chunk ID（知识片段标识）、来源类别与权威性、目标字段、分数、查询扩展状态、延迟和索引缓存状态。不会记录 `queryText`、用户 YAML、选中内容、校验错误、answer（回答）、chunk title/text（知识片段标题 / 正文）、source URI（来源地址）、请求头、cookie（浏览器会话）或环境变量值；脱敏、二次扫描或 strict decode（严格解码）失败时不回退原文。
-
-local mode（本地模式）写入 `data/observability/serving-observations.<UTC-date>.<sequence>.jsonl`，按 UTC（协调世界时）日期或单文件字节上限轮转，并同时按保留天数和总字节上限清理最旧的受管普通文件。配置在模块初始化时读取；修改后必须重启进程。相同 stage/code（阶段 / 错误码）的配置、采样、脱敏、投影或文件故障每个进程只向 console（控制台）报告一次固定安全信号，不输出 payload（负载）或底层异常内容。
-
-人工清理前先停止唯一写入进程，并只检查受控文件名：
-
-```bash
-find data/observability -maxdepth 1 -type f -name 'serving-observations.*.jsonl' -print
-# 核对单个路径后再执行：rm -- data/observability/<reviewed-segment-name>
-```
-
-当前 local mode（本地模式）只支持单进程、单写入端，不适用于多实例或重叠写入；remote observability backend（远程可观测后端）尚未实现。生产候选值和 PVC（持久卷声明）边界以已审核部署设计为准，不能把上述 hard cap（硬上限）当作生产推荐值。
-
-当前模型接入:
-
-- 回答/生成:`Anthropic SDK` 接 DeepSeek Anthropic 兼容端点
-- embedding / rerank:Voyage AI
+项目采用 [Apache License 2.0](LICENSE)。生成 Schema（模式定义）的第三方来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

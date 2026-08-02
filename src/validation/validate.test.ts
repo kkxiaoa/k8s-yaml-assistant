@@ -1,4 +1,4 @@
-// Phase B:validateResource(schema 驱动通用校验)单测。纯函数,无需网络/key。
+// validateResource 的 Schema 驱动校验测试不依赖网络或凭据。
 // 运行: npm test
 
 import assert from 'node:assert/strict';

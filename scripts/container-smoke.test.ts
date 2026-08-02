@@ -44,6 +44,11 @@ test('dockerignore must exclude local state without excluding tracked schema clo
     ['data/observability', 'data/observability'],
     ['data/eval/runs', 'data/eval/runs'],
     ['data/eval/traces', 'data/eval/traces'],
+    ['/AGENTS.md', 'AGENTS.md'],
+    ['/CLAUDE.md', 'CLAUDE.md'],
+    ['/HANDOFF.md', 'HANDOFF.md'],
+    ['/docs/', 'docs/private.md'],
+    ['/scripts/k3s-image-preheat.sh', 'scripts/k3s-image-preheat.sh'],
   ];
 
   for (const [rule, excludedPath] of requiredExclusions) {
@@ -77,13 +82,23 @@ test('dockerignore must exclude local state without excluding tracked schema clo
   }
 });
 
-test('gitignore excludes current local tool caches at the repository boundary', () => {
+test('gitignore excludes local state and private repository material', () => {
   const rules = readFileSync(`${root}/.gitignore`, 'utf8')
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('#'));
 
-  for (const rule of ['__pycache__/', '*.pyc', '.ruff_cache/', '*.tsbuildinfo']) {
+  for (const rule of [
+    '__pycache__/',
+    '*.pyc',
+    '.ruff_cache/',
+    '*.tsbuildinfo',
+    '/AGENTS.md',
+    '/CLAUDE.md',
+    '/HANDOFF.md',
+    '/docs/',
+    '/scripts/k3s-image-preheat.sh',
+  ]) {
     assert.ok(rules.includes(rule), `.gitignore missing ${rule}`);
   }
 });
@@ -259,7 +274,7 @@ test('runtime-base smoke names the exact index-missing expectation', () => {
   );
 });
 
-test('build context selection includes only tracked and reviewed Task files', () => {
+test('build context selection includes only tracked and reviewed files', () => {
   assert.deepEqual(
     selectBuildContextPaths(
       ['src/server/health.ts', 'data/schemas/generated/manifest.json'],
@@ -277,7 +292,7 @@ test('build context selection includes only tracked and reviewed Task files', ()
   }
 });
 
-test('reviewed Task 11 files enter the clean build context before staging', () => {
+test('reviewed release files enter the clean build context before staging', () => {
   const required = [
     '.github/workflows/index-build.yml',
     '.github/workflows/release-artifacts.yml',

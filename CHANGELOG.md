@@ -30,10 +30,8 @@
 ### Bug Fixes
 
 * extend GitHub OAuth callback timeout ([#32](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/32)) ([858ce33](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/858ce33312a46e18cb0b2ba6d008f946822b152b))
-* import preheated image by release digest ([#29](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/29)) ([7ed5613](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/7ed56138364e983accffb971ae2e1ca02e0681da))
 * make control store writes atomic ([#33](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/33)) ([c376645](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/c37664505c751334a2d330c9a309f6e665d5ab95))
 * normalize draft release readback ([#27](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/27)) ([58f598f](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/58f598f80b9f9eb7957c1bb4d8d0e2fa262cb185))
-* preserve image root during K3s preheat ([#28](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/28)) ([cf5fc64](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/cf5fc6401dc73d48cc7367ab0bd94c1e3d25ec16))
 
 ## [0.2.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.1.1...v0.2.0) (2026-07-30)
 
@@ -42,9 +40,6 @@
 
 * add controlled public experience ([#23](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/23)) ([aba5654](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/aba5654963391cf5ee1f3e9505fc6f2c3085ac72))
 * enforce bounded API request contracts ([#22](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/22)) ([699261d](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/699261ddc6ffa73fd29905aebf3a28a6047ac2d7))
-* support rollback image preheating ([#24](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/24)) ([289bf9f](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/289bf9f595e0ca11f2dbf93411ba4317c459d69d))
-
-
 ### Bug Fixes
 
 * remove low-value release validation blockers ([#18](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/18)) ([d43a8b2](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/d43a8b24dee8dcc720d16f90304e6a74f7899ac5))

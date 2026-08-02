@@ -42,6 +42,11 @@ const REQUIRED_IGNORES = [
   'data/observability',
   'data/eval/runs',
   'data/eval/traces',
+  'AGENTS.md',
+  'CLAUDE.md',
+  'HANDOFF.md',
+  'docs/private.md',
+  'scripts/k3s-image-preheat.sh',
 ] as const;
 export const REVIEWED_WORKTREE_CONTEXT_FILES = [
   '.github/workflows/index-build.yml',

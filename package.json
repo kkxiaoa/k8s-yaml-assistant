@@ -2,11 +2,12 @@
   "name": "k8s-yaml-assistant",
   "version": "0.4.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": "24.18.0"
   },
-  "description": "K8s YAML 智能助手:CLI(ask/check/gen)+ 评估(eval)+ Next.js Web(Monaco)。Anthropic SDK 接 DeepSeek + Voyage。",
+  "description": "Evidence-first Kubernetes YAML authoring copilot with schema-backed validation, generation, repair, and evaluation.",
   "scripts": {
     "ask": "tsx src/cli/ask.ts",
     "check": "tsx src/cli/check.ts",

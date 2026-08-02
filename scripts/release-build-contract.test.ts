@@ -16,6 +16,7 @@ const expectedJsYamlVersion = '4.3.0';
 const expectedNextVersion = '16.2.12';
 const expectedPostcssVersion = '8.5.23';
 const expectedSharpVersion = '0.35.3';
+const expectedLicense = 'Apache-2.0';
 const fontExtensions = new Set(['.otf', '.ttf', '.woff', '.woff2']);
 
 type JsonObject = Record<string, unknown>;
@@ -88,6 +89,8 @@ async function readActualBundle(): Promise<ReleaseBuildBundle> {
 
 function validateReleaseBuild(bundle: ReleaseBuildBundle): void {
   assert.equal(bundle.nodeVersion, expectedNodeVersion);
+  assert.equal(bundle.packageJson.license, expectedLicense);
+  assert.equal(bundle.lockRoot.license, expectedLicense);
 
   const engines = bundle.packageJson.engines as JsonObject | undefined;
   const lockEngines = bundle.lockRoot.engines as JsonObject | undefined;

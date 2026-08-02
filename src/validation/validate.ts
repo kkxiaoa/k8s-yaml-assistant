@@ -1,4 +1,4 @@
-// Phase B:schema 驱动的通用校验(纯函数,无副作用、不抛异常、不依赖网络)。
+// Schema 驱动的通用校验保持纯函数边界，不依赖网络。
 // 从 YAML 的 kind 自动选 schema,按 OpenAPI 的 type / enum / required / 未知字段 校验**任意**资源。
 // 同一份 data/schemas/ 既当问答知识库(schema-corpus)又当校验规则。
 // path 字段给 Monaco 编辑器定位高亮用。
