@@ -29,6 +29,7 @@ const GitHubProvider = (
 
 const GITHUB_ID = /^[1-9][0-9]{0,19}$/;
 const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const GITHUB_OAUTH_HTTP_TIMEOUT_MS = 60_000;
 
 function normalizedGithubId(value: unknown): string | null {
   const text =
@@ -72,7 +73,7 @@ export function createAuthOptions(
       GitHubProvider<GitHubIdentityProfile>({
         clientId: environment.GITHUB_ID ?? '',
         clientSecret: environment.GITHUB_SECRET ?? '',
-        httpOptions: { timeout: 15_000 },
+        httpOptions: { timeout: GITHUB_OAUTH_HTTP_TIMEOUT_MS },
         authorization: {
           url: 'https://github.com/login/oauth/authorize',
           params: { scope: 'read:user' },

@@ -40,7 +40,7 @@ test('GitHub 登录只请求 read:user 并只读取稳定用户身份接口', as
   };
 
   assert.equal(provider.options.authorization.params.scope, 'read:user');
-  assert.equal(provider.options.httpOptions.timeout, 15_000);
+  assert.equal(provider.options.httpOptions.timeout, 60_000);
   const profile = await provider.options.userinfo.request({
     tokens: { access_token: 'test-access-token' },
   });
