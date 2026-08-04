@@ -57,6 +57,7 @@ import {
   JUDGE_MAX_TOKENS,
   JUDGE_MODEL,
   JUDGE_PARSER_SCHEMA_IDENTITY,
+  JUDGE_REQUEST_OPTIONS,
   JUDGE_SYSTEM,
   JUDGE_USER_MESSAGE_TEMPLATE,
 } from './judge';
@@ -715,7 +716,11 @@ function judgePromptHash(): string {
   return computeCanonicalHash({
     system: JUDGE_SYSTEM,
     userMessageTemplate: JUDGE_USER_MESSAGE_TEMPLATE,
-    request: { model: JUDGE_MODEL, maxTokens: JUDGE_MAX_TOKENS },
+    request: {
+      model: JUDGE_MODEL,
+      maxTokens: JUDGE_MAX_TOKENS,
+      ...JUDGE_REQUEST_OPTIONS,
+    },
   });
 }
 

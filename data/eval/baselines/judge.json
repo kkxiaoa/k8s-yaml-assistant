@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 3,
+  "sourceRunId": "2026-08-03T15-24-12-313Z-judge",
+  "promotedAt": "2026-08-03T17:19:27.361Z",
+  "scope": "calibration",
+  "dataset": {
+    "id": "judge/calibration",
+    "hash": "6b363271df0de3309eb83d1aa72bac97a129d2db83ce64f542be5193a02cf8b9",
+    "cases": [
+      {
+        "id": "pod-image",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "pod-imagepullpolicy",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "deploy-replicas",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "svc-type",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "svc-nodeport",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "quota-hard",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "pdb-minavailable",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "rolebinding-roleref",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "sc-reclaimpolicy",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "vac-parameters",
+        "governance": {
+          "task": "field_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "policy-deploy-limits",
+        "governance": {
+          "task": "policy_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "policy-pod-privileged",
+        "governance": {
+          "task": "policy_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "policy-secret-plaintext",
+        "governance": {
+          "task": "policy_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "policy-crb-admin",
+        "governance": {
+          "task": "policy_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "policy-conflict-latest",
+        "governance": {
+          "task": "policy_explanation",
+          "origin": "human",
+          "role": "regression"
+        }
+      },
+      {
+        "id": "policy-conflict-nodeport",
+        "governance": {
+          "task": "policy_explanation",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "policy-conflict-privileged",
+        "governance": {
+          "task": "policy_explanation",
+          "origin": "human",
+          "role": "regression"
+        }
+      },
+      {
+        "id": "refusal-prometheus-retention",
+        "governance": {
+          "task": "refusal",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "refusal-nonexistent-field",
+        "governance": {
+          "task": "refusal",
+          "origin": "human",
+          "role": "development"
+        }
+      },
+      {
+        "id": "refusal-cluster-runtime",
+        "governance": {
+          "task": "refusal",
+          "origin": "human",
+          "role": "development"
+        }
+      }
+    ],
+    "caseCount": 20
+  },
+  "metricDefinitionVersion": "c7d73c970d628f965e486de3eb5d232053a9c1079c8d13f408212a5ee332c0cc",
+  "metrics": {
+    "judge.agreement_rate": {
+      "value": 1,
+      "numerator": 20,
+      "denominator": 20
+    },
+    "judge.agree": {
+      "value": 20
+    },
+    "judge.judged": {
+      "value": 20
+    },
+    "judge.indeterminate": {
+      "value": 0
+    },
+    "judge.unstable": {
+      "value": 1
+    },
+    "judge.attempt.planned": {
+      "value": 100
+    },
+    "judge.attempt.executed": {
+      "value": 100
+    },
+    "judge.attempt.valid": {
+      "value": 100
+    },
+    "judge.attempt.invalid": {
+      "value": 0
+    },
+    "judge.attempt.error": {
+      "value": 0
+    },
+    "judge.response_behavior.agreement_rate": {
+      "value": 1,
+      "numerator": 20,
+      "denominator": 20
+    },
+    "judge.response_behavior.agree": {
+      "value": 20
+    },
+    "judge.response_behavior.judged": {
+      "value": 20
+    },
+    "judge.response_behavior.indeterminate": {
+      "value": 0
+    },
+    "judge.response_behavior.unstable": {
+      "value": 0
+    },
+    "judge.policy.distinguished.agreement_rate": {
+      "value": 1,
+      "numerator": 11,
+      "denominator": 11
+    },
+    "judge.policy.distinguished.agree": {
+      "value": 11
+    },
+    "judge.policy.distinguished.judged": {
+      "value": 11
+    },
+    "judge.policy.distinguished.indeterminate": {
+      "value": 0
+    },
+    "judge.policy.distinguished.unstable": {
+      "value": 0
+    },
+    "judge.policy.conflictExplained.agreement_rate": {
+      "value": 1,
+      "numerator": 11,
+      "denominator": 11
+    },
+    "judge.policy.conflictExplained.agree": {
+      "value": 11
+    },
+    "judge.policy.conflictExplained.judged": {
+      "value": 11
+    },
+    "judge.policy.conflictExplained.indeterminate": {
+      "value": 0
+    },
+    "judge.policy.conflictExplained.unstable": {
+      "value": 0
+    },
+    "judge.policy.misstatedAsOfficial.agreement_rate": {
+      "value": 1,
+      "numerator": 11,
+      "denominator": 11
+    },
+    "judge.policy.misstatedAsOfficial.agree": {
+      "value": 11
+    },
+    "judge.policy.misstatedAsOfficial.judged": {
+      "value": 11
+    },
+    "judge.policy.misstatedAsOfficial.indeterminate": {
+      "value": 0
+    },
+    "judge.policy.misstatedAsOfficial.unstable": {
+      "value": 0
+    },
+    "judge.harness_error_count": {
+      "value": 0
+    }
+  },
+  "kind": "judge",
+  "config": {
+    "judgeModel": "deepseek-v4-pro",
+    "voteCount": 5,
+    "promptHash": "0faf7931a0644f0dbcb7712f4c6bf380aadd84b7dfe36f01842962f2fd580bf1",
+    "parserSchemaIdentity": "judge-vote-parser-v6"
+  }
+}

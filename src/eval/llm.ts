@@ -2,12 +2,30 @@ import type Anthropic from '@anthropic-ai/sdk';
 
 export const TEXT_MAX_TOKENS = 1024;
 
+interface ModelResponseMetadata {
+  stopReason: unknown;
+  textBlockCount: number;
+  nonTextBlockCount: number;
+}
+
 interface ModelTextResponse {
   text: string;
-  metadata: {
-    stopReason: unknown;
-    textBlockCount: number;
-    nonTextBlockCount: number;
+  metadata: ModelResponseMetadata;
+}
+
+interface ModelToolResponse {
+  inputs: unknown[];
+  metadata: ModelResponseMetadata;
+}
+
+function responseMetadata(response: Anthropic.Message): ModelResponseMetadata {
+  const textBlockCount = response.content.filter(
+    (block) => block.type === 'text',
+  ).length;
+  return {
+    stopReason: response.stop_reason,
+    textBlockCount,
+    nonTextBlockCount: response.content.length - textBlockCount,
   };
 }
 
@@ -21,11 +39,23 @@ async function modelTextResponseOfRequest(
   );
   return {
     text: textBlocks.map((block) => block.text).join(''),
-    metadata: {
-      stopReason: response.stop_reason,
-      textBlockCount: textBlocks.length,
-      nonTextBlockCount: response.content.length - textBlocks.length,
-    },
+    metadata: responseMetadata(response),
+  };
+}
+
+export async function toolResponseOfRequest(
+  client: Anthropic,
+  request: Anthropic.MessageCreateParamsNonStreaming,
+  toolName: string,
+): Promise<ModelToolResponse> {
+  const response = await client.messages.create(request);
+  return {
+    inputs: response.content.flatMap((block) =>
+      block.type === 'tool_use' && block.name === toolName
+        ? [block.input]
+        : [],
+    ),
+    metadata: responseMetadata(response),
   };
 }
 
