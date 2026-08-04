@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import type Anthropic from '@anthropic-ai/sdk';
-import { JUDGE_MAX_TOKENS, judge } from './judge';
+import {
+  JUDGE_MAX_TOKENS,
+  JUDGE_REQUEST_OPTIONS,
+  JUDGE_RESULT_TOOL,
+  judge,
+} from './judge';
 import {
   JudgeAttemptSchema,
   JudgeVoteSchema,
   computeBooleanQuorum,
   computeResponseBehaviorQuorum,
-  parseJudgeAttempt,
+  parseJudgeToolAttempt,
   type JudgeAttempt,
 } from './judge-votes';
 
@@ -44,7 +49,12 @@ type FakeResponse =
   | string
   | Error
   | {
-      content: Array<{ type: string; text?: string }>;
+      content: Array<{
+        type: string;
+        text?: string;
+        name?: string;
+        input?: unknown;
+      }>;
       stop_reason?: unknown;
     };
 
@@ -69,16 +79,16 @@ function fakeClient(
 }
 
 const RESPONSE_METADATA = {
-  stopReason: 'end_turn',
-  textBlockCount: 1,
-  nonTextBlockCount: 0,
+  stopReason: 'tool_use',
+  textBlockCount: 0,
+  nonTextBlockCount: 1,
 } as const;
 
 function expectInvalid(
-  text: string,
+  input: unknown,
   code: Extract<JudgeAttempt, { status: 'invalid' }>['code'],
 ): void {
-  const attempt = parseJudgeAttempt(text, RESPONSE_METADATA);
+  const attempt = parseJudgeToolAttempt([input], RESPONSE_METADATA);
   assert.equal(attempt.status, 'invalid');
   if (attempt.status === 'invalid') {
     assert.equal(attempt.code, code);
@@ -89,9 +99,8 @@ function expectInvalid(
 
 console.log('judge-votes:');
 
-check('strict parser preserves a complete valid vote', () => {
-  const vote = {
-    faithful: false,
+check('strict parser derives faithful from a complete tool vote', () => {
+  const input = {
     responseBehavior: 'answer' as const,
     unsupported: ['claim A', 'claim B'],
     reason: '  preserve this reason exactly  ',
@@ -102,46 +111,57 @@ check('strict parser preserves a complete valid vote', () => {
   };
 
   assert.deepEqual(
-    parseJudgeAttempt(`  ${JSON.stringify(vote)}\n`, RESPONSE_METADATA),
+    parseJudgeToolAttempt([input], RESPONSE_METADATA),
     {
       status: 'valid',
-      vote,
+      vote: { ...input, faithful: false },
+    },
+  );
+  assert.deepEqual(
+    parseJudgeToolAttempt(
+      [
+        {
+          responseBehavior: 'refusal',
+          unsupported: [],
+          reason: 'insufficient evidence',
+        },
+      ],
+      RESPONSE_METADATA,
+    ),
+    {
+      status: 'valid',
+      vote: {
+        faithful: true,
+        responseBehavior: 'refusal',
+        unsupported: [],
+        reason: 'insufficient evidence',
+      },
     },
   );
 });
 
-check('string booleans and missing required vote fields are invalid', () => {
+check('redundant faithful and missing required tool fields are invalid', () => {
   expectInvalid(
-    JSON.stringify({
-      faithful: 'false',
-      responseBehavior: 'answer',
-      unsupported: [],
-      reason: 'reason',
-    }),
-    'invalid_vote',
-  );
-  expectInvalid(
-    JSON.stringify({
-      responseBehavior: 'answer',
-      unsupported: [],
-      reason: 'reason',
-    }),
-    'invalid_vote',
-  );
-  expectInvalid(
-    JSON.stringify({
-      faithful: true,
-      responseBehavior: 'answer',
-      reason: 'reason',
-    }),
-    'invalid_vote',
-  );
-  expectInvalid(
-    JSON.stringify({
+    {
       faithful: true,
       responseBehavior: 'answer',
       unsupported: [],
-    }),
+      reason: 'reason',
+    },
+    'invalid_vote',
+  );
+  expectInvalid(
+    {
+      responseBehavior: 'answer',
+      reason: 'reason',
+    },
+    'invalid_vote',
+  );
+  expectInvalid(
+    {
+      responseBehavior: 'answer',
+      unsupported: [],
+    },
     'invalid_vote',
   );
 });
@@ -153,61 +173,56 @@ check('live votes require response behavior while reviewed legacy votes remain r
     reason: 'supported',
   };
   assert.deepEqual(JudgeVoteSchema.parse(legacyVote), legacyVote);
-  expectInvalid(JSON.stringify(legacyVote), 'invalid_vote');
+  expectInvalid(legacyVote, 'invalid_vote');
 });
 
 check('unsupported and policy values are never coerced', () => {
   expectInvalid(
-    JSON.stringify({
-      faithful: true,
+    {
       responseBehavior: 'answer',
       unsupported: [1],
       reason: 'reason',
-    }),
+    },
     'invalid_vote',
   );
   for (const value of ['false', 0, null]) {
     expectInvalid(
-      JSON.stringify({
-        faithful: true,
+      {
         responseBehavior: 'answer',
         unsupported: [],
         reason: 'reason',
         policy: { distinguished: value },
-      }),
+      },
       'invalid_vote',
     );
   }
   expectInvalid(
-    JSON.stringify({
-      faithful: true,
+    {
       responseBehavior: 'answer',
       unsupported: [],
       reason: 'reason',
       policy: null,
-    }),
+    },
     'invalid_vote',
   );
 });
 
-check('surrounding prose, code fences, empty output, and unknown fields fail', () => {
-  const vote = JSON.stringify({
-    faithful: true,
-    responseBehavior: 'answer',
-    unsupported: [],
-    reason: 'reason',
-  });
-  expectInvalid(`result: ${vote}`, 'invalid_json');
-  expectInvalid(`\`\`\`json\n${vote}\n\`\`\``, 'invalid_json');
-  expectInvalid('', 'empty_response');
+check('missing, repeated, and malformed tool calls fail closed', () => {
+  for (const inputs of [[], [{}, {}]]) {
+    const attempt = parseJudgeToolAttempt(inputs, RESPONSE_METADATA);
+    assert.equal(attempt.status, 'invalid');
+    if (attempt.status === 'invalid') {
+      assert.equal(attempt.code, 'invalid_tool_use');
+      assert.deepEqual(attempt.response, RESPONSE_METADATA);
+    }
+  }
   expectInvalid(
-    JSON.stringify({
-      faithful: true,
+    {
       responseBehavior: 'answer',
       unsupported: [],
       reason: 'reason',
       extra: true,
-    }),
+    },
     'invalid_vote',
   );
 });
@@ -243,13 +258,16 @@ check('response metadata is bounded and legacy traces remain readable', () => {
   assert.deepEqual(JudgeAttemptSchema.parse(legacy), legacy);
 
   assert.deepEqual(
-    parseJudgeAttempt('', {
+    parseJudgeToolAttempt([], {
       stopReason: 'supplier_specific',
       textBlockCount: 0,
       nonTextBlockCount: 1,
     }),
     {
-      ...legacy,
+      status: 'invalid',
+      code: 'invalid_tool_use',
+      reason:
+        'judge response must contain exactly one vote tool call; received 0',
       response: {
         stopReason: 'unknown',
         textBlockCount: 0,
@@ -259,15 +277,16 @@ check('response metadata is bounded and legacy traces remain readable', () => {
   );
 
   assert.deepEqual(
-    parseJudgeAttempt('{', {
+    parseJudgeToolAttempt([{}], {
       stopReason: 'max_tokens',
       textBlockCount: 1,
       nonTextBlockCount: 1,
     }),
     {
       status: 'invalid',
-      code: 'invalid_json',
-      reason: 'judge response must be one JSON value with no surrounding text',
+      code: 'invalid_vote',
+      reason:
+        'vote.responseBehavior: Invalid option: expected one of "answer"|"refusal"|"non_answer"; vote.unsupported: Invalid input: expected array, received undefined; vote.reason: Invalid input: expected string, received undefined',
       response: {
         stopReason: 'max_tokens',
         textBlockCount: 1,
@@ -277,7 +296,7 @@ check('response metadata is bounded and legacy traces remain readable', () => {
   );
 });
 
-await checkAsync('judge request uses its budget and records invalid diagnostics', async () => {
+await checkAsync('judge request offers one vote tool and records invalid diagnostics', async () => {
   const requests: Anthropic.MessageCreateParamsNonStreaming[] = [];
   const result = await judge(
     fakeClient(
@@ -300,8 +319,9 @@ await checkAsync('judge request uses its budget and records invalid diagnostics'
   assert.deepEqual(result.attempts, [
     {
       status: 'invalid',
-      code: 'empty_response',
-      reason: 'judge response is empty',
+      code: 'invalid_tool_use',
+      reason:
+        'judge response must contain exactly one vote tool call; received 0',
       response: {
         stopReason: 'max_tokens',
         textBlockCount: 0,
@@ -312,6 +332,25 @@ await checkAsync('judge request uses its budget and records invalid diagnostics'
   assert.equal(result.verdict, null);
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.max_tokens, JUDGE_MAX_TOKENS);
+  assert.deepEqual(requests[0]?.thinking, JUDGE_REQUEST_OPTIONS.thinking);
+  assert.deepEqual(
+    requests[0]?.output_config,
+    JUDGE_REQUEST_OPTIONS.output_config,
+  );
+  assert.deepEqual(requests[0]?.tools, [JUDGE_RESULT_TOOL]);
+  assert.equal(
+    'faithful' in JUDGE_RESULT_TOOL.input_schema.properties,
+    false,
+  );
+  assert.deepEqual(JUDGE_RESULT_TOOL.input_schema.required, [
+    'responseBehavior',
+    'unsupported',
+    'reason',
+  ]);
+  assert.deepEqual(
+    requests[0]?.tool_choice,
+    JUDGE_REQUEST_OPTIONS.tool_choice,
+  );
   assert.deepEqual(requests[0]?.messages, [
     {
       role: 'user',
@@ -428,15 +467,38 @@ await checkAsync('faith judge records failures and stops at the first valid vote
     unsupported: [],
     reason: 'supported',
   };
+  const validToolInput = {
+    responseBehavior: validVote.responseBehavior,
+    unsupported: validVote.unsupported,
+    reason: validVote.reason,
+  };
   const result = await judge(
     fakeClient([
-      JSON.stringify({
-        faithful: 'true',
-        responseBehavior: 'answer',
-        unsupported: [],
-        reason: 'coerced',
-      }),
-      JSON.stringify(validVote),
+      {
+        content: [
+          {
+            type: 'tool_use',
+            name: JUDGE_RESULT_TOOL.name,
+            input: {
+              faithful: 'true',
+              responseBehavior: 'answer',
+              unsupported: [],
+              reason: 'coerced',
+            },
+          },
+        ],
+        stop_reason: 'tool_use',
+      },
+      {
+        content: [
+          {
+            type: 'tool_use',
+            name: JUDGE_RESULT_TOOL.name,
+            input: validToolInput,
+          },
+        ],
+        stop_reason: 'tool_use',
+      },
     ]),
     {
       question: 'question',
@@ -453,7 +515,10 @@ await checkAsync('faith judge records failures and stops at the first valid vote
   assert.deepEqual(result.verdict, validVote);
 
   const failed = await judge(
-    fakeClient([new Error('request failed'), 'not json']),
+    fakeClient([
+      new Error('request failed'),
+      { content: [{ type: 'text', text: 'not a tool call' }] },
+    ]),
     {
       question: 'question',
       context: 'context',

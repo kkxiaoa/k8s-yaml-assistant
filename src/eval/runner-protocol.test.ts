@@ -24,6 +24,7 @@ import {
   JUDGE_MAX_TOKENS,
   JUDGE_MODEL,
   JUDGE_PARSER_SCHEMA_IDENTITY,
+  JUDGE_REQUEST_OPTIONS,
   JUDGE_SYSTEM,
   JUDGE_USER_MESSAGE_TEMPLATE,
 } from './judge';
@@ -733,7 +734,11 @@ check('faith and judge prompt hashes are derived from actual request inputs', ()
   const judgeHash = computeCanonicalHash({
     system: JUDGE_SYSTEM,
     userMessageTemplate: JUDGE_USER_MESSAGE_TEMPLATE,
-    request: { model: JUDGE_MODEL, maxTokens: JUDGE_MAX_TOKENS },
+    request: {
+      model: JUDGE_MODEL,
+      maxTokens: JUDGE_MAX_TOKENS,
+      ...JUDGE_REQUEST_OPTIONS,
+    },
   });
   assert.equal(faith.judgePromptHash, judgeHash);
   assert.equal(faith.judgeAttemptLimit, FAITH_JUDGE_ATTEMPT_LIMIT);

@@ -42,12 +42,16 @@ export const JudgeVoteSchema = z.strictObject({
 
 export type JudgeVote = z.infer<typeof JudgeVoteSchema>;
 
-export const LiveJudgeVoteSchema = z.strictObject({
-  faithful: z.boolean(),
+const LiveJudgeToolInputSchema = z.strictObject({
   responseBehavior: JudgeResponseBehaviorSchema,
   unsupported: z.array(z.string()),
   reason: NonBlankStringSchema,
   policy: JudgePolicyVoteSchema.optional(),
+});
+
+export const LiveJudgeVoteSchema = z.strictObject({
+  faithful: z.boolean(),
+  ...LiveJudgeToolInputSchema.shape,
 });
 
 export type LiveJudgeVote = z.infer<typeof LiveJudgeVoteSchema>;
@@ -55,6 +59,7 @@ export type LiveJudgeVote = z.infer<typeof LiveJudgeVoteSchema>;
 export const JudgeInvalidCodeSchema = z.enum([
   'empty_response',
   'invalid_json',
+  'invalid_tool_use',
   'invalid_vote',
 ]);
 type JudgeInvalidCode = z.infer<typeof JudgeInvalidCodeSchema>;
@@ -89,8 +94,8 @@ export const JudgeAttemptSchema = z.discriminatedUnion('status', [
     status: z.literal('invalid'),
     code: JudgeInvalidCodeSchema,
     reason: NonBlankStringSchema,
-    // Persisted calibration sources may omit metadata; the live parser
-    // supplies it for every parser-invalid response.
+    // Persisted calibration sources may omit metadata; the live boundary
+    // supplies it for every invalid response.
     response: JudgeResponseMetadataSchema.optional(),
   }),
   z.strictObject({
@@ -157,31 +162,19 @@ function invalidAttempt(
   };
 }
 
-export function parseJudgeAttempt(
-  text: string,
+export function parseJudgeToolAttempt(
+  inputs: readonly unknown[],
   responseMetadata: JudgeResponseMetadataInput,
 ): LiveJudgeAttempt {
-  const candidate = text.trim();
-  if (candidate.length === 0) {
+  if (inputs.length !== 1) {
     return invalidAttempt(
-      'empty_response',
-      'judge response is empty',
+      'invalid_tool_use',
+      `judge response must contain exactly one vote tool call; received ${inputs.length}`,
       responseMetadata,
     );
   }
 
-  let value: unknown;
-  try {
-    value = JSON.parse(candidate) as unknown;
-  } catch {
-    return invalidAttempt(
-      'invalid_json',
-      'judge response must be one JSON value with no surrounding text',
-      responseMetadata,
-    );
-  }
-
-  const parsed = LiveJudgeVoteSchema.safeParse(value);
+  const parsed = LiveJudgeToolInputSchema.safeParse(inputs[0]);
   if (!parsed.success) {
     return invalidAttempt(
       'invalid_vote',
@@ -189,7 +182,13 @@ export function parseJudgeAttempt(
       responseMetadata,
     );
   }
-  return { status: 'valid', vote: parsed.data };
+  return {
+    status: 'valid',
+    vote: {
+      ...parsed.data,
+      faithful: parsed.data.unsupported.length === 0,
+    },
+  };
 }
 
 export const DEFAULT_JUDGE_QUORUM = 3;
