@@ -28,6 +28,10 @@ import {
   reserveModelRequest,
 } from '@/server/model-access';
 import { ModelUsageCollector } from '@/server/provider-usage';
+import {
+  modelTextResponse,
+  requireModelText,
+} from '@/server/model-response';
 import type {
   RetrieveContextOptions,
   prepareAsk as prepareAskFunction,
@@ -217,6 +221,7 @@ export async function POST(req: Request): Promise<Response> {
             finalMessage.usage?.cache_creation_input_tokens,
             finalMessage.usage?.cache_read_input_tokens,
           );
+          requireModelText(modelTextResponse(finalMessage));
           finishAccounting('success');
           controller.enqueue(
             sse('done', { requestId }),

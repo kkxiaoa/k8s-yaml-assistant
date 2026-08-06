@@ -4,6 +4,7 @@
 //       npm run eval:faith -- --full    完整集
 //       npm run eval:faith -- 2        冒烟:检索引用/独立拒答各前 2 条
 //       npm run eval:faith -- --policy 只跑非 Holdout policy 用例
+//       npm run eval:faith -- --case <case-id> [--case <case-id> ...] 定向非 Holdout 用例
 
 import { config } from 'dotenv';
 import type Anthropic from '@anthropic-ai/sdk';
@@ -52,7 +53,6 @@ import {
   type FaithMetricCounts,
 } from './runner-protocol';
 import {
-  EvalRunExecutionError,
   createErrorTraceEnvelope,
   createTraceEnvelope,
   executeEvalCaseStage,
@@ -299,26 +299,6 @@ async function processCase(
   );
 }
 
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  retries: number,
-  delayMs: number,
-): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (error instanceof EvalRunExecutionError) throw error;
-      lastError = error;
-      if (attempt < retries) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    }
-  }
-  throw lastError;
-}
-
 function faithMetricCounts(traces: readonly FaithTrace[]): FaithMetricCounts {
   let faithfulCount = 0;
   let judgedCount = 0;
@@ -464,8 +444,7 @@ async function main(): Promise<void> {
 
     const batch = await executeEvalCases({
       cases,
-      evaluate: (evalCase) =>
-        withRetry(() => processCase(client, evalCase, runConfig), 1, 2_000),
+      evaluate: (evalCase) => processCase(client, evalCase, runConfig),
       appendSuccess: (evalCase, trace) => {
         session.appendCase(
           createTraceEnvelope({

@@ -27,6 +27,9 @@
 
 `npm run eval`、`npm run eval:faith`、`npm run eval:judge`、`npm run eval:gen`、`npm run eval:fix`、`npm run aliases:generate`、`npm run aliases:ab` 和 `npm run voyage:ab` 会访问外部模型或检索供应商。运行前必须核对输入范围、索引身份和费用预算。
 
+Faith（忠实度评估）定向复测使用重复的 `--case <case-id>`，只接受非 Holdout（非留出集）用例并记录 `targeted`（定向）范围；不得把定向运行晋升为 baseline（基线）。
+Faith 每条用例只执行一次回答请求；空文本或请求失败会显式记录为该用例的评估框架错误，不隐式重跑整条用例。有效回答再执行最多两次 Judge（裁判）尝试，并在首个有效结果后停止。
+
 ## 数据与发布工具
 
 | 入口 | 作用 | 写盘边界 |

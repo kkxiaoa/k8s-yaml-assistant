@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { CORPUS } from '../knowledge/corpus';
-import { findExactFieldChunks } from './exact-field';
+import {
+  findExactFieldChunks,
+  hasSchemaFieldDescendants,
+} from './exact-field';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -77,6 +80,36 @@ check('exact-field 返回全部候选，由上层统一 selection/k 截断', () 
   assert.equal(
     findExactFieldChunks(chunks, 'Deployment', 'spec.replicas').length,
     3,
+  );
+});
+
+check('对象字段存在同版本 schema 子字段，标量字段不存在', () => {
+  assert.equal(
+    hasSchemaFieldDescendants(
+      CORPUS,
+      'Deployment',
+      'spec.selector',
+      'apps/v1',
+    ),
+    true,
+  );
+  assert.equal(
+    hasSchemaFieldDescendants(
+      CORPUS,
+      'Deployment',
+      'spec.replicas',
+      'apps/v1',
+    ),
+    false,
+  );
+  assert.equal(
+    hasSchemaFieldDescendants(
+      CORPUS,
+      'Deployment',
+      'spec.selector',
+      'apps/v2',
+    ),
+    false,
   );
 });
 

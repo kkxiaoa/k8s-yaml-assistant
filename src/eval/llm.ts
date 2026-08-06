@@ -1,32 +1,17 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import {
+  modelResponseMetadata,
+  modelTextResponse,
+  requireModelText,
+  type ModelResponseMetadata,
+  type ModelTextResponse,
+} from '../server/model-response';
 
 export const TEXT_MAX_TOKENS = 1024;
-
-interface ModelResponseMetadata {
-  stopReason: unknown;
-  textBlockCount: number;
-  nonTextBlockCount: number;
-}
-
-interface ModelTextResponse {
-  text: string;
-  metadata: ModelResponseMetadata;
-}
 
 interface ModelToolResponse {
   inputs: unknown[];
   metadata: ModelResponseMetadata;
-}
-
-function responseMetadata(response: Anthropic.Message): ModelResponseMetadata {
-  const textBlockCount = response.content.filter(
-    (block) => block.type === 'text',
-  ).length;
-  return {
-    stopReason: response.stop_reason,
-    textBlockCount,
-    nonTextBlockCount: response.content.length - textBlockCount,
-  };
 }
 
 async function modelTextResponseOfRequest(
@@ -34,13 +19,7 @@ async function modelTextResponseOfRequest(
   request: Anthropic.MessageCreateParamsNonStreaming,
 ): Promise<ModelTextResponse> {
   const response = await client.messages.create(request);
-  const textBlocks = response.content.filter(
-    (block) => block.type === 'text',
-  );
-  return {
-    text: textBlocks.map((block) => block.text).join(''),
-    metadata: responseMetadata(response),
-  };
+  return modelTextResponse(response);
 }
 
 export async function toolResponseOfRequest(
@@ -55,7 +34,7 @@ export async function toolResponseOfRequest(
         ? [block.input]
         : [],
     ),
-    metadata: responseMetadata(response),
+    metadata: modelResponseMetadata(response),
   };
 }
 
@@ -63,7 +42,7 @@ export async function textOfRequest(
   client: Anthropic,
   request: Anthropic.MessageCreateParamsNonStreaming,
 ): Promise<string> {
-  return (await modelTextResponseOfRequest(client, request)).text;
+  return requireModelText(await modelTextResponseOfRequest(client, request));
 }
 
 export async function textResponseOf(
@@ -88,5 +67,5 @@ export async function textOf(
   system: string,
   user: string,
 ): Promise<string> {
-  return (await textResponseOf(client, model, system, user)).text;
+  return requireModelText(await textResponseOf(client, model, system, user));
 }

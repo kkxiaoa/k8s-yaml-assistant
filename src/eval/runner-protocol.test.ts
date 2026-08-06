@@ -9,6 +9,7 @@ import {
 } from '../server/agent-contract';
 import {
   ASK_MAX_TOKENS,
+  ASK_REQUEST_OPTIONS,
   ASK_SYSTEM,
   buildAskUserMessage,
 } from '../server/pipeline';
@@ -289,11 +290,22 @@ check('faith selection includes explicit referenced and standalone cases', () =>
   const grounded = [GROUNDED_REFERENCE, STANDALONE_REFUSAL];
   const full = selectFaithCases(['--full'], grounded, [SEMANTIC_CASE]);
   const smoke = selectFaithCases(['1'], grounded, [SEMANTIC_CASE]);
+  const targeted = selectFaithCases(
+    ['--case', 'refusal', '--case', 'semantic'],
+    grounded,
+    [SEMANTIC_CASE],
+  );
   const prepared = prepareFaithDataset(grounded, [SEMANTIC_CASE]);
   const identity = full.identity;
 
   assert.equal(full.scope, 'full');
   assert.equal(smoke.scope, 'smoke');
+  assert.equal(targeted.scope, 'targeted');
+  assert.deepEqual(
+    targeted.cases.map((evalCase) => evalCase.id),
+    ['semantic', 'refusal'],
+  );
+  assert.equal(targeted.identity.caseCount, 2);
   assert.deepEqual(identity.cases, [
     { id: 'semantic', governance: SEMANTIC_CASE.governance },
     { id: 'refusal', governance: STANDALONE_REFUSAL.governance },
@@ -348,6 +360,32 @@ check('faith selection includes explicit referenced and standalone cases', () =>
       },
     ]).hash,
     identity.hash,
+  );
+  assert.throws(
+    () => selectFaithCases(['--case', 'missing'], grounded, [SEMANTIC_CASE]),
+    /unknown faith case ID: missing/,
+  );
+  assert.throws(
+    () =>
+      selectFaithCases(
+        ['--case', 'semantic', '--case', 'semantic'],
+        grounded,
+        [SEMANTIC_CASE],
+      ),
+    /duplicate faith case ID: semantic/,
+  );
+  assert.throws(
+    () => selectFaithCases(['--case'], grounded, [SEMANTIC_CASE]),
+    /用法/,
+  );
+  assert.throws(
+    () =>
+      selectFaithCases(
+        ['--full', '--case', 'semantic'],
+        grounded,
+        [SEMANTIC_CASE],
+      ),
+    /用法/,
   );
 });
 
@@ -511,6 +549,15 @@ check('faith suite and diagnostic selections exclude holdout unless explicitly r
   assert.throws(
     () => selectFaithCases(['--holdout', '--policy'], grounded, retrievalCases),
     /holdout.*policy|diagnostic.*suite|suite.*diagnostic/i,
+  );
+  assert.throws(
+    () =>
+      selectFaithCases(
+        ['--case', 'holdout-semantic'],
+        grounded,
+        retrievalCases,
+      ),
+    /Holdout.*tuning-eligible/i,
   );
 });
 
@@ -728,7 +775,11 @@ check('faith and judge prompt hashes are derived from actual request inputs', ()
           },
         }),
       ],
-      request: { model: ANSWER_MODEL, maxTokens: ASK_MAX_TOKENS },
+      request: {
+        model: ANSWER_MODEL,
+        maxTokens: ASK_MAX_TOKENS,
+        ...ASK_REQUEST_OPTIONS,
+      },
     }),
   );
   const judgeHash = computeCanonicalHash({

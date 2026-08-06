@@ -9,6 +9,7 @@ import {
 } from '../server/agent-contract';
 import {
   ASK_MAX_TOKENS,
+  ASK_REQUEST_OPTIONS,
   ASK_SYSTEM,
   buildAskUserMessage,
 } from '../server/pipeline';
@@ -45,6 +46,7 @@ import {
   type SemanticRetrievalCase,
 } from './cases/retrieval-cases';
 import {
+  assertTuningEligibleCase,
   parseEvalSuiteArgs,
   selectCasesForSuite,
   type EvalCaseGovernance,
@@ -233,7 +235,7 @@ type EnvelopeOutcome = TraceEnvelope['outcome'];
 export interface FaithCaseSelection {
   cases: ResolvedGroundedAnswerCase[];
   identity: EvalDatasetIdentity;
-  suffix: '' | '-holdout' | '-full' | '-smoke' | '-policy';
+  suffix: '' | '-holdout' | '-full' | '-smoke' | '-policy' | '-targeted';
   label: string;
   scope: EvalScope;
 }
@@ -254,6 +256,37 @@ export interface JudgeCaseSelection {
   scope: 'calibration' | 'targeted';
   suffix: '' | '-targeted';
   label: string;
+}
+
+function selectTargetedCases<T extends GovernedEvalCase>(
+  argv: readonly string[],
+  cases: readonly T[],
+  kind: 'faith' | 'judge',
+): T[] | null {
+  if (!argv.includes('--case')) return null;
+
+  const usage =
+    kind === 'faith'
+      ? '用法: npm run eval:faith -- [--case <case-id>]...'
+      : '用法: npm run eval:judge -- [--case <case-id>]...';
+  const requestedIds = new Set<string>();
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] !== '--case') throw new Error(usage);
+    const id = argv[index + 1];
+    if (id === undefined || id.startsWith('--')) throw new Error(usage);
+    if (requestedIds.has(id)) {
+      throw new Error(`duplicate ${kind} case ID: ${id}`);
+    }
+    requestedIds.add(id);
+    index++;
+  }
+
+  const knownIds = new Set(cases.map((evalCase) => evalCase.id));
+  const unknownIds = [...requestedIds].filter((id) => !knownIds.has(id));
+  if (unknownIds.length > 0) {
+    throw new Error(`unknown ${kind} case ID: ${unknownIds.join(', ')}`);
+  }
+  return cases.filter((evalCase) => requestedIds.has(evalCase.id));
 }
 
 export interface RetrievalEvalTracePayload {
@@ -431,35 +464,10 @@ export function selectJudgeCases(
       label: '完整校准集',
     };
   }
-
-  const requestedIds = new Set<string>();
-  for (let index = 0; index < argv.length; index++) {
-    if (argv[index] !== '--case') {
-      throw new Error(
-        '用法: npm run eval:judge -- [--case <case-id>]...',
-      );
-    }
-    const id = argv[index + 1];
-    if (id === undefined || id.startsWith('--')) {
-      throw new Error(
-        '用法: npm run eval:judge -- [--case <case-id>]...',
-      );
-    }
-    if (requestedIds.has(id)) {
-      throw new Error(`duplicate judge case ID: ${id}`);
-    }
-    requestedIds.add(id);
-    index++;
+  const selected = selectTargetedCases(argv, cases, 'judge');
+  if (selected === null) {
+    throw new Error('用法: npm run eval:judge -- [--case <case-id>]...');
   }
-
-  const knownIds = new Set(cases.map((evalCase) => evalCase.id));
-  const unknownIds = [...requestedIds].filter((id) => !knownIds.has(id));
-  if (unknownIds.length > 0) {
-    throw new Error(`unknown judge case ID: ${unknownIds.join(', ')}`);
-  }
-  const selected = cases.filter((evalCase) =>
-    requestedIds.has(evalCase.id),
-  );
   return {
     cases: selected,
     scope: 'targeted',
@@ -499,8 +507,22 @@ export function selectFaithCases(
   retrievalCases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
   fixCases: readonly FixCase[] = FIX_CASES,
 ): FaithCaseSelection {
-  const parsed = parseEvalSuiteArgs(argv);
   const prepared = prepareFaithDataset(cases, retrievalCases, fixCases);
+  const targeted = selectTargetedCases(argv, prepared.cases, 'faith');
+  if (targeted !== null) {
+    for (const evalCase of targeted) {
+      assertTuningEligibleCase(evalCase, 'faith targeted selection');
+    }
+    return {
+      cases: targeted,
+      identity: resolvedFaithDatasetIdentity(targeted),
+      suffix: '-targeted',
+      label: `,定向集: ${targeted.map((evalCase) => evalCase.id).join(', ')}`,
+      scope: 'targeted',
+    };
+  }
+
+  const parsed = parseEvalSuiteArgs(argv);
   if (parsed.remainingArgs.length > 0 && parsed.explicit) {
     throw new Error(
       'faith diagnostic mode cannot be combined with a suite flag',
@@ -508,7 +530,7 @@ export function selectFaithCases(
   }
   if (parsed.remainingArgs.length > 1) {
     throw new Error(
-      '用法: npm run eval:faith -- [<N>|--policy|--tuning|--holdout|--full]',
+      '用法: npm run eval:faith -- [<N>|--policy|--tuning|--holdout|--full|--case <case-id> ...]',
     );
   }
 
@@ -550,7 +572,7 @@ export function selectFaithCases(
   const smokeN = Number(diagnosticArg);
   if (!Number.isInteger(smokeN) || smokeN <= 0) {
     throw new Error(
-      '用法: npm run eval:faith -- [<N>|--policy|--tuning|--holdout|--full]',
+      '用法: npm run eval:faith -- [<N>|--policy|--tuning|--holdout|--full|--case <case-id> ...]',
     );
   }
   const referenced = tuningCases
@@ -708,7 +730,11 @@ function answerPromptHash(): string {
         },
       }),
     ],
-    request: { model: ANSWER_MODEL, maxTokens: ASK_MAX_TOKENS },
+    request: {
+      model: ANSWER_MODEL,
+      maxTokens: ASK_MAX_TOKENS,
+      ...ASK_REQUEST_OPTIONS,
+    },
   });
 }
 
