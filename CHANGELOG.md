@@ -3,6 +3,18 @@
 > 状态：当前维护。
 > 用途：记录面向使用者的版本变化、部署边界和已知限制。
 
+## [0.6.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.5.0...v0.6.0) (2026-08-06)
+
+
+### Features
+
+* stabilize and baseline judge calibration ([#51](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/51)) ([fff86f5](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/fff86f531323c617b9a7334af9fb3da39817bb84))
+
+
+### Bug Fixes
+
+* enforce grounded answer evidence boundaries ([#53](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/53)) ([26263af](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/26263af71793682b4203792d01c997eec82262ac))
+
 ## [0.5.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.4.1...v0.5.0) (2026-08-02)
 
 
