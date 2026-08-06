@@ -2,16 +2,14 @@ import { config } from 'dotenv';
 config({ override: true }); // 用 .env 覆盖继承的同名环境变量
 import { pathToFileURL } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
-import { retrieveContext } from '../server/pipeline';
-
-const SYSTEM_PROMPT = `你是一位精通 Kubernetes 资源模型的助手,服务于一个容器云平台控制台。
-你的任务是基于给定的 K8s 字段文档片段,准确回答用户关于资源配置的问题。
-
-规则:
-- 只依据提供的 <docs> 片段作答,不要编造文档里没有的字段或取值。
-- 如果片段不足以回答,明确说"提供的文档片段中没有相关信息",不要猜。
-- 回答简洁、准确,涉及枚举值时把合法取值列全。
-- 用中文回答。`;
+import {
+  buildAskRequest,
+  retrieveContext,
+} from '../server/pipeline';
+import {
+  modelTextResponse,
+  requireModelText,
+} from '../server/model-response';
 
 type AskRetrievalResult = Awaited<ReturnType<typeof retrieveContext>>;
 
@@ -68,22 +66,13 @@ async function main(): Promise<void> {
   }
 
   console.error('\n[2/2] 通过 DeepSeek 兼容端点流式作答：\n');
-  const stream = client.messages.stream({
-    // DeepSeek 兼容端点将该模型名映射到 deepseek-v4-flash。
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2048,
-    // DeepSeek 兼容端点不支持 cache_control。
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: `参考以下 K8s 字段文档片段回答问题。\n\n<docs>\n${context}\n</docs>\n\n问题:${question}`,
-      },
-    ],
-  });
+  const stream = client.messages.stream(
+    buildAskRequest({ question, context, mode: 'free' }),
+  );
 
   stream.on('text', (delta) => process.stdout.write(delta));
   const final = await stream.finalMessage();
+  requireModelText(modelTextResponse(final));
   process.stdout.write('\n\n');
 
   const u = final.usage;

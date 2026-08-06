@@ -53,6 +53,8 @@ check('prompt 规则禁止把 cluster/extension schema 表达为官方事实', (
   assert.match(CONFLICT_RULES, /扩展提供方/);
   assert.match(CONFLICT_RULES, /不得.*Kubernetes 官方/);
   assert.match(CONFLICT_RULES, /不得把 policy 说成 K8s 官方强制/);
+  assert.match(CONFLICT_RULES, /每一层结论都必须分别由对应来源直接支持/);
+  assert.doesNotMatch(CONFLICT_RULES, /nginx:latest/);
 });
 
 console.log(`\n通过 ${passed} 项`);

@@ -31,6 +31,7 @@ import {
   ANSWER_MODEL,
   ASK_MAX_TOKENS,
   ASK_SYSTEM,
+  buildAskUserMessage,
   prepareAsk,
   retrieveContext,
   type RetrieveContextOptions,
@@ -160,6 +161,30 @@ const exactCases = [
 
 console.log('pipeline retrieval:');
 
+await check('Ask 使用统一的严格证据与拒答边界', () => {
+  assert.match(ASK_SYSTEM, /问题本身不能补充新事实/);
+  assert.match(ASK_SYSTEM, /有限选项中限定用户指定的一个选项/);
+  assert.match(ASK_SYSTEM, /常识.*模型记忆.*不是依据/);
+  assert.match(ASK_SYSTEM, /字段、资源、API、参数、键、命令/);
+  assert.match(ASK_SYSTEM, /限制只支持其明确语义.*不得推导未明示的补救动作/);
+  assert.match(ASK_SYSTEM, /不可更新.*不支持重新创建、删除、重启/);
+  assert.match(ASK_SYSTEM, /object 字段本身.*不得据此命名或输出.*子键或对象 YAML/);
+  assert.match(ASK_SYSTEM, /示例只能组合依据中已经出现的字段、层级和取值/);
+  assert.match(ASK_SYSTEM, /<current_yaml> 为“无”时.*不得输出 YAML 代码块、完整资源骨架或相邻字段/);
+  assert.match(ASK_SYSTEM, /只用行内文本写出 <docs> 中已经出现的完整字段路径和取值/);
+  assert.match(ASK_SYSTEM, /依据不足以回答核心问题时/);
+  assert.match(ASK_SYSTEM, /无法据此回答.*并停止/);
+  assert.match(ASK_SYSTEM, /不得追加外部链接、未检索字段、命令或替代方案/);
+  assert.match(
+    buildAskUserMessage({
+      question: 'Pod 镜像拉取策略怎么配?',
+      context: '<docs>',
+      mode: 'free',
+    }),
+    /<current_yaml>\n无\n<\/current_yaml>/,
+  );
+});
+
 await check('Ask route 只注入安全 recorder 且不恢复原始持久化入口', () => {
   const routeSource = readFileSync(
     new URL('../../app/api/ask/route.ts', import.meta.url),
@@ -197,6 +222,20 @@ await check('Ask route 只注入安全 recorder 且不恢复原始持久化入�
     routeSource,
     /controller\.enqueue\(sse\('error', upstreamErrorEvent\(error\)\)\)/,
   );
+  assert.match(
+    routeSource,
+    /requireModelText\(modelTextResponse\(finalMessage\)\)/,
+  );
+  const requireTextOffset = routeSource.indexOf(
+    'requireModelText(modelTextResponse(finalMessage))',
+  );
+  const successAccountingOffset = routeSource.indexOf(
+    "finishAccounting('success')",
+  );
+  const doneEventOffset = routeSource.indexOf("sse('done'");
+  assert.ok(requireTextOffset >= 0);
+  assert.ok(requireTextOffset < successAccountingOffset);
+  assert.ok(successAccountingOffset < doneEventOffset);
   assert.doesNotMatch(routeSource, /controller\.error\(/);
   assert.doesNotMatch(routeSource, /process\.env\.(?:DEEPSEEK|VOYAGE)/);
   assert.match(routeSource, /await import\('@\/server\/pipeline'\)/);
@@ -667,6 +706,8 @@ await check(
     assert.equal(prepared.request.system, ASK_SYSTEM);
     assert.equal(prepared.request.model, ANSWER_MODEL);
     assert.equal(prepared.request.max_tokens, ASK_MAX_TOKENS);
+    assert.deepEqual(prepared.request.thinking, { type: 'disabled' });
+    assert.equal(prepared.request.temperature, 0);
     const userMessage = prepared.request.messages[0]?.content;
     assert.equal(typeof userMessage, 'string');
     assert.match(userMessage as string, /<ask_mode>\nexplain_error/);
@@ -692,5 +733,78 @@ await check(
     assert.deepEqual(requests, [prepared.request]);
   },
 );
+
+await check('对象字段错误进入 search 路径以检索子字段证据', async () => {
+  const evalCase = GROUNDED_ANSWER_CASES.find(
+    (candidate) => candidate.id === 'error-deployment-missing-selector',
+  );
+  assert.ok(evalCase);
+  const resolved = resolveGroundedAnswerCase(evalCase);
+  assert.ok(resolved.editorContext);
+
+  const ranked = [
+    chunk('schema::apps/v1::Deployment::spec.selector'),
+    chunk('schema::apps/v1::Deployment::spec.selector.matchLabels'),
+    chunk('schema::apps/v1::Deployment::spec.selector.matchExpressions'),
+  ];
+  let searchCalled = false;
+  let boostPath: string | undefined;
+  const search: RetrieveContextOptions['search'] = async (
+    queryText,
+    options = {},
+  ) => {
+    searchCalled = true;
+    boostPath = options.boostPath;
+    return {
+      hits: ranked.map((schemaChunk, index) => ({
+        chunk: schemaChunk,
+        score: 0.9 - index * 0.1,
+      })),
+      trace: {
+        queryText,
+        queryExpansion: {
+          enabled: false,
+          status: 'disabled',
+          originalQueryText: queryText,
+          expandedQueryText: queryText,
+          matchedAliases: [],
+          expansionTerms: [],
+          routedResource: options.boostResource,
+          selectedResource: options.boostResource,
+        },
+        coarseHits: ranked.map((schemaChunk, index) =>
+          toTraceHit(schemaChunk, 0.8 - index * 0.1),
+        ),
+        rerankHits: ranked.map((schemaChunk, index) =>
+          toTraceHit(schemaChunk, 0.9 - index * 0.1),
+        ),
+        latencyMs: { total: 1 },
+        cache: { index: { status: 'hit' }, embeddingHit: false },
+      },
+    };
+  };
+
+  const prepared = await prepareAsk({
+    question: resolved.question,
+    k: 3,
+    editorContext: resolved.editorContext,
+    mode: 'explain_error',
+    retrievalOptions: { search, queryExpansion: false },
+  });
+
+  assert.equal(searchCalled, true);
+  assert.equal(boostPath, 'spec.selector');
+  assert.equal(prepared.trace.path, 'search');
+  assert.deepEqual(
+    prepared.hits.map((hit) => hit.id),
+    ranked.map((schemaChunk) => schemaChunk.id),
+  );
+  assert.deepEqual(
+    resolved.expectedChunkIds.filter((id) =>
+      prepared.hits.some((hit) => hit.id === id),
+    ),
+    resolved.expectedChunkIds,
+  );
+});
 
 console.log(`\n通过 ${passed} 项`);

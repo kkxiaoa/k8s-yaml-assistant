@@ -526,6 +526,7 @@ assert.deepEqual(
           'Deployment 为什么提示缺少 spec.selector，应该怎么修复？',
         expectedChunkIds: [
           'schema::apps/v1::Deployment::spec.selector',
+          'schema::apps/v1::Deployment::spec.selector.matchLabels',
         ],
       },
       governance: ERROR_DEVELOPMENT,

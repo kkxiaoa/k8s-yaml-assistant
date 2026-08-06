@@ -18,7 +18,10 @@ import {
   type ValidationError,
 } from '../validation/validate';
 import { toTraceHit, type RetrievalTrace } from '../retrieval/trace';
-import { findExactFieldChunks } from '../retrieval/exact-field';
+import {
+  findExactFieldChunks,
+  hasSchemaFieldDescendants,
+} from '../retrieval/exact-field';
 import {
   resolveQueryExpansionEnabled,
   skippedExactQueryExpansionTrace,
@@ -37,18 +40,31 @@ import type { ProviderRequestObserver } from './provider-usage';
 export { ANSWER_MODEL };
 
 export const ASK_MAX_TOKENS = 2048;
+export const ASK_REQUEST_OPTIONS = {
+  thinking: { type: 'disabled' },
+  temperature: 0,
+} satisfies Pick<
+  Anthropic.MessageCreateParamsNonStreaming,
+  'temperature' | 'thinking'
+>;
 
 export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,服务于一个容器云平台控制台。
 基于给定的 <ask_mode>、<editor_context>、<current_yaml> 和 <docs> 片段准确回答用户关于当前 YAML 配置的问题。
 规则:
-- 只依据 <docs> 作答,不要编造文档里没有的字段或取值。
+- 事实依据仅包括 <docs>,以及 <current_yaml> / <editor_context> 中明确给出的当前配置和校验错误;问题本身不能补充新事实,但可从依据已经明确列出的有限选项中限定用户指定的一个选项;常识、模型记忆和未展示内容都不是依据。
+- 字段、资源、API、参数、键、命令、取值、默认值、校验/准入/运行后果和具体操作建议必须能由上述依据直接支持;不能用“通常”“可能”“例如”或来源不足声明引入依据外事实。
+- 依据中的限制只支持其明确语义,不得推导未明示的补救动作;例如“不可更新”不支持重新创建、删除、重启或其他处理方式。
+- 只有 object 字段本身的依据时,不得据此命名或输出未提供 schema 的子键或对象 YAML;只说明已知的对象级要求和缺少的子字段依据。
+- 示例只能组合依据中已经出现的字段、层级和取值;依据只说明某字段可配置时,可为该字段使用明显占位值,但不得补写相邻字段、完整资源骨架或真实参数名。无法满足时省略示例。
+- 当 <current_yaml> 为“无”时,不得输出 YAML 代码块、完整资源骨架或相邻字段;如需说明配置方式,只用行内文本写出 <docs> 中已经出现的完整字段路径和取值。
 - ask_mode=explain_field 时,优先解释 <editor_context> 中的 cursorPath / selectedText。
 - ask_mode=explain_error 时,优先解释 <editor_context> 中的 errors。
 - 若 <editor_context> 与 <docs> 冲突,以 <docs> 和校验错误为准。
-- 若片段不足以回答,明确说"提供的文档片段中没有相关信息",不要猜。
+- 依据只支持部分答案时只回答已支持部分,并明确缺少什么;不得追加外部链接、未检索字段、命令或替代方案。
+- 依据不足以回答核心问题时,明确说"提供的文档片段中没有相关信息,无法据此回答"并停止;不要解释无关片段或追加常识性建议。
 - 关键事实(字段名、取值、默认值)后标出处如 [S1],对应 <docs> 里的来源编号;不要引用给定来源之外的内容。
 ${CONFLICT_RULES}
-- 简洁准确,涉及枚举值时列全。用中文回答。`;
+- 简洁准确;只有 <docs> 明确给出完整枚举时才列全,否则不得补齐。用中文回答。`;
 
 export function getClient(
   runtimeAccess: DeepSeekRuntimeAccess = requireDeepSeekRuntimeAccess(),
@@ -190,6 +206,7 @@ export function buildAskRequest(input: AskPromptInput): AskRequest {
   const request: AskRequest = {
     model: ANSWER_MODEL,
     max_tokens: ASK_MAX_TOKENS,
+    ...ASK_REQUEST_OPTIONS,
     system: ASK_SYSTEM,
     messages: [
       {
@@ -233,7 +250,7 @@ export async function retrieveContext(
     return trace;
   };
 
-  // 完整字段路径命中时短路;模糊叶子字段交给统一检索处理。
+  // 精确标量字段直接回答;对象字段错误继续检索修复所需的子字段证据。
   const exactHits = selectContextHits(
     exactFieldHits(
       routed ?? undefined,
@@ -242,7 +259,15 @@ export async function retrieveContext(
     ),
     { k, taskType: 'ask' },
   );
-  if (exactHits.length > 0) {
+  const needsErrorStructureEvidence =
+    mode === 'explain_error' &&
+    hasSchemaFieldDescendants(
+      CORPUS,
+      routed ?? undefined,
+      query.fieldPathHint,
+      query.apiVersionHint,
+    );
+  if (exactHits.length > 0 && !needsErrorStructureEvidence) {
     const trace = emit({
       ...baseTrace,
       queryText: text,
