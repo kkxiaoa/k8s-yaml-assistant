@@ -64,6 +64,27 @@ check('context 同时标记知识形态和 authority', () => {
   assert.ok(context.includes('[S3][schema][Schema][当前集群 API]'), context);
 });
 
+check('schema context 显式给出完整 canonical target', () => {
+  const topLevelSchema: SourceInput = {
+    ...officialSchema,
+    id: 'schema::v1::ConfigMap::immutable',
+    title: 'ConfigMap.immutable',
+    targets: [{ apiVersion: 'v1', kind: 'ConfigMap', path: 'immutable' }],
+  };
+  const { context } = formatSources([topLevelSchema]);
+
+  assert.match(
+    context,
+    /规范目标: apiVersion=v1, kind=ConfigMap, path=immutable\n/,
+  );
+  assert.doesNotMatch(context, /path=spec\.immutable/);
+});
+
+check('非 schema context 不重复序列化 target', () => {
+  const { context } = formatSources([policy, docs]);
+  assert.doesNotMatch(context, /规范目标:/);
+});
+
 check('sources 只输出 canonical targets/provenance', () => {
   const { sources } = formatSources([clusterSchema, docs]);
   assert.deepEqual(sources[0]!.targets, clusterSchema.targets);

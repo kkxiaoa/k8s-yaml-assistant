@@ -2,9 +2,10 @@
 
 import { performance } from 'node:perf_hooks';
 import { embed, resolveEmbeddingModel } from './embeddings';
+import { retrievalDocumentText } from './document-text';
 import { buildCorpusManifest, CORPUS, type Chunk } from '../knowledge/corpus';
 import { RESOURCE_BOOST } from './router';
-import { policyBoost } from './boost';
+import { matchesDirectSchemaChild, policyBoost } from './boost';
 import { rerank, COARSE_N } from './rerank';
 import {
   readIndex,
@@ -90,6 +91,7 @@ export function denseSearch(
   boostResource?: string,
   boostPath?: string,
   boostApiVersion?: string,
+  boostDirectSchemaChildren = false,
 ): Array<{ chunk: Chunk; score: number }> {
   const normalizedPath = boostPath?.toLowerCase();
   const matchesTarget = (chunk: Chunk, path: string | undefined): boolean =>
@@ -103,17 +105,35 @@ export function denseSearch(
     );
 
   return index
-    .map((c) => ({
-      chunk: c as Chunk,
-      // 软加权:命中路由资源的 chunk 加分,但保留所有 chunk(误路由也不会删掉正确答案)
-      score:
-        cosineSimilarity(queryEmbedding, c.embedding) +
-        (boostResource && matchesTarget(c, undefined) ? RESOURCE_BOOST : 0) +
-        (normalizedPath && matchesTarget(c, normalizedPath)
-          ? FIELD_PATH_BOOST
-          : 0) +
-        policyBoost(c as Chunk, boostResource, normalizedPath, boostApiVersion),
-    }))
+    .map((c) => {
+      const chunk = c as Chunk;
+      const pathMatches =
+        normalizedPath !== undefined &&
+        (matchesTarget(chunk, normalizedPath) ||
+          (boostDirectSchemaChildren &&
+            matchesDirectSchemaChild(
+              chunk,
+              boostResource,
+              normalizedPath,
+              boostApiVersion,
+            )));
+      return {
+        chunk,
+        // 软加权:命中路由资源的 chunk 加分,但保留所有 chunk(误路由也不会删掉正确答案)
+        score:
+          cosineSimilarity(queryEmbedding, c.embedding) +
+          (boostResource && matchesTarget(chunk, undefined)
+            ? RESOURCE_BOOST
+            : 0) +
+          (pathMatches ? FIELD_PATH_BOOST : 0) +
+          policyBoost(
+            chunk,
+            boostResource,
+            normalizedPath,
+            boostApiVersion,
+          ),
+      };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
 }
@@ -218,6 +238,8 @@ export interface SearchOptions {
   boostPath?: string;
   /** 当前 YAML 的 apiVersion；有值时不提升同 Kind 的其他 schema 版本。 */
   boostApiVersion?: string;
+  /** 对象字段错误时，让同资源同版本的直接 schema 子字段共享字段软加权。 */
+  boostDirectSchemaChildren?: boolean;
   /** 粗召回候选数,默认 COARSE_N。 */
   coarseN?: number;
   /** 显式覆盖 query expansion feature flag,供 A/B 和回退验证。 */
@@ -254,6 +276,7 @@ export async function searchCorpusTraced(
     boostResource,
     boostPath,
     boostApiVersion,
+    boostDirectSchemaChildren = false,
     coarseN = COARSE_N,
     queryExpansion,
     runtimeAccess,
@@ -311,6 +334,7 @@ export async function searchCorpusTraced(
       effectiveBoostResource,
       effectiveBoostPath,
       boostApiVersion,
+      boostDirectSchemaChildren,
     ),
   );
   const denseMs = performance.now() - tDense;
@@ -327,10 +351,8 @@ export async function searchCorpusTraced(
   const rr = await executeRetrievalStage('rerank', () =>
     rerank(
       rerankQuery,
-      coarse.map((h) =>
-        matchedAliasPaths.length > 0
-          ? `${h.chunk.title}\n${h.chunk.text}`
-          : h.chunk.text,
+      coarse.map((hit) =>
+        retrievalDocumentText(hit.chunk, matchedAliasPaths.length > 0),
       ),
       coarse.length,
       runtimeAccess,

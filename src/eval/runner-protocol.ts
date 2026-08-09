@@ -780,6 +780,8 @@ export function retrievalEvalConfig(k: number): RetrievalEvalConfig {
 export function faithEvalConfig(k = FAITH_CONTEXT_K): FaithEvalConfig {
   return {
     ...retrievalConfigShape(k),
+    structuredErrorDirectSchemaChildBoost: true,
+    resourceExampleScaffoldEvidence: true,
     answerModel: ANSWER_MODEL,
     judgeModel: JUDGE_MODEL,
     answerPromptHash: answerPromptHash(),

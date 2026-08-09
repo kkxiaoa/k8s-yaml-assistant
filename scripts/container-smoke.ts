@@ -80,7 +80,7 @@ const CANDIDATE_INDEX_PATHS = new Set([
 interface ContainerBuildContract {
   dockerfile: string;
   dockerignore: string;
-  trackedSchemaPaths: readonly string[];
+  trackedKnowledgePaths: readonly string[];
 }
 
 interface CommandResult {
@@ -218,9 +218,9 @@ export function assertContainerBuildContract(
       fail(`.dockerignore must exclude ${path}`);
     }
   }
-  for (const path of contract.trackedSchemaPaths) {
+  for (const path of contract.trackedKnowledgePaths) {
     if (isDockerIgnored(path, ignoreRules)) {
-      fail(`.dockerignore excludes tracked schema closure path ${path}`);
+      fail(`.dockerignore excludes tracked knowledge source path ${path}`);
     }
   }
 
@@ -471,13 +471,15 @@ function runInteractive(command: string, args: readonly string[]): void {
 }
 
 function validateRepositoryContract(root: string): void {
-  const trackedSchemaPaths = gitTrackedFiles(root).filter((path) =>
-    path.startsWith('data/schemas/generated/'),
+  const trackedKnowledgePaths = gitTrackedFiles(root).filter(
+    (path) =>
+      path.startsWith('data/schemas/generated/') ||
+      path.startsWith('data/knowledge/'),
   );
   assertContainerBuildContract({
     dockerfile: readFileSync(join(root, 'Dockerfile'), 'utf8'),
     dockerignore: readFileSync(join(root, '.dockerignore'), 'utf8'),
-    trackedSchemaPaths,
+    trackedKnowledgePaths,
   });
 }
 
@@ -671,6 +673,8 @@ function assertRuntimeContents(
       'app/data/policies.json',
       'app/data/aliases/schema-field-aliases.jsonl',
       'app/data/schemas/generated/resources/core.v1.Pod.json',
+      'app/data/knowledge/kubernetes-docs/manifest.json',
+      'app/data/knowledge/kubernetes-docs/resource-quotas.md',
       ...(allowCandidateIndex ? CANDIDATE_INDEX_PATHS : []),
     ]) {
       if (!paths.includes(required)) fail(`runtime image missing ${required}`);

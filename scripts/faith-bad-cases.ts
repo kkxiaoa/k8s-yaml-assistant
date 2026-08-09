@@ -8,6 +8,7 @@ import {
   buildFaithBadCaseCandidates,
   mergeBadCaseIssues,
   readFaithBadCaseInput,
+  selectFaithBadCaseCandidates,
   type FaithBadCaseAction,
   type FaithBadCaseCandidate,
 } from '../src/eval/faith-bad-cases';
@@ -24,7 +25,38 @@ const ACTIONS: FaithBadCaseAction[] = [
 ];
 
 function usage(): never {
-  throw new Error('用法: npm run badcases:faith -- <runId> [--write]');
+  throw new Error(
+    '用法: npm run badcases:faith -- <runId> [--case <evalCaseId> ...] [--write]',
+  );
+}
+
+function parseArgs(args: string[]): {
+  runId: string;
+  write: boolean;
+  evalCaseIds: string[];
+} {
+  let runId: string | undefined;
+  let write = false;
+  const evalCaseIds: string[] = [];
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (arg === '--write') {
+      write = true;
+      continue;
+    }
+    if (arg === '--case') {
+      const evalCaseId = args[++index];
+      if (!evalCaseId || evalCaseId.startsWith('--')) usage();
+      evalCaseIds.push(evalCaseId);
+      continue;
+    }
+    if (arg.startsWith('--') || runId !== undefined) usage();
+    runId = arg;
+  }
+
+  if (!runId) usage();
+  return { runId, write, evalCaseIds };
 }
 
 function issueLabel(candidate: FaithBadCaseCandidate): string {
@@ -104,10 +136,7 @@ function printPreview(params: {
 }
 
 function main(): void {
-  const args = process.argv.slice(2);
-  const runId = args.find((arg) => arg !== '--write');
-  const write = args.includes('--write');
-  if (!runId) usage();
+  const { runId, write, evalCaseIds } = parseArgs(process.argv.slice(2));
 
   const input = readFaithBadCaseInput({ runId });
   const existing = readBadCases();
@@ -115,11 +144,14 @@ function main(): void {
     existing,
     candidates: [],
   });
-  const candidates = buildFaithBadCaseCandidates({
-    observations: input.observations,
-    existingBadCases: canonicalExisting.cases,
-    run: input.run,
-    scope: input.scope,
+  const candidates = selectFaithBadCaseCandidates({
+    candidates: buildFaithBadCaseCandidates({
+      observations: input.observations,
+      existingBadCases: canonicalExisting.cases,
+      run: input.run,
+      scope: input.scope,
+    }),
+    evalCaseIds,
   });
   const writeResult = write
     ? mergeBadCaseIssues({

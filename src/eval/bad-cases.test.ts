@@ -304,6 +304,25 @@ function withTempDir(fn: (directory: string) => void): void {
   for (const badCase of canonical) {
     assert.doesNotThrow(() => assertCanonicalBadCase(badCase));
   }
+
+  const immutableCase = canonical.find(
+    (badCase) => badCase.tracking.evalCaseId === 'cm-immutable',
+  );
+  const quotaCase = canonical.find(
+    (badCase) => badCase.tracking.evalCaseId === 'quota-hard',
+  );
+  assert.ok(immutableCase);
+  assert.ok(quotaCase);
+  assert.ok(quotaCase.expected);
+  assert.equal(immutableCase.status, 'fixed');
+  assert.equal(quotaCase.id, '61951b2a9334');
+  assert.equal(quotaCase.failure.layer, 'knowledge');
+  assert.equal(quotaCase.failure.type, 'knowledge_missing');
+  assert.equal(quotaCase.status, 'fixed');
+  assert.deepEqual(quotaCase.expected.sourceIds, [
+    'schema::v1::ResourceQuota::spec.hard',
+    'docs::kubernetes::resource-quotas::compute-resource-quota',
+  ]);
 }
 
 {

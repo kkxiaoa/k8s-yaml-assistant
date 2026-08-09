@@ -94,9 +94,18 @@ function requiredLocalSink(
 function fakeSearchFor(
   chunkId: string,
 ): NonNullable<RetrieveContextOptions['search']> {
-  const found = chunk(chunkId);
+  return fakeSearchForIds([chunkId]);
+}
+
+function fakeSearchForIds(
+  chunkIds: readonly string[],
+): NonNullable<RetrieveContextOptions['search']> {
+  const found = chunkIds.map(chunk);
   return async (queryText, options = {}) => ({
-    hits: [{ chunk: found, score: 0.9 }],
+    hits: found.map((candidate, index) => ({
+      chunk: candidate,
+      score: 0.9 - index * 0.1,
+    })),
     trace: {
       queryText,
       queryExpansion: {
@@ -109,8 +118,12 @@ function fakeSearchFor(
         routedResource: options.boostResource,
         selectedResource: options.boostResource,
       },
-      coarseHits: [toTraceHit(found, 0.8)],
-      rerankHits: [toTraceHit(found, 0.9)],
+      coarseHits: found.map((candidate, index) =>
+        toTraceHit(candidate, 0.8 - index * 0.1),
+      ),
+      rerankHits: found.map((candidate, index) =>
+        toTraceHit(candidate, 0.9 - index * 0.1),
+      ),
       latencyMs: { total: 1 },
       cache: { index: { status: 'hit' }, embeddingHit: false },
     },
@@ -162,19 +175,34 @@ const exactCases = [
 console.log('pipeline retrieval:');
 
 await check('Ask 使用统一的严格证据与拒答边界', () => {
-  assert.match(ASK_SYSTEM, /问题本身不能补充新事实/);
-  assert.match(ASK_SYSTEM, /有限选项中限定用户指定的一个选项/);
-  assert.match(ASK_SYSTEM, /常识.*模型记忆.*不是依据/);
+  assert.match(ASK_SYSTEM, /证据边界:事实只能来自 <docs>/);
+  assert.match(ASK_SYSTEM, /有限选项中限定用户所指对象/);
+  assert.match(ASK_SYSTEM, /常识、模型记忆、未展示内容和外部链接都不是证据/);
+  assert.match(ASK_SYSTEM, /候选证据,不是逐条介绍清单/);
   assert.match(ASK_SYSTEM, /字段、资源、API、参数、键、命令/);
-  assert.match(ASK_SYSTEM, /限制只支持其明确语义.*不得推导未明示的补救动作/);
-  assert.match(ASK_SYSTEM, /不可更新.*不支持重新创建、删除、重启/);
-  assert.match(ASK_SYSTEM, /object 字段本身.*不得据此命名或输出.*子键或对象 YAML/);
-  assert.match(ASK_SYSTEM, /示例只能组合依据中已经出现的字段、层级和取值/);
-  assert.match(ASK_SYSTEM, /<current_yaml> 为“无”时.*不得输出 YAML 代码块、完整资源骨架或相邻字段/);
-  assert.match(ASK_SYSTEM, /只用行内文本写出 <docs> 中已经出现的完整字段路径和取值/);
-  assert.match(ASK_SYSTEM, /依据不足以回答核心问题时/);
+  assert.match(ASK_SYSTEM, /限制本身不能推出未明示的补救动作/);
+  assert.match(ASK_SYSTEM, /核心问题已有完整答案时立即结束/);
+  assert.match(ASK_SYSTEM, /即使是否定描述.*不得点名证据中未出现的字段或选项/);
+  assert.match(ASK_SYSTEM, /path 是完整字段路径.*必须原样使用/);
+  assert.match(ASK_SYSTEM, /单字段段 path 表示顶层字段/);
+  assert.match(ASK_SYSTEM, /示例只能组合证据支持的业务字段、层级和键/);
+  assert.match(ASK_SYSTEM, /应输出一个最小完整资源 YAML 示例/);
+  assert.match(
+    ASK_SYSTEM,
+    /只含 `apiVersion`、`kind`、`metadata\.name` 的通用资源骨架/,
+  );
+  assert.match(ASK_SYSTEM, /只组合核心问题所需且有证据的业务字段子树/);
+  assert.match(ASK_SYSTEM, /名称只能使用 `example` 或 `example-` 开头/);
+  assert.match(ASK_SYSTEM, /`metadata\.namespace` 不属于通用骨架/);
+  assert.match(ASK_SYSTEM, /object 字段而没有子字段 schema/);
+  assert.match(ASK_SYSTEM, /不得命名真实或占位子键/);
+  assert.match(ASK_SYSTEM, /不得生成该对象的 YAML/);
+  assert.match(ASK_SYSTEM, /不得列举证据中未出现的具体例子/);
   assert.match(ASK_SYSTEM, /无法据此回答.*并停止/);
-  assert.match(ASK_SYSTEM, /不得追加外部链接、未检索字段、命令或替代方案/);
+  assert.match(ASK_SYSTEM, /不追加命令、替代方案或无关片段/);
+  assert.doesNotMatch(ASK_SYSTEM, /可为该字段使用明显占位值/);
+  assert.doesNotMatch(ASK_SYSTEM, /可附加只含/);
+  assert.doesNotMatch(ASK_SYSTEM, /不得输出 YAML 代码块/);
   assert.match(
     buildAskUserMessage({
       question: 'Pod 镜像拉取策略怎么配?',
@@ -182,6 +210,74 @@ await check('Ask 使用统一的严格证据与拒答边界', () => {
       mode: 'free',
     }),
     /<current_yaml>\n无\n<\/current_yaml>/,
+  );
+});
+
+await check('配置型无 YAML Ask 只附加 schema 支持的最小资源骨架', async () => {
+  const rankedIds = [
+    'docs::kubernetes::resource-quotas::compute-resource-quota',
+    'schema::v1::ResourceQuota::spec.hard',
+    'schema::v1::ResourceQuota::status.hard',
+  ];
+  const search = fakeSearchForIds(rankedIds);
+
+  const prepared = await prepareAsk({
+    question: 'ResourceQuota 怎么设置命名空间的资源硬限制?',
+    k: 3,
+    mode: 'free',
+    retrievalOptions: { search, queryExpansion: false },
+  });
+  assert.deepEqual(
+    prepared.hits.map((hit) => hit.id),
+    [...rankedIds, 'schema::v1::ResourceQuota::metadata.name'],
+  );
+  assert.deepEqual(
+    prepared.trace.finalHits.map((hit) => hit.id),
+    prepared.hits.map((hit) => hit.id),
+  );
+  assert.match(prepared.context, /ResourceQuota · metadata\.name/);
+  assert.doesNotMatch(prepared.context, /ResourceQuota · metadata\.namespace/);
+
+  const disabled = await prepareAsk({
+    question: 'ResourceQuota 怎么设置命名空间的资源硬限制?',
+    k: 3,
+    mode: 'free',
+    retrievalOptions: {
+      search,
+      queryExpansion: false,
+      resourceExampleScaffoldEvidence: false,
+    },
+  });
+  assert.deepEqual(
+    disabled.hits.map((hit) => hit.id),
+    rankedIds,
+  );
+
+  const conceptual = await prepareAsk({
+    question: 'ResourceQuota 的 spec.hard 是什么?',
+    k: 3,
+    mode: 'free',
+    retrievalOptions: { search, queryExpansion: false },
+  });
+  assert.deepEqual(
+    conceptual.hits.map((hit) => hit.id),
+    rankedIds,
+  );
+
+  const withCurrentYaml = await prepareAsk({
+    question: 'ResourceQuota 怎么设置命名空间的资源硬限制?',
+    k: 3,
+    mode: 'free',
+    editorContext: {
+      yaml: 'apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: current',
+      kind: 'ResourceQuota',
+      apiVersion: 'v1',
+    },
+    retrievalOptions: { search, queryExpansion: false },
+  });
+  assert.deepEqual(
+    withCurrentYaml.hits.map((hit) => hit.id),
+    rankedIds,
   );
 });
 
@@ -749,12 +845,14 @@ await check('对象字段错误进入 search 路径以检索子字段证据', as
   ];
   let searchCalled = false;
   let boostPath: string | undefined;
+  let boostDirectSchemaChildren: boolean | undefined;
   const search: RetrieveContextOptions['search'] = async (
     queryText,
     options = {},
   ) => {
     searchCalled = true;
     boostPath = options.boostPath;
+    boostDirectSchemaChildren = options.boostDirectSchemaChildren;
     return {
       hits: ranked.map((schemaChunk, index) => ({
         chunk: schemaChunk,
@@ -794,6 +892,7 @@ await check('对象字段错误进入 search 路径以检索子字段证据', as
 
   assert.equal(searchCalled, true);
   assert.equal(boostPath, 'spec.selector');
+  assert.equal(boostDirectSchemaChildren, true);
   assert.equal(prepared.trace.path, 'search');
   assert.deepEqual(
     prepared.hits.map((hit) => hit.id),
@@ -805,6 +904,19 @@ await check('对象字段错误进入 search 路径以检索子字段证据', as
     ),
     resolved.expectedChunkIds,
   );
+
+  await prepareAsk({
+    question: resolved.question,
+    k: 3,
+    editorContext: resolved.editorContext,
+    mode: 'explain_error',
+    retrievalOptions: {
+      search,
+      queryExpansion: false,
+      structuredErrorDirectSchemaChildBoost: false,
+    },
+  });
+  assert.equal(boostDirectSchemaChildren, false);
 });
 
 console.log(`\n通过 ${passed} 项`);
