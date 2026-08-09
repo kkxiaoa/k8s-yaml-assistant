@@ -23,6 +23,9 @@ function repositoryContract() {
       'data/schemas/generated/definitions/io.k8s.api.core.v1.PodSpec.json',
       'data/knowledge/kubernetes-docs/manifest.json',
       'data/knowledge/kubernetes-docs/resource-quotas.md',
+      'data/knowledge/kubernetes-docs/limit-range.md',
+      'data/knowledge/kubernetes-examples/manifest.json',
+      'data/knowledge/kubernetes-examples/resource-quota-mem-cpu.yaml',
     ],
   };
 }
@@ -212,6 +215,8 @@ test('runtime content audit rejects development, credential, index and trace pat
       'app/data/policies.json',
       'app/data/knowledge/kubernetes-docs/manifest.json',
       'app/data/knowledge/kubernetes-docs/resource-quotas.md',
+      'app/data/knowledge/kubernetes-examples/manifest.json',
+      'app/data/knowledge/kubernetes-examples/resource-quota-mem-cpu.yaml',
       'app/data/schemas/generated/resources/core.v1.Pod.json',
       'app/node_modules/next/package.json',
       'app/node_modules/@anthropic-ai/sdk/core/api.d.mts',

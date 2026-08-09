@@ -57,6 +57,7 @@ function withMarkdownFixture(
     const manifest = readManifestFixture();
     const [document] = manifest.documents;
     assert.ok(document);
+    manifest.documents = [document];
     document.upstreamBlobSha1 = gitBlobSha1(markdown);
     configure(manifest);
     writeFileSync(
@@ -78,7 +79,7 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
     snapshot.version,
     '7eae8915497224dd9ba4803a8ebd0efec33b303b',
   );
-  assert.equal(snapshot.chunks.length, 1);
+  assert.equal(snapshot.chunks.length, 5);
 
   const chunk = snapshot.chunks[0]!;
   assert.deepEqual(decodeKnowledgeChunk(chunk), chunk);
@@ -114,6 +115,37 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
   assert.doesNotMatch(chunk.text, /<!--|-->/u);
   assert.doesNotMatch(chunk.text, /apiVersion: v1|kind: ResourceQuota/u);
   assert.doesNotMatch(chunk.text, /扩展资源的配额/u);
+
+  const chunksById = new Map(
+    snapshot.chunks.map((candidate) => [candidate.id, candidate] as const),
+  );
+  const limitRange = chunksById.get(
+    'docs::kubernetes::limit-range::constraints-on-resource-limits-and-requests',
+  );
+  const configMap = chunksById.get(
+    'docs::kubernetes::configmap::configmap-immutable',
+  );
+  const deployment = chunksById.get(
+    'docs::kubernetes::deployment::selector',
+  );
+  const images = chunksById.get(
+    'docs::kubernetes::images::image-pull-policy',
+  );
+  assert.ok(limitRange);
+  assert.ok(configMap);
+  assert.ok(deployment);
+  assert.ok(images);
+  assert.match(limitRange.text, /设置默认请求值与限制值/u);
+  assert.match(configMap.text, /将 `immutable` 字段设置为 `true`/u);
+  assert.match(
+    deployment.text,
+    /`\.spec\.selector` 必须匹配 `\.spec\.template\.metadata\.labels`/u,
+  );
+  assert.match(images.text, /`IfNotPresent`/u);
+  assert.match(images.text, /默认镜像拉取策略/u);
+  assert.doesNotMatch(configMap.text, /\{\{< feature-state/u);
+  assert.doesNotMatch(deployment.text, /\{\{< \/?note/u);
+  assert.doesNotMatch(images.text, /\{\{< \/?note/u);
 });
 
 test('官方文档数据提供器拒绝偏离固定 Git blob 的快照', () => {

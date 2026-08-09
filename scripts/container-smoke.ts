@@ -675,6 +675,16 @@ function assertRuntimeContents(
       'app/data/schemas/generated/resources/core.v1.Pod.json',
       'app/data/knowledge/kubernetes-docs/manifest.json',
       'app/data/knowledge/kubernetes-docs/resource-quotas.md',
+      'app/data/knowledge/kubernetes-docs/limit-range.md',
+      'app/data/knowledge/kubernetes-docs/configmap.md',
+      'app/data/knowledge/kubernetes-docs/deployment.md',
+      'app/data/knowledge/kubernetes-docs/images.md',
+      'app/data/knowledge/kubernetes-examples/manifest.json',
+      'app/data/knowledge/kubernetes-examples/resource-quota-mem-cpu.yaml',
+      'app/data/knowledge/kubernetes-examples/limit-range-mem-cpu-container.yaml',
+      'app/data/knowledge/kubernetes-examples/configmap-immutable.yaml',
+      'app/data/knowledge/kubernetes-examples/deployment-nginx.yaml',
+      'app/data/knowledge/kubernetes-examples/pod-nginx.yaml',
       ...(allowCandidateIndex ? CANDIDATE_INDEX_PATHS : []),
     ]) {
       if (!paths.includes(required)) fail(`runtime image missing ${required}`);

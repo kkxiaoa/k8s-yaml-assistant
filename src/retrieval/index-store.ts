@@ -14,7 +14,7 @@ import { canonicalHash, canonicalJson } from '../shared/json';
 import type { IndexBuildChunk } from './index-builder';
 import { getRetrievalRuntimeConfig } from '../server/runtime-config';
 
-export const INDEX_FORMAT_VERSION = 6 as const;
+export const INDEX_FORMAT_VERSION = 7 as const;
 
 const Sha256Schema = z
   .string()

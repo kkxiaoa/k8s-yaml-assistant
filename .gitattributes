@@ -1,0 +1,7 @@
+# Provider snapshots must preserve the exact upstream Git blob bytes.
+data/knowledge/kubernetes-docs/resource-quotas.md -whitespace
+data/knowledge/kubernetes-docs/limit-range.md -whitespace
+data/knowledge/kubernetes-docs/configmap.md -whitespace
+data/knowledge/kubernetes-docs/deployment.md -whitespace
+data/knowledge/kubernetes-docs/images.md -whitespace
+data/knowledge/kubernetes-examples/*.yaml -whitespace

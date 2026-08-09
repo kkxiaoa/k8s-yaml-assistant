@@ -185,16 +185,17 @@ await check('Ask 使用统一的严格证据与拒答边界', () => {
   assert.match(ASK_SYSTEM, /即使是否定描述.*不得点名证据中未出现的字段或选项/);
   assert.match(ASK_SYSTEM, /path 是完整字段路径.*必须原样使用/);
   assert.match(ASK_SYSTEM, /单字段段 path 表示顶层字段/);
-  assert.match(ASK_SYSTEM, /示例只能组合证据支持的业务字段、层级和键/);
-  assert.match(ASK_SYSTEM, /应输出一个最小完整资源 YAML 示例/);
+  assert.match(ASK_SYSTEM, /问题目标资源与当前资源不同时,不得复制当前 YAML/);
+  assert.match(ASK_SYSTEM, /应基于该来源输出一个最小完整资源 YAML 代码块/);
+  assert.match(ASK_SYSTEM, /example 只提供配置参考,不替代 schema 合法性/);
   assert.match(
     ASK_SYSTEM,
-    /只含 `apiVersion`、`kind`、`metadata\.name` 的通用资源骨架/,
+    /只含 `apiVersion`、`kind`、`metadata\.name` 的通用骨架/,
   );
-  assert.match(ASK_SYSTEM, /只组合核心问题所需且有证据的业务字段子树/);
-  assert.match(ASK_SYSTEM, /名称只能使用 `example` 或 `example-` 开头/);
+  assert.match(ASK_SYSTEM, /保留其 `apiVersion`、`kind`、`metadata\.name`/);
+  assert.match(ASK_SYSTEM, /名称使用 `example` 或 `example-` 开头/);
   assert.match(ASK_SYSTEM, /`metadata\.namespace` 不属于通用骨架/);
-  assert.match(ASK_SYSTEM, /object 字段而没有子字段 schema/);
+  assert.match(ASK_SYSTEM, /object 字段而没有子字段 schema 或 example/);
   assert.match(ASK_SYSTEM, /不得命名真实或占位子键/);
   assert.match(ASK_SYSTEM, /不得生成该对象的 YAML/);
   assert.match(ASK_SYSTEM, /不得列举证据中未出现的具体例子/);
@@ -213,7 +214,7 @@ await check('Ask 使用统一的严格证据与拒答边界', () => {
   );
 });
 
-await check('配置型无 YAML Ask 只附加 schema 支持的最小资源骨架', async () => {
+await check('配置型 Ask 在真实编辑器上下文中附加目标资源的官方示例', async () => {
   const rankedIds = [
     'docs::kubernetes::resource-quotas::compute-resource-quota',
     'schema::v1::ResourceQuota::spec.hard',
@@ -229,13 +230,14 @@ await check('配置型无 YAML Ask 只附加 schema 支持的最小资源骨架'
   });
   assert.deepEqual(
     prepared.hits.map((hit) => hit.id),
-    [...rankedIds, 'schema::v1::ResourceQuota::metadata.name'],
+    [...rankedIds, 'example::kubernetes::resource-quota-mem-cpu'],
   );
   assert.deepEqual(
     prepared.trace.finalHits.map((hit) => hit.id),
     prepared.hits.map((hit) => hit.id),
   );
-  assert.match(prepared.context, /ResourceQuota · metadata\.name/);
+  assert.match(prepared.context, /CPU 与内存配额示例/);
+  assert.match(prepared.context, /```yaml\napiVersion: v1/u);
   assert.doesNotMatch(prepared.context, /ResourceQuota · metadata\.namespace/);
 
   const disabled = await prepareAsk({
@@ -277,7 +279,55 @@ await check('配置型无 YAML Ask 只附加 schema 支持的最小资源骨架'
   });
   assert.deepEqual(
     withCurrentYaml.hits.map((hit) => hit.id),
-    rankedIds,
+    [...rankedIds, 'example::kubernetes::resource-quota-mem-cpu'],
+  );
+
+  const withDifferentCurrentYaml = await prepareAsk({
+    question: 'ResourceQuota 怎么设置命名空间的资源硬限制?',
+    k: 3,
+    mode: 'free',
+    editorContext: {
+      yaml: 'apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: current',
+      kind: 'StorageClass',
+      apiVersion: 'storage.k8s.io/v1',
+      selectedText: 'reclaimPolicy: Retain',
+      cursorPath: 'reclaimPolicy',
+    },
+    retrievalOptions: { search, queryExpansion: false },
+  });
+  assert.deepEqual(
+    withDifferentCurrentYaml.hits.map((hit) => hit.id),
+    [...rankedIds, 'example::kubernetes::resource-quota-mem-cpu'],
+  );
+  assert.equal(withDifferentCurrentYaml.trace.resourceHint, 'ResourceQuota');
+  assert.equal(withDifferentCurrentYaml.trace.apiVersionHint, undefined);
+  assert.equal(withDifferentCurrentYaml.trace.fieldPathHint, undefined);
+  assert.match(withDifferentCurrentYaml.trace.queryText, /资源:ResourceQuota/u);
+  assert.doesNotMatch(
+    withDifferentCurrentYaml.trace.queryText,
+    /StorageClass|storage\.k8s\.io|reclaimPolicy/u,
+  );
+});
+
+await check('没有匹配官方示例时保留 schema 驱动的通用骨架', async () => {
+  const rankedIds = [
+    'schema::autoscaling/v2::HorizontalPodAutoscaler::spec.maxReplicas',
+  ];
+  const prepared = await prepareAsk({
+    question: 'HPA 怎么设置最大副本数?',
+    k: 3,
+    mode: 'free',
+    retrievalOptions: {
+      search: fakeSearchForIds(rankedIds),
+      queryExpansion: false,
+    },
+  });
+  assert.deepEqual(
+    prepared.hits.map((hit) => hit.id),
+    [
+      ...rankedIds,
+      'schema::autoscaling/v2::HorizontalPodAutoscaler::metadata.name',
+    ],
   );
 });
 

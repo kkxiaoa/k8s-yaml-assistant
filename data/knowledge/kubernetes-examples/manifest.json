@@ -1,0 +1,99 @@
+{
+  "formatVersion": 1,
+  "providerId": "example.kubernetes-official",
+  "sourceType": "example",
+  "version": "7eae8915497224dd9ba4803a8ebd0efec33b303b",
+  "capturedAt": "2026-08-09T08:20:45.000Z",
+  "upstreamRepository": "https://github.com/kubernetes/website",
+  "license": {
+    "spdxId": "CC-BY-4.0",
+    "sourceUri": "https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE"
+  },
+  "examples": [
+    {
+      "id": "resource-quota-mem-cpu",
+      "snapshot": "resource-quota-mem-cpu.yaml",
+      "upstreamPath": "content/zh-cn/examples/admin/resource/quota-mem-cpu.yaml",
+      "upstreamBlobSha1": "5c4bcd81b8b355328ffd991a843941facbc0dc7a",
+      "title": "ResourceQuota · spec.hard · CPU 与内存配额示例",
+      "targets": [
+        {
+          "apiVersion": "v1",
+          "kind": "ResourceQuota",
+          "path": "spec.hard"
+        }
+      ]
+    },
+    {
+      "id": "limit-range-mem-cpu-container",
+      "snapshot": "limit-range-mem-cpu-container.yaml",
+      "upstreamPath": "content/zh-cn/examples/admin/resource/limit-mem-cpu-container.yaml",
+      "upstreamBlobSha1": "3c2b30f29ccefe541712762da3b50513a9b3dae2",
+      "title": "LimitRange · spec.limits · 容器 CPU 与内存默认值示例",
+      "targets": [
+        {
+          "apiVersion": "v1",
+          "kind": "LimitRange",
+          "path": "spec.limits.default"
+        },
+        {
+          "apiVersion": "v1",
+          "kind": "LimitRange",
+          "path": "spec.limits.defaultRequest"
+        }
+      ]
+    },
+    {
+      "id": "configmap-immutable",
+      "snapshot": "configmap-immutable.yaml",
+      "upstreamPath": "content/zh-cn/examples/configmap/immutable-configmap.yaml",
+      "upstreamBlobSha1": "7785dfdc5335e58aac4b5995197578e080dc55d6",
+      "title": "ConfigMap · immutable · 不可变配置示例",
+      "targets": [
+        {
+          "apiVersion": "v1",
+          "kind": "ConfigMap",
+          "path": "immutable"
+        }
+      ]
+    },
+    {
+      "id": "deployment-selector",
+      "snapshot": "deployment-nginx.yaml",
+      "upstreamPath": "content/zh-cn/examples/controllers/nginx-deployment.yaml",
+      "upstreamBlobSha1": "685c17aa68e1d5f413f2f5b469511a28937e469b",
+      "title": "Deployment · spec.selector · 选择算符与 Pod 模板标签示例",
+      "targets": [
+        {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "path": "spec.selector"
+        },
+        {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "path": "spec.selector.matchLabels"
+        },
+        {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "path": "spec.template.metadata.labels"
+        }
+      ]
+    },
+    {
+      "id": "pod-image-pull-policy",
+      "snapshot": "pod-nginx.yaml",
+      "upstreamPath": "content/zh-cn/examples/pods/pod-nginx.yaml",
+      "upstreamBlobSha1": "134ddae2aa1c883e9fa8e2959aaea781517bebc6",
+      "title": "Pod · spec.containers.imagePullPolicy · 镜像拉取策略示例",
+      "targets": [
+        {
+          "apiVersion": "v1",
+          "kind": "Pod",
+          "path": "spec.containers.imagePullPolicy"
+        }
+      ]
+    }
+  ]
+}

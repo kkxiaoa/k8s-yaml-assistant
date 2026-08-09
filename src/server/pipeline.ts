@@ -54,7 +54,7 @@ export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,�
 - 证据边界:事实只能来自 <docs>,以及 <current_yaml> / <editor_context> 中明确给出的当前配置、选中内容和校验错误。问题只能在证据已列出的有限选项中限定用户所指对象;常识、模型记忆、未展示内容和外部链接都不是证据。<editor_context> 与 <docs> 冲突时以 <docs> 和校验错误为准。
 - 最小回答:只回答核心问题所需且能由证据直接推出的内容;检索片段是候选证据,不是逐条介绍清单。字段、资源、API、参数、键、命令、取值、默认值、校验/准入/运行后果和操作建议都要有直接证据;限制本身不能推出未明示的补救动作,也不能用“通常”“可能”“例如”引入新事实。核心问题已有完整答案时立即结束,不要追加“未提供”说明;即使是否定描述,也不得点名证据中未出现的字段或选项。
 - 字段路径:schema 来源“规范目标”中的 path 是完整字段路径,必须原样使用;单字段段 path 表示顶层字段,不得自行添加 spec、metadata 或其他前缀。
-- YAML 与示例:有 <current_yaml> 时只复用其中明确内容和证据支持的字段、取值。没有 <current_yaml> 时,示例只能组合证据支持的业务字段、层级和键;这些字段的值可以使用明确标为示例的占位值。问题明确询问配置写法,且 <docs> 同时支持核心业务字段与资源的 \`metadata.name\` schema 规范目标时,应输出一个最小完整资源 YAML 示例:使用只含 \`apiVersion\`、\`kind\`、\`metadata.name\` 的通用资源骨架,并只组合核心问题所需且有证据的业务字段子树;名称只能使用 \`example\` 或 \`example-\` 开头的明显占位值。\`metadata.namespace\` 不属于通用骨架,没有当前配置或直接证据时不得补写;也不得补写其他相邻字段。若证据只有 object 字段而没有子字段 schema,不得命名真实或占位子键、不得生成该对象的 YAML;只说明已知的路径、类型、作用和缺少的子字段依据。
+- YAML 与示例:<current_yaml> 只证明其自身资源中明确出现的字段和值;问题目标资源与当前资源不同时,不得复制当前 YAML。问题明确询问配置写法且 <docs> 有匹配目标的 example 来源时,应基于该来源输出一个最小完整资源 YAML 代码块:保留其 \`apiVersion\`、\`kind\`、\`metadata.name\` 和核心问题所需业务子树,删除无关相邻字段;example 只提供配置参考,不替代 schema 合法性。没有匹配 example 时,仅当 <docs> 同时支持核心业务字段与 \`metadata.name\` schema 规范目标,才使用只含 \`apiVersion\`、\`kind\`、\`metadata.name\` 的通用骨架,名称使用 \`example\` 或 \`example-\` 开头的明显占位值。当前 YAML 与问题目标一致时可保留其中已有名称。\`metadata.namespace\` 不属于通用骨架,没有当前配置或直接证据时不得补写;也不得补写其他相邻字段。若证据只有 object 字段而没有子字段 schema 或 example,不得命名真实或占位子键、不得生成该对象的 YAML;只说明已知的路径、类型、作用和缺少的子字段依据。
 - 来源不足:证据只支持部分答案时只回答该部分,并按类别说明还缺什么,不得列举证据中未出现的具体例子。证据不足以回答核心问题时,只说“提供的文档片段中没有相关信息,无法据此回答”并停止,不追加命令、替代方案或无关片段。
 - 模式聚焦:ask_mode=explain_field 时优先解释 cursorPath / selectedText;ask_mode=explain_error 时优先解释 errors。
 ${CONFLICT_RULES}
@@ -108,7 +108,7 @@ export interface RetrievalQuery {
 }
 
 const CONFIGURATION_EXAMPLE_INTENT =
-  /(?:怎么|如何)[^?？。\n]{0,32}(?:设置|配置|声明|指定|编写|写入|添加|设为|启用|关闭|绑定|引用|挂载|限制|配)(?:[?？。\n]|$)|(?:YAML|配置)(?:示例|样例|写法|片段)/iu;
+  /(?:怎么|如何)[^?？。\n]{0,24}(?:设置|配置|声明|指定|编写|写入|添加|设为|设|启用|关闭|绑定|引用|挂载|限制|选中|配)[^?？。\n]{0,48}(?:[?？。\n]|$)|(?:YAML|配置)(?:示例|样例|写法|片段)/iu;
 
 function toRetrievalQuery(
   question: string,
@@ -160,23 +160,21 @@ function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
   };
 }
 
-function withResourceExampleScaffoldEvidence(
+function withResourceExampleEvidence(
   hits: readonly Hit[],
   input: {
     question: string;
     mode: AskMode;
-    editorContext?: EditorContext;
     resource?: string;
     apiVersion?: string;
     enabled: boolean;
   },
 ): Hit[] {
-  const { question, mode, editorContext, resource, enabled } = input;
+  const { question, mode, resource, enabled } = input;
   if (
     !enabled ||
     hits.length === 0 ||
     mode !== 'free' ||
-    editorContext?.yaml?.trim() ||
     !resource ||
     !CONFIGURATION_EXAMPLE_INTENT.test(question)
   ) {
@@ -195,6 +193,38 @@ function withResourceExampleScaffoldEvidence(
     input.apiVersion ??
     (evidenceVersions.size === 1 ? [...evidenceVersions][0] : undefined);
   if (!apiVersion) return [...hits];
+
+  const corePaths = new Set(
+    hits.flatMap((hit) =>
+      hit.sourceType === 'example'
+        ? []
+        : hit.targets
+            .filter(
+              (target) =>
+                target.kind === resource &&
+                target.apiVersion === apiVersion &&
+                target.path !== undefined &&
+                target.path !== 'metadata.name',
+            )
+            .map((target) => target.path!),
+    ),
+  );
+  const examples = CORPUS.filter(
+    (chunk) =>
+      chunk.sourceType === 'example' &&
+      chunk.targets.some(
+        (target) =>
+          target.kind === resource &&
+          target.apiVersion === apiVersion &&
+          target.path !== undefined &&
+          corePaths.has(target.path),
+      ),
+  );
+  const existingExample = hits.some((hit) =>
+    examples.some((example) => example.id === hit.id),
+  );
+  if (existingExample) return [...hits];
+  if (examples.length === 1) return [...hits, toHit(examples[0]!)];
 
   const candidates = findExactFieldChunks(
     CORPUS,
@@ -283,15 +313,33 @@ export async function retrieveContext(
 }> {
   const t0 = performance.now();
   const query = toRetrievalQuery(question, mode, editorContext);
-  const routed = query.resourceHint ?? inferResource(question);
-  const text = retrievalText(query);
+  const questionResource = inferResource(question);
+  const usesEditorTarget =
+    mode !== 'free' ||
+    questionResource === null ||
+    questionResource === query.resourceHint;
+  const routed =
+    mode === 'free'
+      ? (questionResource ?? query.resourceHint)
+      : (query.resourceHint ?? questionResource);
+  const routedApiVersion = usesEditorTarget
+    ? query.apiVersionHint
+    : undefined;
+  const effectiveQuery: RetrievalQuery = {
+    ...query,
+    resourceHint: routed ?? undefined,
+    apiVersionHint: routedApiVersion,
+    fieldPathHint: usesEditorTarget ? query.fieldPathHint : undefined,
+    selectedText: usesEditorTarget ? query.selectedText : undefined,
+  };
+  const text = retrievalText(effectiveQuery);
 
   const baseTrace = {
     question,
     mode,
     resourceHint: routed ?? undefined,
-    apiVersionHint: query.apiVersionHint,
-    fieldPathHint: query.fieldPathHint,
+    apiVersionHint: routedApiVersion,
+    fieldPathHint: effectiveQuery.fieldPathHint,
     createdAt: new Date().toISOString(),
   };
   const emit = (trace: RetrievalTrace): RetrievalTrace => {
@@ -303,8 +351,8 @@ export async function retrieveContext(
   const exactHits = selectContextHits(
     exactFieldHits(
       routed ?? undefined,
-      query.fieldPathHint,
-      query.apiVersionHint,
+      effectiveQuery.fieldPathHint,
+      routedApiVersion,
     ),
     { k, taskType: 'ask' },
   );
@@ -313,16 +361,15 @@ export async function retrieveContext(
     hasSchemaFieldDescendants(
       CORPUS,
       routed ?? undefined,
-      query.fieldPathHint,
-      query.apiVersionHint,
+      effectiveQuery.fieldPathHint,
+      routedApiVersion,
     );
   if (exactHits.length > 0 && !needsErrorStructureEvidence) {
-    const contextHits = withResourceExampleScaffoldEvidence(exactHits, {
+    const contextHits = withResourceExampleEvidence(exactHits, {
       question,
       mode,
-      editorContext,
       resource: routed ?? undefined,
-      apiVersion: query.apiVersionHint,
+      apiVersion: routedApiVersion,
       enabled: options.resourceExampleScaffoldEvidence ?? true,
     });
     const trace = emit({
@@ -348,8 +395,8 @@ export async function retrieveContext(
   const search = options.search ?? searchCorpusTraced;
   const { hits: ranked, trace: searchTrace } = await search(text, {
     boostResource: routed ?? undefined,
-    boostPath: query.fieldPathHint,
-    boostApiVersion: query.apiVersionHint,
+    boostPath: effectiveQuery.fieldPathHint,
+    boostApiVersion: routedApiVersion,
     boostDirectSchemaChildren:
       needsErrorStructureEvidence &&
       (options.structuredErrorDirectSchemaChildBoost ?? true),
@@ -362,14 +409,13 @@ export async function retrieveContext(
       : { requestObserver: options.requestObserver }),
   });
   const hits = selectContextHits(ranked, { k, taskType: 'ask' });
-  const finalHits = withResourceExampleScaffoldEvidence(
+  const finalHits = withResourceExampleEvidence(
     hits.map(({ chunk, score }) => toHit(chunk, score)),
     {
       question,
       mode,
-      editorContext,
       resource: routed ?? undefined,
-      apiVersion: query.apiVersionHint,
+      apiVersion: routedApiVersion,
       enabled: options.resourceExampleScaffoldEvidence ?? true,
     },
   );

@@ -3,7 +3,7 @@
   "providerId": "docs.kubernetes-official",
   "sourceType": "docs",
   "version": "7eae8915497224dd9ba4803a8ebd0efec33b303b",
-  "capturedAt": "2026-08-08T09:04:57.000Z",
+  "capturedAt": "2026-08-09T08:20:45.000Z",
   "upstreamRepository": "https://github.com/kubernetes/website",
   "license": {
     "spdxId": "CC-BY-4.0",
@@ -27,6 +27,109 @@
               "apiVersion": "v1",
               "kind": "ResourceQuota",
               "path": "spec.hard"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "limit-range",
+      "snapshot": "limit-range.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/policy/limit-range.md",
+      "upstreamBlobSha1": "3d7df7c6f1f400814e4dc2ac4fd423fa4cebfff6",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/policy/limit-range/",
+      "sections": [
+        {
+          "id": "constraints-on-resource-limits-and-requests",
+          "heading": "资源限制和请求的约束",
+          "anchor": "constraints-on-resource-limits-and-requests",
+          "title": "LimitRange · spec.limits · 资源限制和请求的约束",
+          "targets": [
+            {
+              "apiVersion": "v1",
+              "kind": "LimitRange",
+              "path": "spec.limits.default"
+            },
+            {
+              "apiVersion": "v1",
+              "kind": "LimitRange",
+              "path": "spec.limits.defaultRequest"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "configmap",
+      "snapshot": "configmap.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/configuration/configmap.md",
+      "upstreamBlobSha1": "663f25014a73b81c4e15cd1c45f73280607d2401",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/configuration/configmap/",
+      "sections": [
+        {
+          "id": "configmap-immutable",
+          "heading": "不可变更的 ConfigMap",
+          "anchor": "configmap-immutable",
+          "title": "ConfigMap · immutable · 不可变更的 ConfigMap",
+          "targets": [
+            {
+              "apiVersion": "v1",
+              "kind": "ConfigMap",
+              "path": "immutable"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deployment",
+      "snapshot": "deployment.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/workloads/controllers/deployment.md",
+      "upstreamBlobSha1": "f800d9feb8071c4b04d96ab050fa7c38d86e6714",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/deployment/",
+      "sections": [
+        {
+          "id": "selector",
+          "heading": "选择算符",
+          "anchor": "selector",
+          "title": "Deployment · spec.selector · 选择算符与 Pod 模板标签",
+          "targets": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "Deployment",
+              "path": "spec.selector"
+            },
+            {
+              "apiVersion": "apps/v1",
+              "kind": "Deployment",
+              "path": "spec.selector.matchLabels"
+            },
+            {
+              "apiVersion": "apps/v1",
+              "kind": "Deployment",
+              "path": "spec.template.metadata.labels"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "images",
+      "snapshot": "images.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/containers/images.md",
+      "upstreamBlobSha1": "526409cabc6445c5c4b5d457dd417cbe457ff070",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/containers/images/",
+      "sections": [
+        {
+          "id": "image-pull-policy",
+          "heading": "镜像拉取策略",
+          "anchor": "image-pull-policy",
+          "title": "Pod · spec.containers.imagePullPolicy · 镜像拉取策略",
+          "targets": [
+            {
+              "apiVersion": "v1",
+              "kind": "Pod",
+              "path": "spec.containers.imagePullPolicy"
             }
           ]
         }

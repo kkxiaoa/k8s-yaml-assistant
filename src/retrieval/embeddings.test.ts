@@ -225,8 +225,8 @@ check('显式 VOYAGE_EMBEDDING_MODEL 决定索引模型身份', () => {
   });
 });
 
-check('index v6 round-trip 保存显式 corpus identity version 与 canonical metadata', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-roundtrip-'));
+check('index v7 round-trip 保存显式 corpus identity version 与 canonical metadata', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-roundtrip-'));
   try {
     const expected = expectation();
     const manifest = writeIndex(
@@ -292,7 +292,7 @@ check('indexHash 显式绑定 corpus identity version', () => {
     identityVersion: KNOWLEDGE_IDENTITY_VERSION + 1,
   } as unknown as CorpusManifest;
 
-  assert.equal(INDEX_FORMAT_VERSION, 6);
+  assert.equal(INDEX_FORMAT_VERSION, 7);
   assert.notEqual(
     computeIndexHash(versionOne, 'test-model'),
     computeIndexHash(versionTwo, 'test-model'),
@@ -300,8 +300,8 @@ check('indexHash 显式绑定 corpus identity version', () => {
 });
 
 check('writeIndex 对同一身份生成顺序无关的确定性 chunk/embedding 文件', () => {
-  const forwardDir = mkdtempSync(join(tmpdir(), 'index-v6-order-forward-'));
-  const reverseDir = mkdtempSync(join(tmpdir(), 'index-v6-order-reverse-'));
+  const forwardDir = mkdtempSync(join(tmpdir(), 'index-v7-order-forward-'));
+  const reverseDir = mkdtempSync(join(tmpdir(), 'index-v7-order-reverse-'));
   try {
     const chunks = [BASE_CHUNK, SECOND_CHUNK];
     const expected = expectation(chunks);
@@ -332,7 +332,7 @@ check('writeIndex 对同一身份生成顺序无关的确定性 chunk/embedding 
 });
 
 check('index hit 使用共享连续 Float32Array,不展开为 number[]', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-contiguous-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-contiguous-'));
   try {
     const chunks = [BASE_CHUNK, SECOND_CHUNK];
     const expected = expectation(chunks);
@@ -401,7 +401,7 @@ check('连续 Float32Array 与 builder number[] 的 dense score 和排序完全�
       score: referenceCosine(query, chunk.embedding),
     }))
     .sort((a, b) => b.score - a.score);
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-ab-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-ab-'));
   try {
     const expectedIdentity = expectation(chunks);
     writeIndex(legacy, expectedIdentity, dir);
@@ -498,7 +498,7 @@ check('对象错误只给直接 schema 子字段共享一次字段软加权', ()
 });
 
 check('chunk manifest 与 model 变化分别给出明确 miss reason', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-identity-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-identity-'));
   try {
     const original = expectation();
     writeIndex([indexed(BASE_CHUNK)], original, dir);
@@ -527,7 +527,7 @@ check('chunk manifest 与 model 变化分别给出明确 miss reason', () => {
 });
 
 check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-chunk-identity-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-chunk-identity-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -560,7 +560,7 @@ check('chunks 文件与 manifest 声称的当前 identity 不一致时失效', (
 });
 
 check('count、dimension 与 indexHash 不一致不会返回 chunks', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-shape-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-shape-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -594,7 +594,7 @@ check('count、dimension 与 indexHash 不一致不会返回 chunks', () => {
 });
 
 check('chunks 与 embeddings 文件哈希不匹配时封闭失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-file-hash-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-file-hash-'));
   try {
     const expected = expectation();
     const manifest = writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -627,7 +627,7 @@ check('chunks 与 embeddings 文件哈希不匹配时封闭失效', () => {
 });
 
 check('格式、损坏 JSON、chunk count 与旧 manifest 明确失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-json-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-json-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -684,7 +684,7 @@ check('格式、损坏 JSON、chunk count 与旧 manifest 明确失效', () => {
 });
 
 check('NaN embedding 与 duplicate chunk ID 明确失效', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-values-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-values-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -711,7 +711,7 @@ check('NaN embedding 与 duplicate chunk ID 明确失效', () => {
 });
 
 check('缺失和不完整文件集使用不同 miss reason', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-files-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-files-'));
   try {
     const expected = expectation();
     assert.equal(missReason(readIndex(expected, dir)), 'missing_files');
@@ -723,7 +723,7 @@ check('缺失和不完整文件集使用不同 miss reason', () => {
 });
 
 check('writeIndex 在落盘前拒绝 count、维度、NaN 与重复 ID', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-write-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-write-'));
   try {
     assert.throws(
       () =>
@@ -902,7 +902,7 @@ await checkAsync('runtime 所有 miss 都封闭失败且不调用旧 rebuild 或
 });
 
 await checkAsync('runtime hit 复用已校验 Float32 chunks', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-hit-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-hit-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);
@@ -918,7 +918,7 @@ await checkAsync('runtime hit 复用已校验 Float32 chunks', async () => {
 });
 
 await checkAsync('有效 serving index 在并发和后续调用中只读取一次', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'index-v6-loader-once-'));
+  const dir = mkdtempSync(join(tmpdir(), 'index-v7-loader-once-'));
   try {
     const expected = expectation();
     writeIndex([indexed(BASE_CHUNK)], expected, dir);

@@ -26,7 +26,19 @@ const docsChunk: KnowledgeChunk = {
   targets: [{ apiVersion: 'v1', kind: 'ResourceQuota', path: 'spec.hard' }],
 };
 
-test('非 docs 来源保持既有正文输入，按需补标题', () => {
+const exampleChunk: KnowledgeChunk = {
+  id: 'example::kubernetes::resource-quota-mem-cpu',
+  title: 'ResourceQuota · spec.hard · CPU 与内存配额示例',
+  text: '```yaml\napiVersion: v1\nkind: ResourceQuota\n```',
+  sourceType: 'example',
+  provenance: {
+    authority: 'kubernetes_official',
+    version: 'a'.repeat(40),
+  },
+  targets: [{ apiVersion: 'v1', kind: 'ResourceQuota', path: 'spec.hard' }],
+};
+
+test('schema 来源保持既有正文输入，按需补标题', () => {
   assert.equal(retrievalDocumentText(schemaChunk), schemaChunk.text);
   assert.equal(
     retrievalDocumentText(schemaChunk, true),
@@ -38,4 +50,10 @@ test('docs 来源统一补标题和规范目标且不重复标题', () => {
   const expected = `${docsChunk.title}\n规范目标: apiVersion=v1, kind=ResourceQuota, path=spec.hard\n${docsChunk.text}`;
   assert.equal(retrievalDocumentText(docsChunk), expected);
   assert.equal(retrievalDocumentText(docsChunk, true), expected);
+});
+
+test('example 来源与 docs 共享可检索元数据表示', () => {
+  const expected = `${exampleChunk.title}\n规范目标: apiVersion=v1, kind=ResourceQuota, path=spec.hard\n${exampleChunk.text}`;
+  assert.equal(retrievalDocumentText(exampleChunk), expected);
+  assert.equal(retrievalDocumentText(exampleChunk, true), expected);
 });

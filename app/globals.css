@@ -43,3 +43,43 @@ body {
   background: var(--color-line);
   border-radius: 4px;
 }
+
+.markdown-code .hljs-comment,
+.markdown-code .hljs-quote {
+  color: #6a9955;
+}
+
+.markdown-code .hljs-attr,
+.markdown-code .hljs-name,
+.markdown-code .hljs-selector-tag {
+  color: #9cdcfe;
+}
+
+.markdown-code .hljs-string,
+.markdown-code .hljs-regexp,
+.markdown-code .hljs-template-tag,
+.markdown-code .hljs-template-variable {
+  color: #ce9178;
+}
+
+.markdown-code .hljs-number,
+.markdown-code .hljs-literal,
+.markdown-code .hljs-symbol,
+.markdown-code .hljs-bullet {
+  color: #b5cea8;
+}
+
+.markdown-code .hljs-keyword,
+.markdown-code .hljs-selector-class,
+.markdown-code .hljs-type {
+  color: #569cd6;
+}
+
+.markdown-code .hljs-meta,
+.markdown-code .hljs-built_in {
+  color: #c586c0;
+}
+
+.markdown-table tbody tr:last-child td {
+  border-bottom: 0;
+}

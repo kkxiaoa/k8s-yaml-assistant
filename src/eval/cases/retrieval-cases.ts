@@ -136,7 +136,11 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     governance: FIELD_DEVELOPMENT,
     target: { kind: "Pod" },
     question: "Pod 镜像拉取策略怎么配?",
-    expectedChunkIds: ["schema::v1::Pod::spec.containers.imagePullPolicy"],
+    expectedChunkIds: [
+      "schema::v1::Pod::spec.containers.imagePullPolicy",
+      "docs::kubernetes::images::image-pull-policy",
+      "example::kubernetes::pod-image-pull-policy",
+    ],
   },
   {
     id: "pod-nodeselector",
@@ -228,7 +232,11 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     governance: FIELD_DEVELOPMENT,
     target: { kind: "Deployment" },
     question: "Deployment 怎么选中它管理的 Pod?",
-    expectedChunkIds: ["schema::apps/v1::Deployment::spec.selector"],
+    expectedChunkIds: [
+      "schema::apps/v1::Deployment::spec.selector",
+      "docs::kubernetes::deployment::selector",
+      "example::kubernetes::deployment-selector",
+    ],
   },
   {
     id: "deploy-container-image",
@@ -461,7 +469,11 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     governance: FIELD_DEVELOPMENT,
     target: { kind: "ConfigMap" },
     question: "ConfigMap 怎么设为不可变?",
-    expectedChunkIds: ["schema::v1::ConfigMap::immutable"],
+    expectedChunkIds: [
+      "schema::v1::ConfigMap::immutable",
+      "docs::kubernetes::configmap::configmap-immutable",
+      "example::kubernetes::configmap-immutable",
+    ],
   },
   {
     id: "secret-stringdata",
@@ -505,6 +517,7 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     expectedChunkIds: [
       "schema::v1::ResourceQuota::spec.hard",
       "docs::kubernetes::resource-quotas::compute-resource-quota",
+      "example::kubernetes::resource-quota-mem-cpu",
     ],
   },
   {

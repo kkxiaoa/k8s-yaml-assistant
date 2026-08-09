@@ -554,14 +554,16 @@ assert.ok(quotaGroundedAnswerCase);
 assert.deepEqual(quotaRetrievalCase.expectedChunkIds, [
   'schema::v1::ResourceQuota::spec.hard',
   'docs::kubernetes::resource-quotas::compute-resource-quota',
+  'example::kubernetes::resource-quota-mem-cpu',
 ]);
 assert.deepEqual(quotaGroundedAnswerCase.expectedChunkIds, [
   'schema::v1::ResourceQuota::spec.hard',
   'docs::kubernetes::resource-quotas::compute-resource-quota',
+  'example::kubernetes::resource-quota-mem-cpu',
 ]);
 assert.deepEqual(quotaGroundedAnswerCase.sourceExpectation, {
   mode: 'required',
-  types: ['schema', 'docs'],
+  types: ['schema', 'docs', 'example'],
 });
 assert.deepEqual(
   resolvedGroundedAnswerCases

@@ -406,6 +406,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "pod-imagepullpolicy",
     input: { kind: "retrieval_case", retrievalCaseId: "pod-imagepullpolicy" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "pod-nodeselector",
@@ -464,6 +468,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "deploy-selector",
     input: { kind: "retrieval_case", retrievalCaseId: "deploy-selector" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "deploy-container-image",
@@ -617,6 +625,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "cm-immutable",
     input: { kind: "retrieval_case", retrievalCaseId: "cm-immutable" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "secret-stringdata",
@@ -644,13 +656,17 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     expectedBehavior: ANSWER_WITH_SOURCES,
     sourceExpectation: {
       mode: "required",
-      types: ["schema", "docs"],
+      types: ["schema", "docs", "example"],
     },
   },
   {
     id: "limitrange-limits",
     input: { kind: "retrieval_case", retrievalCaseId: "limitrange-limits" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "hpa-maxreplicas",
