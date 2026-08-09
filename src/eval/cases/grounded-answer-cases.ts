@@ -375,6 +375,11 @@ const ERROR_DEVELOPMENT = {
   origin: "human",
   role: "development",
 } as const satisfies EvalCaseGovernance;
+const ERROR_BAD_CASE_REGRESSION = {
+  task: "error_explanation",
+  origin: "bad_case",
+  role: "regression",
+} as const satisfies EvalCaseGovernance;
 
 export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
   {
@@ -637,6 +642,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "quota-hard",
     input: { kind: "retrieval_case", retrievalCaseId: "quota-hard" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs"],
+    },
   },
   {
     id: "limitrange-limits",
@@ -849,7 +858,7 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
   },
   {
     id: "error-deployment-missing-selector",
-    governance: ERROR_DEVELOPMENT,
+    governance: ERROR_BAD_CASE_REGRESSION,
     input: {
       kind: "validation_error",
       fixCaseId: "fix-missing-deployment-selector",

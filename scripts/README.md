@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | `npm run eval:compare -- <runId>` | 无 | 只比较兼容运行和基线 |
 | `npm run eval:promote -- <runId>` | `data/eval/baselines/<kind>.json` | 仅接受完整、已审核且通过晋升门禁的运行 |
-| `npm run badcases:faith -- <runId> [--write]` | 默认不写；显式 `--write` 更新问题台账 | Holdout（留出集）轨迹不能回灌 |
+| `npm run badcases:faith -- <runId> [--case <evalCaseId> ...] [--write]` | 默认不写；可按人工审核后的 Case（用例）选择，显式 `--write` 更新问题台账 | Holdout（留出集）轨迹不能回灌 |
 | `npm run build:calibration` | `data/eval/judge-calibration.jsonl` | 从人工标签物化校准快照 |
 | `npm run aliases:review -- <draft> [--apply]` | 默认只预览；显式 `--apply` 更新正式别名 | 草稿必须完整审核且可追溯 |
 

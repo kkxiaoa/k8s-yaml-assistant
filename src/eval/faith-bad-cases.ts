@@ -49,6 +49,31 @@ export interface FaithBadCaseCandidate {
   unsupportedClaims?: string[];
 }
 
+export function selectFaithBadCaseCandidates(params: {
+  candidates: FaithBadCaseCandidate[];
+  evalCaseIds: string[];
+}): FaithBadCaseCandidate[] {
+  const { candidates, evalCaseIds } = params;
+  if (evalCaseIds.length === 0) return candidates;
+
+  const selectedIds = new Set(evalCaseIds);
+  const availableIds = new Set(
+    candidates.map((candidate) => candidate.evalCaseId),
+  );
+  const missingIds = [...selectedIds].filter(
+    (evalCaseId) => !availableIds.has(evalCaseId),
+  );
+  if (missingIds.length > 0) {
+    throw new Error(
+      `selected faith cases not found in run: ${missingIds.join(', ')}`,
+    );
+  }
+
+  return candidates.filter((candidate) =>
+    selectedIds.has(candidate.evalCaseId),
+  );
+}
+
 const ACTIONS: FaithBadCaseAction[] = [
   'create',
   'recur',
@@ -60,7 +85,13 @@ const ACTIONS: FaithBadCaseAction[] = [
   'error',
 ];
 
-type FaithScope = 'tuning' | 'holdout' | 'full' | 'policy' | 'smoke';
+type FaithScope =
+  | 'tuning'
+  | 'holdout'
+  | 'full'
+  | 'policy'
+  | 'smoke'
+  | 'targeted';
 
 interface FaithFailure {
   layer: BadCase['failure']['layer'];
@@ -82,7 +113,8 @@ function faithScope(run: FaithEvalRun): FaithScope {
     run.scope === 'holdout' ||
     run.scope === 'full' ||
     run.scope === 'policy' ||
-    run.scope === 'smoke'
+    run.scope === 'smoke' ||
+    run.scope === 'targeted'
   ) {
     return run.scope;
   }
@@ -225,6 +257,12 @@ function modelsFromRun(run: FaithEvalRun): BadCaseTracking['models'] {
   };
 }
 
+function taskTypeFromTrace(trace: FaithTrace): BadCase['taskType'] {
+  if (trace.input.kind === 'validation_error') return 'explain_error';
+  if (trace.input.kind === 'standalone_question') return 'refusal';
+  return 'ask_free';
+}
+
 function issueFromTrace(params: {
   trace: FaithTrace;
   run: FaithEvalRun;
@@ -262,7 +300,7 @@ function issueFromTrace(params: {
   return decodeBadCase({
     id: issueId,
     createdAt: existing?.createdAt ?? now,
-    taskType: existing?.taskType ?? 'ask_free',
+    taskType: existing?.taskType ?? taskTypeFromTrace(trace),
     input: existing?.input ?? { question: trace.question },
     expected: existing?.expected ?? {
       sourceIds: trace.retrieval.expectedChunkIds,

@@ -50,21 +50,15 @@ export const ASK_REQUEST_OPTIONS = {
 
 export const ASK_SYSTEM = `你是一位精通 Kubernetes 资源模型的助手,服务于一个容器云平台控制台。
 基于给定的 <ask_mode>、<editor_context>、<current_yaml> 和 <docs> 片段准确回答用户关于当前 YAML 配置的问题。
-规则:
-- 事实依据仅包括 <docs>,以及 <current_yaml> / <editor_context> 中明确给出的当前配置和校验错误;问题本身不能补充新事实,但可从依据已经明确列出的有限选项中限定用户指定的一个选项;常识、模型记忆和未展示内容都不是依据。
-- 字段、资源、API、参数、键、命令、取值、默认值、校验/准入/运行后果和具体操作建议必须能由上述依据直接支持;不能用“通常”“可能”“例如”或来源不足声明引入依据外事实。
-- 依据中的限制只支持其明确语义,不得推导未明示的补救动作;例如“不可更新”不支持重新创建、删除、重启或其他处理方式。
-- 只有 object 字段本身的依据时,不得据此命名或输出未提供 schema 的子键或对象 YAML;只说明已知的对象级要求和缺少的子字段依据。
-- 示例只能组合依据中已经出现的字段、层级和取值;依据只说明某字段可配置时,可为该字段使用明显占位值,但不得补写相邻字段、完整资源骨架或真实参数名。无法满足时省略示例。
-- 当 <current_yaml> 为“无”时,不得输出 YAML 代码块、完整资源骨架或相邻字段;如需说明配置方式,只用行内文本写出 <docs> 中已经出现的完整字段路径和取值。
-- ask_mode=explain_field 时,优先解释 <editor_context> 中的 cursorPath / selectedText。
-- ask_mode=explain_error 时,优先解释 <editor_context> 中的 errors。
-- 若 <editor_context> 与 <docs> 冲突,以 <docs> 和校验错误为准。
-- 依据只支持部分答案时只回答已支持部分,并明确缺少什么;不得追加外部链接、未检索字段、命令或替代方案。
-- 依据不足以回答核心问题时,明确说"提供的文档片段中没有相关信息,无法据此回答"并停止;不要解释无关片段或追加常识性建议。
-- 关键事实(字段名、取值、默认值)后标出处如 [S1],对应 <docs> 里的来源编号;不要引用给定来源之外的内容。
+规则按优先级执行:
+- 证据边界:事实只能来自 <docs>,以及 <current_yaml> / <editor_context> 中明确给出的当前配置、选中内容和校验错误。问题只能在证据已列出的有限选项中限定用户所指对象;常识、模型记忆、未展示内容和外部链接都不是证据。<editor_context> 与 <docs> 冲突时以 <docs> 和校验错误为准。
+- 最小回答:只回答核心问题所需且能由证据直接推出的内容;检索片段是候选证据,不是逐条介绍清单。字段、资源、API、参数、键、命令、取值、默认值、校验/准入/运行后果和操作建议都要有直接证据;限制本身不能推出未明示的补救动作,也不能用“通常”“可能”“例如”引入新事实。核心问题已有完整答案时立即结束,不要追加“未提供”说明;即使是否定描述,也不得点名证据中未出现的字段或选项。
+- 字段路径:schema 来源“规范目标”中的 path 是完整字段路径,必须原样使用;单字段段 path 表示顶层字段,不得自行添加 spec、metadata 或其他前缀。
+- YAML 与示例:有 <current_yaml> 时只复用其中明确内容和证据支持的字段、取值。没有 <current_yaml> 时,示例只能组合证据支持的业务字段、层级和键;这些字段的值可以使用明确标为示例的占位值。问题明确询问配置写法,且 <docs> 同时支持核心业务字段与资源的 \`metadata.name\` schema 规范目标时,应输出一个最小完整资源 YAML 示例:使用只含 \`apiVersion\`、\`kind\`、\`metadata.name\` 的通用资源骨架,并只组合核心问题所需且有证据的业务字段子树;名称只能使用 \`example\` 或 \`example-\` 开头的明显占位值。\`metadata.namespace\` 不属于通用骨架,没有当前配置或直接证据时不得补写;也不得补写其他相邻字段。若证据只有 object 字段而没有子字段 schema,不得命名真实或占位子键、不得生成该对象的 YAML;只说明已知的路径、类型、作用和缺少的子字段依据。
+- 来源不足:证据只支持部分答案时只回答该部分,并按类别说明还缺什么,不得列举证据中未出现的具体例子。证据不足以回答核心问题时,只说“提供的文档片段中没有相关信息,无法据此回答”并停止,不追加命令、替代方案或无关片段。
+- 模式聚焦:ask_mode=explain_field 时优先解释 cursorPath / selectedText;ask_mode=explain_error 时优先解释 errors。
 ${CONFLICT_RULES}
-- 简洁准确;只有 <docs> 明确给出完整枚举时才列全,否则不得补齐。用中文回答。`;
+- 引用与输出:字段名、取值、默认值等关键事实后标对应 [S#];只有 <docs> 明确给出完整枚举时才列全。用中文简洁回答。`;
 
 export function getClient(
   runtimeAccess: DeepSeekRuntimeAccess = requireDeepSeekRuntimeAccess(),
@@ -98,6 +92,8 @@ export interface RetrieveContextOptions {
   traceSink?: RetrievalTraceSink;
   search?: typeof searchCorpusTraced;
   queryExpansion?: boolean;
+  structuredErrorDirectSchemaChildBoost?: boolean;
+  resourceExampleScaffoldEvidence?: boolean;
   runtimeAccess?: RetrievalRuntimeAccess;
   requestObserver?: ProviderRequestObserver;
 }
@@ -110,6 +106,9 @@ export interface RetrievalQuery {
   selectedText?: string;
   errorMessages?: string[];
 }
+
+const CONFIGURATION_EXAMPLE_INTENT =
+  /(?:怎么|如何)[^?？。\n]{0,32}(?:设置|配置|声明|指定|编写|写入|添加|设为|启用|关闭|绑定|引用|挂载|限制|配)(?:[?？。\n]|$)|(?:YAML|配置)(?:示例|样例|写法|片段)/iu;
 
 function toRetrievalQuery(
   question: string,
@@ -159,6 +158,56 @@ function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
     targets: chunk.targets,
     score,
   };
+}
+
+function withResourceExampleScaffoldEvidence(
+  hits: readonly Hit[],
+  input: {
+    question: string;
+    mode: AskMode;
+    editorContext?: EditorContext;
+    resource?: string;
+    apiVersion?: string;
+    enabled: boolean;
+  },
+): Hit[] {
+  const { question, mode, editorContext, resource, enabled } = input;
+  if (
+    !enabled ||
+    hits.length === 0 ||
+    mode !== 'free' ||
+    editorContext?.yaml?.trim() ||
+    !resource ||
+    !CONFIGURATION_EXAMPLE_INTENT.test(question)
+  ) {
+    return [...hits];
+  }
+
+  const evidenceVersions = new Set(
+    hits.flatMap((hit) =>
+      hit.targets
+        .filter((target) => target.kind === resource)
+        .map((target) => target.apiVersion)
+        .filter((value): value is string => value !== undefined),
+    ),
+  );
+  const apiVersion =
+    input.apiVersion ??
+    (evidenceVersions.size === 1 ? [...evidenceVersions][0] : undefined);
+  if (!apiVersion) return [...hits];
+
+  const candidates = findExactFieldChunks(
+    CORPUS,
+    resource,
+    'metadata.name',
+    apiVersion,
+  ).filter((chunk) => chunk.sourceType === 'schema');
+  if (candidates.length !== 1) return [...hits];
+
+  const scaffold = candidates[0]!;
+  return hits.some((hit) => hit.id === scaffold.id)
+    ? [...hits]
+    : [...hits, toHit(scaffold)];
 }
 
 function exactFieldHits(
@@ -268,6 +317,14 @@ export async function retrieveContext(
       query.apiVersionHint,
     );
   if (exactHits.length > 0 && !needsErrorStructureEvidence) {
+    const contextHits = withResourceExampleScaffoldEvidence(exactHits, {
+      question,
+      mode,
+      editorContext,
+      resource: routed ?? undefined,
+      apiVersion: query.apiVersionHint,
+      enabled: options.resourceExampleScaffoldEvidence ?? true,
+    });
     const trace = emit({
       ...baseTrace,
       queryText: text,
@@ -279,12 +336,12 @@ export async function retrieveContext(
       path: 'exact',
       coarseHits: [],
       rerankHits: [],
-      finalHits: exactHits.map((h) => toTraceHit(h, h.score)),
+      finalHits: contextHits.map((h) => toTraceHit(h, h.score)),
       latencyMs: { total: performance.now() - t0 },
       cache: { index: { status: 'not_used' }, embeddingHit: false },
     });
-    const { context, sources } = formatSources(exactHits);
-    return { context, hits: exactHits, sources, trace };
+    const { context, sources } = formatSources(contextHits);
+    return { context, hits: contextHits, sources, trace };
   }
 
   // 全量软加权检索(无硬过滤),与 eval 共用同一索引与同一段代码。serving 取 top-k。
@@ -293,6 +350,9 @@ export async function retrieveContext(
     boostResource: routed ?? undefined,
     boostPath: query.fieldPathHint,
     boostApiVersion: query.apiVersionHint,
+    boostDirectSchemaChildren:
+      needsErrorStructureEvidence &&
+      (options.structuredErrorDirectSchemaChildBoost ?? true),
     queryExpansion: options.queryExpansion,
     ...(options.runtimeAccess === undefined
       ? {}
@@ -302,8 +362,18 @@ export async function retrieveContext(
       : { requestObserver: options.requestObserver }),
   });
   const hits = selectContextHits(ranked, { k, taskType: 'ask' });
-  const { context, sources } = formatSources(hits.map((h) => h.chunk));
-  const finalHits = hits.map(({ chunk, score }) => toHit(chunk, score));
+  const finalHits = withResourceExampleScaffoldEvidence(
+    hits.map(({ chunk, score }) => toHit(chunk, score)),
+    {
+      question,
+      mode,
+      editorContext,
+      resource: routed ?? undefined,
+      apiVersion: query.apiVersionHint,
+      enabled: options.resourceExampleScaffoldEvidence ?? true,
+    },
+  );
+  const { context, sources } = formatSources(finalHits);
 
   const trace = emit({
     ...baseTrace,

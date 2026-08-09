@@ -35,6 +35,11 @@ const ERROR_DEVELOPMENT = {
   origin: 'human',
   role: 'development',
 } as const;
+const ERROR_BAD_CASE_REGRESSION = {
+  task: 'error_explanation',
+  origin: 'bad_case',
+  role: 'regression',
+} as const;
 
 function semanticCase(overrides: Record<string, unknown> = {}): unknown {
   return {
@@ -529,11 +534,56 @@ assert.deepEqual(
           'schema::apps/v1::Deployment::spec.selector.matchLabels',
         ],
       },
-      governance: ERROR_DEVELOPMENT,
+      governance: ERROR_BAD_CASE_REGRESSION,
       hasCopiedYaml: false,
       hasCopiedErrors: false,
     },
   ],
+);
+const resolvedGroundedAnswerCases = GROUNDED_ANSWER_CASES.map((evalCase) =>
+  resolveGroundedAnswerCase(evalCase),
+);
+const quotaRetrievalCase = RETRIEVAL_CASES.find(
+  (evalCase) => evalCase.id === 'quota-hard',
+);
+const quotaGroundedAnswerCase = resolvedGroundedAnswerCases.find(
+  (evalCase) => evalCase.id === 'quota-hard',
+);
+assert.ok(quotaRetrievalCase);
+assert.ok(quotaGroundedAnswerCase);
+assert.deepEqual(quotaRetrievalCase.expectedChunkIds, [
+  'schema::v1::ResourceQuota::spec.hard',
+  'docs::kubernetes::resource-quotas::compute-resource-quota',
+]);
+assert.deepEqual(quotaGroundedAnswerCase.expectedChunkIds, [
+  'schema::v1::ResourceQuota::spec.hard',
+  'docs::kubernetes::resource-quotas::compute-resource-quota',
+]);
+assert.deepEqual(quotaGroundedAnswerCase.sourceExpectation, {
+  mode: 'required',
+  types: ['schema', 'docs'],
+});
+assert.deepEqual(
+  resolvedGroundedAnswerCases
+    .filter((evalCase) => evalCase.governance.origin === 'bad_case')
+    .map((evalCase) => ({
+      id: evalCase.id,
+      task: evalCase.governance.task,
+      role: evalCase.governance.role,
+    })),
+  [
+    {
+      id: 'error-deployment-missing-selector',
+      task: 'error_explanation',
+      role: 'regression',
+    },
+  ],
+);
+assert.equal(
+  resolvedGroundedAnswerCases.filter(
+    (evalCase) => evalCase.governance.role === 'regression',
+  ).length,
+  12,
 );
 assert.deepEqual(
   GROUNDED_ANSWER_CASES.filter(

@@ -18,7 +18,7 @@ export interface SchemaNode {
   enum?: unknown[];
   properties?: Record<string, SchemaNode>;
   items?: SchemaNode;
-  /** map 类型(如 selector/labels/data)的值约束:schema=值须匹配它;true=任意值;false/缺省=不许额外键 */
+  /** 对象额外键的值约束:schema=值须匹配它;true=任意值;false=禁止;缺省=未显式声明 */
   additionalProperties?: boolean | SchemaNode;
   required?: string[];
   [key: string]: unknown;

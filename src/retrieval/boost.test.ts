@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { Chunk } from '../knowledge/corpus';
-import { policyBoost } from './boost';
+import { matchesDirectSchemaChild, policyBoost } from './boost';
 import { POLICY_RELATED_BOOST } from './router';
 
 let passed = 0;
@@ -90,6 +90,87 @@ check('versioned policy 不匹配 apiVersion hint 时不加权', () => {
       'apps/v1',
     ),
     0,
+  );
+});
+
+check('只匹配同资源同版本的直接 schema 子字段', () => {
+  const directChild: Chunk = {
+    ...schemaChunk,
+    targets: [
+      {
+        apiVersion: 'apps/v1',
+        kind: 'Deployment',
+        path: 'spec.selector.matchLabels',
+      },
+    ],
+  };
+  const grandchild: Chunk = {
+    ...directChild,
+    targets: [
+      {
+        apiVersion: 'apps/v1',
+        kind: 'Deployment',
+        path: 'spec.selector.matchExpressions.operator',
+      },
+    ],
+  };
+
+  assert.equal(
+    matchesDirectSchemaChild(
+      directChild,
+      'Deployment',
+      'spec.selector',
+      'apps/v1',
+    ),
+    true,
+  );
+  assert.equal(
+    matchesDirectSchemaChild(
+      grandchild,
+      'Deployment',
+      'spec.selector',
+      'apps/v1',
+    ),
+    false,
+  );
+  assert.equal(
+    matchesDirectSchemaChild(
+      directChild,
+      'StatefulSet',
+      'spec.selector',
+      'apps/v1',
+    ),
+    false,
+  );
+  assert.equal(
+    matchesDirectSchemaChild(
+      directChild,
+      'Deployment',
+      'spec.selector',
+      'apps/v2',
+    ),
+    false,
+  );
+});
+
+check('policy 与父字段自身不属于直接 schema 子字段', () => {
+  assert.equal(
+    matchesDirectSchemaChild(
+      policyChunk,
+      'Deployment',
+      'spec',
+      undefined,
+    ),
+    false,
+  );
+  assert.equal(
+    matchesDirectSchemaChild(
+      schemaChunk,
+      'Deployment',
+      'spec.replicas',
+      undefined,
+    ),
+    false,
   );
 });
 

@@ -45,6 +45,24 @@ function sourceProvenance(chunk: SourceInput): Provenance {
   };
 }
 
+function schemaTargetContext(chunk: SourceInput): string {
+  if (chunk.sourceType !== 'schema') return '';
+  return chunk.targets
+    .map((target) => {
+      const identity = [
+        target.apiVersion === undefined
+          ? undefined
+          : `apiVersion=${target.apiVersion}`,
+        `kind=${target.kind}`,
+        target.path === undefined ? undefined : `path=${target.path}`,
+      ]
+        .filter((value): value is string => value !== undefined)
+        .join(', ');
+      return `\n规范目标: ${identity}`;
+    })
+    .join('');
+}
+
 export function formatSources(chunks: SourceInput[]): {
   context: string;
   sources: Source[];
@@ -60,7 +78,7 @@ export function formatSources(chunks: SourceInput[]): {
   const context = chunks
     .map(
       (chunk, index) =>
-        `[S${index + 1}][${chunk.sourceType}][${sourceLabel(chunk.sourceType)}][${sourceAuthorityLabel(chunk.provenance.authority)}] ${chunk.title}\n${chunk.text}`,
+        `[S${index + 1}][${chunk.sourceType}][${sourceLabel(chunk.sourceType)}][${sourceAuthorityLabel(chunk.provenance.authority)}] ${chunk.title}${schemaTargetContext(chunk)}\n${chunk.text}`,
     )
     .join('\n\n');
   return { context, sources };

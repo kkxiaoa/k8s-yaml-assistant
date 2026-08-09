@@ -138,6 +138,23 @@ const markdownComponents: Components = {
   ),
 };
 
+const sourceMarkdownComponents: Components = {
+  ...markdownComponents,
+  p: ({ children }) => (
+    <p className="my-1 text-xs leading-relaxed text-fg/80">{children}</p>
+  ),
+  ul: ({ children }) => (
+    <ul className="my-1 list-disc space-y-1 pl-4 text-xs text-fg/80">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="my-1 list-decimal space-y-1 pl-4 text-xs text-fg/80">
+      {children}
+    </ol>
+  ),
+};
+
 function MarkdownText({
   text,
   streaming,
@@ -268,9 +285,15 @@ export function AskPanel({
                         {sourceAuthorityLabel(source.provenance.authority)}
                       </span>
                     </div>
-                    <p className="mt-1 break-words text-xs leading-relaxed text-fg/80">
-                      {source.text}
-                    </p>
+                    <div className="mt-1 min-w-0 break-words">
+                      <ReactMarkdown
+                        components={sourceMarkdownComponents}
+                        remarkPlugins={[remarkGfm]}
+                        skipHtml
+                      >
+                        {source.text}
+                      </ReactMarkdown>
+                    </div>
                     {source.provenance.sourceUri?.startsWith("http") && (
                       <a
                         href={source.provenance.sourceUri}

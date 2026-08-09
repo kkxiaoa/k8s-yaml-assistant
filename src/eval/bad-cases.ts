@@ -100,6 +100,7 @@ const BadCaseEvalScopeSchema = z.enum([
   'full',
   'policy',
   'smoke',
+  'targeted',
 ]);
 
 export const BadCaseTrackingSchema = z

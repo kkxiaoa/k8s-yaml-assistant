@@ -826,6 +826,14 @@ check('retrieval config resolves the embedding model at run start', () => {
       config.indexHash,
       computeIndexHash(corpus, 'voyage-4'),
     );
+    assert.equal(
+      faithEvalConfig(3).structuredErrorDirectSchemaChildBoost,
+      true,
+    );
+    assert.equal(
+      faithEvalConfig(3).resourceExampleScaffoldEvidence,
+      true,
+    );
   } finally {
     for (const [key, value] of previous) {
       if (value === undefined) delete process.env[key];

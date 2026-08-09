@@ -142,6 +142,10 @@ async function processCase(
       mode,
       retrievalOptions: {
         queryExpansion: runConfig.queryExpansion.enabled,
+        structuredErrorDirectSchemaChildBoost:
+          runConfig.structuredErrorDirectSchemaChildBoost ?? false,
+        resourceExampleScaffoldEvidence:
+          runConfig.resourceExampleScaffoldEvidence ?? false,
       },
     });
   } catch (error) {

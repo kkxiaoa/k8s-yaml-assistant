@@ -1,0 +1,36 @@
+{
+  "formatVersion": 1,
+  "providerId": "docs.kubernetes-official",
+  "sourceType": "docs",
+  "version": "7eae8915497224dd9ba4803a8ebd0efec33b303b",
+  "capturedAt": "2026-08-08T09:04:57.000Z",
+  "upstreamRepository": "https://github.com/kubernetes/website",
+  "license": {
+    "spdxId": "CC-BY-4.0",
+    "sourceUri": "https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE"
+  },
+  "documents": [
+    {
+      "id": "resource-quotas",
+      "snapshot": "resource-quotas.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/policy/resource-quotas.md",
+      "upstreamBlobSha1": "0ae39c4f53d2171f50f45428f68d8bd3f470b579",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/policy/resource-quotas/",
+      "sections": [
+        {
+          "id": "compute-resource-quota",
+          "heading": "基础设施资源的配额",
+          "anchor": "compute-resource-quota",
+          "title": "ResourceQuota · spec.hard · 基础设施资源配额",
+          "targets": [
+            {
+              "apiVersion": "v1",
+              "kind": "ResourceQuota",
+              "path": "spec.hard"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

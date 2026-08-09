@@ -1,4 +1,5 @@
 import type { KnowledgeChunk } from '../knowledge/chunk';
+import { retrievalDocumentText } from './document-text';
 import { embed } from './embeddings';
 
 export interface IndexBuildChunk extends KnowledgeChunk {
@@ -19,7 +20,7 @@ export async function buildIndexInput(
   supplyEmbeddings: DocumentEmbeddingSupplier = voyageDocumentEmbeddings,
 ): Promise<IndexBuildChunk[]> {
   const embeddings = await supplyEmbeddings(
-    chunks.map((chunk) => chunk.text),
+    chunks.map((chunk) => retrievalDocumentText(chunk)),
     embeddingModel,
   );
   if (embeddings.length !== chunks.length) {

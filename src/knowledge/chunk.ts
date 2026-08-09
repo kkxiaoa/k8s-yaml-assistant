@@ -47,7 +47,7 @@ function compareTargets(left: KnowledgeTarget, right: KnowledgeTarget): number {
   );
 }
 
-function canonicalDecodedTargets(
+export function canonicalizeKnowledgeTargets(
   targets: readonly KnowledgeTarget[],
 ): KnowledgeTarget[] {
   const unique = new Map<string, KnowledgeTarget>();
@@ -60,7 +60,9 @@ function canonicalDecodedTargets(
 export function canonicalTargets(
   targets: readonly unknown[],
 ): KnowledgeTarget[] {
-  return canonicalDecodedTargets(z.array(KnowledgeTargetSchema).parse(targets));
+  return canonicalizeKnowledgeTargets(
+    z.array(KnowledgeTargetSchema).parse(targets),
+  );
 }
 
 export const KnowledgeChunkSchema = z.strictObject({
@@ -69,7 +71,9 @@ export const KnowledgeChunkSchema = z.strictObject({
   text: z.string().min(1),
   sourceType: SourceTypeSchema,
   provenance: ProvenanceSchema,
-  targets: z.array(KnowledgeTargetSchema).transform(canonicalDecodedTargets),
+  targets: z
+    .array(KnowledgeTargetSchema)
+    .transform(canonicalizeKnowledgeTargets),
 });
 
 export type SourceType = z.infer<typeof SourceTypeSchema>;

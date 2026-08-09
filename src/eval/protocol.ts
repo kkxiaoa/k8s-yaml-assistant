@@ -214,6 +214,8 @@ export const RetrievalEvalConfigSchema = z.strictObject(RetrievalConfigShape);
 
 export const FaithEvalConfigSchema = z.strictObject({
   ...RetrievalConfigShape,
+  structuredErrorDirectSchemaChildBoost: z.boolean().optional(),
+  resourceExampleScaffoldEvidence: z.boolean().optional(),
   answerModel: NonEmptyStringSchema,
   judgeModel: NonEmptyStringSchema,
   answerPromptHash: Sha256Schema,

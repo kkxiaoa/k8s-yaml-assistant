@@ -17,10 +17,12 @@ function repositoryContract() {
   return {
     dockerfile: readFileSync(`${root}/Dockerfile`, 'utf8'),
     dockerignore: readFileSync(`${root}/.dockerignore`, 'utf8'),
-    trackedSchemaPaths: [
+    trackedKnowledgePaths: [
       'data/schemas/generated/manifest.json',
       'data/schemas/generated/resources/core.v1.Pod.json',
       'data/schemas/generated/definitions/io.k8s.api.core.v1.PodSpec.json',
+      'data/knowledge/kubernetes-docs/manifest.json',
+      'data/knowledge/kubernetes-docs/resource-quotas.md',
     ],
   };
 }
@@ -29,7 +31,7 @@ test('repository container files satisfy the release build contract', () => {
   assert.doesNotThrow(() => assertContainerBuildContract(repositoryContract()));
 });
 
-test('dockerignore must exclude local state without excluding tracked schema closure', () => {
+test('dockerignore must exclude local state without excluding tracked knowledge sources', () => {
   const contract = repositoryContract();
   const requiredExclusions: Array<[string, string]> = [
     ['.env', '.env'],
@@ -78,7 +80,7 @@ test('dockerignore must exclude local state without excluding tracked schema clo
           ...contract,
           dockerignore: `${contract.dockerignore}\n${broadExclusion}\n`,
         }),
-      /tracked schema closure/,
+      /tracked knowledge source/,
     );
   }
 });
@@ -208,6 +210,8 @@ test('runtime content audit rejects development, credential, index and trace pat
       'app/server.js',
       'app/.next/server/app/api/health/ready/route.js',
       'app/data/policies.json',
+      'app/data/knowledge/kubernetes-docs/manifest.json',
+      'app/data/knowledge/kubernetes-docs/resource-quotas.md',
       'app/data/schemas/generated/resources/core.v1.Pod.json',
       'app/node_modules/next/package.json',
       'app/node_modules/@anthropic-ai/sdk/core/api.d.mts',

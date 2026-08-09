@@ -17,6 +17,39 @@ const SCHEMA_AUTHORITIES: Record<SchemaSource, SourceAuthority> = {
   crd: 'extension_provider',
 };
 
+function referenceTypeName(ref: string | undefined): string | undefined {
+  if (ref === undefined) return undefined;
+  const name = ref.split('/').at(-1)?.split('.').at(-1);
+  return name && name.length > 0 ? name : undefined;
+}
+
+function schemaTypes(node: SchemaNode): string[] {
+  const candidates = [
+    node.type,
+    ...(node.oneOf ?? []).map((item) => resolveSchemaNode(item).type),
+    ...(node.anyOf ?? []).map((item) => resolveSchemaNode(item).type),
+  ];
+  return [...new Set(candidates.filter((value): value is string => value !== undefined))];
+}
+
+function mapConstraint(node: SchemaNode): string | undefined {
+  const additional = node.additionalProperties;
+  if (additional === undefined || additional === false) return undefined;
+  if (additional === true) {
+    return '动态键值映射，键名不固定，值类型未限定';
+  }
+
+  const resolved = resolveSchemaNode(additional);
+  const reference = referenceTypeName(additional.$ref);
+  const types = schemaTypes(resolved);
+  const valueType = reference
+    ? `${reference}${types.length === 0 ? '' : ` (${types.join(' / ')})`}`
+    : types.join(' / ');
+  return valueType.length > 0
+    ? `动态键值映射，键名不固定，值类型 ${valueType}`
+    : '动态键值映射，键名不固定，值受 additionalProperties 约束';
+}
+
 function chunkText(
   kind: string,
   path: string,
@@ -28,6 +61,9 @@ function chunkText(
   ];
 
   if (node.type) parts.push(`类型 ${node.type}`);
+
+  const map = mapConstraint(node);
+  if (map) parts.push(map);
 
   const enumVals = node.enum ?? node.items?.enum;
   if (enumVals && enumVals.length > 0) {

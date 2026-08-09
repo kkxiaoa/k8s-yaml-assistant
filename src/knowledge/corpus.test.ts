@@ -22,8 +22,8 @@ function check(name: string, fn: () => void): void {
 
 console.log('corpus builder:');
 
-check('默认构建 schema + policy,与兼容 CORPUS 常量一致', () => {
-  assert.deepEqual([...DEFAULT_CORPUS_SOURCES], ['schema', 'policy']);
+check('默认构建 schema + policy + docs,与兼容 CORPUS 常量一致', () => {
+  assert.deepEqual([...DEFAULT_CORPUS_SOURCES], ['schema', 'policy', 'docs']);
   const built = buildCorpus();
   assert.deepEqual(built, CORPUS);
 });
@@ -31,12 +31,18 @@ check('默认构建 schema + policy,与兼容 CORPUS 常量一致', () => {
 check('source 选择可控', () => {
   const schemaOnly = buildCorpus({ sources: ['schema'] });
   const policyOnly = buildCorpus({ sources: ['policy'] });
+  const docsOnly = buildCorpus({ sources: ['docs'] });
 
   assert.ok(schemaOnly.length > 0);
   assert.ok(policyOnly.length > 0);
+  assert.ok(docsOnly.length > 0);
   assert.ok(schemaOnly.every((chunk) => chunk.sourceType === 'schema'));
   assert.ok(policyOnly.every((chunk) => chunk.sourceType === 'policy'));
-  assert.equal(buildCorpus().length, schemaOnly.length + policyOnly.length);
+  assert.ok(docsOnly.every((chunk) => chunk.sourceType === 'docs'));
+  assert.equal(
+    buildCorpus().length,
+    schemaOnly.length + policyOnly.length + docsOnly.length,
+  );
 });
 
 check('真实 provider manifest 使用稳定 providerId 和单一完整 identity', () => {
@@ -49,6 +55,7 @@ check('真实 provider manifest 使用稳定 providerId 和单一完整 identity
       sourceType,
     })),
     [
+      { providerId: 'docs.kubernetes-official', sourceType: 'docs' },
       { providerId: 'policy.organization', sourceType: 'policy' },
       { providerId: 'schema.curated-openapi', sourceType: 'schema' },
     ],
@@ -66,8 +73,8 @@ check('真实 provider manifest 使用稳定 providerId 和单一完整 identity
 
 check('未注册 sourceType 明确失败', () => {
   assert.throws(
-    () => getCorpusProviders(['docs']),
-    /未注册 corpus provider: docs/,
+    () => getCorpusProviders(['example']),
+    /未注册 corpus provider: example/,
   );
 });
 

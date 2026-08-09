@@ -1,4 +1,5 @@
 import type { Chunk, SourceType } from './chunk';
+import { loadKubernetesDocsProviderSnapshot } from './docs-corpus';
 import { buildSchemaCorpus } from './schema-corpus';
 import { buildPolicyCorpus } from './policy-corpus';
 import {
@@ -27,12 +28,14 @@ export interface BuildCorpusOptions {
 export const DEFAULT_CORPUS_SOURCES = [
   'schema',
   'policy',
+  'docs',
 ] as const satisfies readonly SourceType[];
 
 function createCorpusProvider(
   providerId: string,
   sourceType: SourceType,
   buildSource: () => Chunk[],
+  metadata: Pick<CorpusProvider, 'version' | 'generatedAt'> = {},
 ): CorpusProvider {
   let cached: Chunk[] | undefined;
   let cachedManifest: SourceManifest | undefined;
@@ -43,6 +46,7 @@ function createCorpusProvider(
   return {
     providerId,
     sourceType,
+    ...metadata,
     build,
     manifest: () =>
       (cachedManifest ??= buildSourceManifest({
@@ -65,11 +69,24 @@ export const POLICY_CORPUS_PROVIDER = createCorpusProvider(
   buildPolicyCorpus,
 );
 
+const KUBERNETES_DOCS_SNAPSHOT = loadKubernetesDocsProviderSnapshot();
+
+const KUBERNETES_DOCS_CORPUS_PROVIDER = createCorpusProvider(
+  KUBERNETES_DOCS_SNAPSHOT.providerId,
+  'docs',
+  () => KUBERNETES_DOCS_SNAPSHOT.chunks,
+  {
+    version: KUBERNETES_DOCS_SNAPSHOT.version,
+    generatedAt: KUBERNETES_DOCS_SNAPSHOT.generatedAt,
+  },
+);
+
 const CORPUS_PROVIDERS = new Map<SourceType, CorpusProvider>(
-  [SCHEMA_CORPUS_PROVIDER, POLICY_CORPUS_PROVIDER].map((provider) => [
-    provider.sourceType,
-    provider,
-  ]),
+  [
+    SCHEMA_CORPUS_PROVIDER,
+    POLICY_CORPUS_PROVIDER,
+    KUBERNETES_DOCS_CORPUS_PROVIDER,
+  ].map((provider) => [provider.sourceType, provider]),
 );
 
 export function getCorpusProviders(

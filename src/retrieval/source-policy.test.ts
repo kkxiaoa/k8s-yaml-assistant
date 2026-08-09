@@ -48,12 +48,13 @@ check('source label 与 authority label 分开表达', () => {
   assert.equal(sourceAuthorityLabel('curated'), '人工精选');
 });
 
-check('prompt 规则禁止把 cluster/extension schema 表达为官方事实', () => {
+check('prompt 规则以一条边界覆盖 authority 与 schema/policy 冲突', () => {
   assert.match(CONFLICT_RULES, /当前集群 API/);
   assert.match(CONFLICT_RULES, /扩展提供方/);
   assert.match(CONFLICT_RULES, /不得.*Kubernetes 官方/);
-  assert.match(CONFLICT_RULES, /不得把 policy 说成 K8s 官方强制/);
-  assert.match(CONFLICT_RULES, /每一层结论都必须分别由对应来源直接支持/);
+  assert.match(CONFLICT_RULES, /每层结论都要有对应来源/);
+  assert.match(CONFLICT_RULES, /未检索到组织规范/);
+  assert.match(CONFLICT_RULES, /组织策略\/平台规范/);
   assert.doesNotMatch(CONFLICT_RULES, /nginx:latest/);
 });
 

@@ -31,3 +31,32 @@ export function policyBoost(
     );
   return POLICY_RELATED_BOOST + (pathHit ? POLICY_PATH_BONUS : 0);
 }
+
+export function matchesDirectSchemaChild(
+  chunk: Chunk,
+  boostResource: string | undefined,
+  normalizedParentPath: string | undefined,
+  boostApiVersion: string | undefined,
+): boolean {
+  if (
+    chunk.sourceType !== 'schema' ||
+    !boostResource ||
+    !normalizedParentPath
+  ) {
+    return false;
+  }
+
+  const childPrefix = `${normalizedParentPath}.`;
+  return chunk.targets.some((target) => {
+    if (
+      target.kind !== boostResource ||
+      (boostApiVersion !== undefined &&
+        target.apiVersion !== boostApiVersion)
+    ) {
+      return false;
+    }
+    const targetPath = target.path?.toLowerCase();
+    if (!targetPath?.startsWith(childPrefix)) return false;
+    return !targetPath.slice(childPrefix.length).includes('.');
+  });
+}

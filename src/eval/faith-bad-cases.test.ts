@@ -13,6 +13,7 @@ import {
   buildFaithBadCaseCandidates,
   mergeBadCaseIssues,
   readFaithBadCaseInput,
+  selectFaithBadCaseCandidates,
   type FaithBadCaseCandidate,
   type FaithTraceObservation,
 } from './faith-bad-cases';
@@ -432,6 +433,37 @@ function check(name: string, fn: () => void): void {
 
 console.log('faith-bad-cases:');
 
+check('selects every candidate for reviewed eval cases', () => {
+  const candidates: FaithBadCaseCandidate[] = [
+    { action: 'create', evalCaseId: 'case-a' },
+    { action: 'warning', evalCaseId: 'case-a' },
+    { action: 'create', evalCaseId: 'case-b' },
+  ];
+
+  assert.deepEqual(
+    selectFaithBadCaseCandidates({
+      candidates,
+      evalCaseIds: ['case-a'],
+    }),
+    candidates.slice(0, 2),
+  );
+  assert.equal(
+    selectFaithBadCaseCandidates({ candidates, evalCaseIds: [] }),
+    candidates,
+  );
+});
+
+check('rejects reviewed eval cases absent from the run candidates', () => {
+  assert.throws(
+    () =>
+      selectFaithBadCaseCandidates({
+        candidates: [{ action: 'create', evalCaseId: 'case-a' }],
+        evalCaseIds: ['case-missing'],
+      }),
+    /selected faith cases not found in run: case-missing/,
+  );
+});
+
 check('reads a decoded faith run and envelope payloads from the eval root', () => {
   withEvalRoot((evalRoot) => {
     const written = writeInput({
@@ -459,6 +491,25 @@ check('reads a decoded faith run and envelope payloads from the eval root', () =
       })),
     );
     assert.deepEqual(input.warnings, []);
+  });
+});
+
+check('reads targeted non-Holdout runs for reviewed bad-case import', () => {
+  withEvalRoot((evalRoot) => {
+    writeInput({
+      evalRoot,
+      runId: 'run-targeted',
+      traces: [inputTrace('case-a')],
+      scope: 'targeted',
+    });
+
+    const input = readFaithBadCaseInput({
+      runId: 'run-targeted',
+      evalRoot,
+    });
+
+    assert.equal(input.scope, 'targeted');
+    assert.equal(input.observations.length, 1);
   });
 });
 
@@ -854,6 +905,30 @@ check('current failures use observational bad-case types instead of causal label
     }),
   );
   assert.equal(unsupportedCandidate.issue?.failure.type, 'unsupported_claim');
+
+  const validationErrorCandidate = onlyCandidate(
+    buildFaithBadCaseCandidates({
+      observations: [
+        observation({
+          ...unsupported,
+          input: {
+            kind: 'validation_error',
+            fixCaseId: 'fix-missing-deployment-selector',
+            question: 'Deployment 为什么缺少 selector？',
+            expectedChunkIds: [
+              'schema::apps/v1::Deployment::spec.selector',
+              'schema::apps/v1::Deployment::spec.selector.matchLabels',
+            ],
+          },
+        }),
+      ],
+      existingBadCases: [],
+      run: RUN,
+      scope: 'targeted',
+      now: '2026-07-10T00:00:00.000Z',
+    }),
+  );
+  assert.equal(validationErrorCandidate.issue?.taskType, 'explain_error');
 
   const expectedRefusal = trace('passed', {
     expectedBehavior: 'refuse_insufficient_context',
