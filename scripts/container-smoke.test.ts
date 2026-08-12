@@ -24,8 +24,13 @@ function repositoryContract() {
       'data/knowledge/kubernetes-docs/manifest.json',
       'data/knowledge/kubernetes-docs/resource-quotas.md',
       'data/knowledge/kubernetes-docs/limit-range.md',
+      'data/knowledge/kubernetes-docs/statefulset.md',
+      'data/knowledge/kubernetes-docs/storage-classes.md',
       'data/knowledge/kubernetes-examples/manifest.json',
       'data/knowledge/kubernetes-examples/resource-quota-mem-cpu.yaml',
+      'data/knowledge/kubernetes-examples/statefulset-web.yaml',
+      'data/knowledge/kubernetes-examples/persistent-volume-claim-storage.yaml',
+      'data/knowledge/kubernetes-examples/storageclass-low-latency.yaml',
     ],
   };
 }

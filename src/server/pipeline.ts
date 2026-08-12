@@ -108,7 +108,26 @@ export interface RetrievalQuery {
 }
 
 const CONFIGURATION_EXAMPLE_INTENT =
-  /(?:怎么|如何)[^?？。\n]{0,24}(?:设置|配置|声明|指定|编写|写入|添加|设为|设|启用|关闭|绑定|引用|挂载|限制|选中|配)[^?？。\n]{0,48}(?:[?？。\n]|$)|(?:YAML|配置)(?:示例|样例|写法|片段)/iu;
+  /(?:怎么|如何)[^?？。\n]{0,24}(?:设置|配置|声明|指定|编写|写入|添加|设为|设|启用|关闭|绑定|引用|挂载|申请|限制|选中|配)[^?？。\n]{0,48}(?:[?？。\n]|$)|(?:YAML|配置)(?:示例|样例|写法|片段)/iu;
+
+interface ResourceExampleEvidenceInput {
+  question: string;
+  mode: AskMode;
+  resource?: string;
+  apiVersion?: string;
+  enabled: boolean;
+}
+
+function usesSupplementalResourceExample(
+  input: ResourceExampleEvidenceInput,
+): boolean {
+  return (
+    input.enabled &&
+    input.mode === 'free' &&
+    input.resource !== undefined &&
+    CONFIGURATION_EXAMPLE_INTENT.test(input.question)
+  );
+}
 
 function toRetrievalQuery(
   question: string,
@@ -162,24 +181,45 @@ function toHit(chunk: (typeof CORPUS)[number], score?: number): Hit {
 
 function withResourceExampleEvidence(
   hits: readonly Hit[],
-  input: {
-    question: string;
-    mode: AskMode;
-    resource?: string;
-    apiVersion?: string;
-    enabled: boolean;
-  },
+  input: ResourceExampleEvidenceInput,
 ): Hit[] {
-  const { question, mode, resource, enabled } = input;
+  const { resource } = input;
   if (
-    !enabled ||
     hits.length === 0 ||
-    mode !== 'free' ||
-    !resource ||
-    !CONFIGURATION_EXAMPLE_INTENT.test(question)
+    !usesSupplementalResourceExample(input) ||
+    resource === undefined
   ) {
     return [...hits];
   }
+
+  const coreTargets = hits.flatMap((hit) =>
+    hit.sourceType === 'example'
+      ? []
+      : hit.targets.filter(
+          (target) =>
+            target.apiVersion !== undefined &&
+            target.path !== undefined &&
+            target.path !== 'metadata.name',
+        ),
+  );
+  const examples = CORPUS.filter(
+    (chunk) =>
+      chunk.sourceType === 'example' &&
+      chunk.targets.some((exampleTarget) =>
+        coreTargets.some(
+          (coreTarget) =>
+            exampleTarget.apiVersion === coreTarget.apiVersion &&
+            exampleTarget.kind === coreTarget.kind &&
+            exampleTarget.path === coreTarget.path,
+        ),
+      ),
+  );
+  const existingExample = hits.some((hit) =>
+    examples.some((example) => example.id === hit.id),
+  );
+  if (existingExample) return [...hits];
+  if (examples.length === 1) return [...hits, toHit(examples[0]!)];
+  if (examples.length > 1) return [...hits];
 
   const evidenceVersions = new Set(
     hits.flatMap((hit) =>
@@ -193,38 +233,6 @@ function withResourceExampleEvidence(
     input.apiVersion ??
     (evidenceVersions.size === 1 ? [...evidenceVersions][0] : undefined);
   if (!apiVersion) return [...hits];
-
-  const corePaths = new Set(
-    hits.flatMap((hit) =>
-      hit.sourceType === 'example'
-        ? []
-        : hit.targets
-            .filter(
-              (target) =>
-                target.kind === resource &&
-                target.apiVersion === apiVersion &&
-                target.path !== undefined &&
-                target.path !== 'metadata.name',
-            )
-            .map((target) => target.path!),
-    ),
-  );
-  const examples = CORPUS.filter(
-    (chunk) =>
-      chunk.sourceType === 'example' &&
-      chunk.targets.some(
-        (target) =>
-          target.kind === resource &&
-          target.apiVersion === apiVersion &&
-          target.path !== undefined &&
-          corePaths.has(target.path),
-      ),
-  );
-  const existingExample = hits.some((hit) =>
-    examples.some((example) => example.id === hit.id),
-  );
-  if (existingExample) return [...hits];
-  if (examples.length === 1) return [...hits, toHit(examples[0]!)];
 
   const candidates = findExactFieldChunks(
     CORPUS,
@@ -245,9 +253,9 @@ function exactFieldHits(
   fieldPath: string | undefined,
   apiVersion: string | undefined,
 ): Hit[] {
-  return findExactFieldChunks(CORPUS, resource, fieldPath, apiVersion).map(
-    (chunk) => toHit(chunk, 1),
-  );
+  return findExactFieldChunks(CORPUS, resource, fieldPath, apiVersion)
+    .filter((chunk) => chunk.sourceType !== 'example')
+    .map((chunk) => toHit(chunk, 1));
 }
 
 export function formatEditorContext(editorContext?: EditorContext): string {
@@ -393,7 +401,11 @@ export async function retrieveContext(
 
   // 全量软加权检索(无硬过滤),与 eval 共用同一索引与同一段代码。serving 取 top-k。
   const search = options.search ?? searchCorpusTraced;
-  const { hits: ranked, trace: searchTrace } = await search(text, {
+  const {
+    hits: ranked,
+    trace: searchTrace,
+    targetResource,
+  } = await search(text, {
     boostResource: routed ?? undefined,
     boostPath: effectiveQuery.fieldPathHint,
     boostApiVersion: routedApiVersion,
@@ -401,6 +413,13 @@ export async function retrieveContext(
       needsErrorStructureEvidence &&
       (options.structuredErrorDirectSchemaChildBoost ?? true),
     queryExpansion: options.queryExpansion,
+    retargetQueryText: (selectedResource) =>
+      retrievalText({
+        ...effectiveQuery,
+        resourceHint: selectedResource,
+        apiVersionHint: undefined,
+        fieldPathHint: undefined,
+      }),
     ...(options.runtimeAccess === undefined
       ? {}
       : { runtimeAccess: options.runtimeAccess }),
@@ -408,22 +427,37 @@ export async function retrieveContext(
       ? {}
       : { requestObserver: options.requestObserver }),
   });
-  const hits = selectContextHits(ranked, { k, taskType: 'ask' });
+  const effectiveTargetResource = targetResource ?? routed ?? undefined;
+  const usesInitialTarget = effectiveTargetResource === routed;
+  const effectiveTargetApiVersion = usesInitialTarget
+    ? routedApiVersion
+    : undefined;
+  const resourceExampleInput: ResourceExampleEvidenceInput = {
+    question,
+    mode,
+    resource: effectiveTargetResource,
+    apiVersion: effectiveTargetApiVersion,
+    enabled: options.resourceExampleScaffoldEvidence ?? true,
+  };
+  const rankedHits = ranked.map(({ chunk, score }) => toHit(chunk, score));
+  const coreCandidates = usesSupplementalResourceExample(resourceExampleInput)
+    ? rankedHits.filter((hit) => hit.sourceType !== 'example')
+    : rankedHits;
+  const hits = selectContextHits(coreCandidates, { k, taskType: 'ask' });
   const finalHits = withResourceExampleEvidence(
-    hits.map(({ chunk, score }) => toHit(chunk, score)),
-    {
-      question,
-      mode,
-      resource: routed ?? undefined,
-      apiVersion: routedApiVersion,
-      enabled: options.resourceExampleScaffoldEvidence ?? true,
-    },
+    hits,
+    resourceExampleInput,
   );
   const { context, sources } = formatSources(finalHits);
 
   const trace = emit({
     ...baseTrace,
     ...searchTrace,
+    resourceHint: effectiveTargetResource,
+    apiVersionHint: effectiveTargetApiVersion,
+    fieldPathHint: usesInitialTarget
+      ? effectiveQuery.fieldPathHint
+      : undefined,
     path: 'search',
     finalHits: finalHits.map((h) => toTraceHit(h, h.score)),
     latencyMs: { ...searchTrace.latencyMs, total: performance.now() - t0 },

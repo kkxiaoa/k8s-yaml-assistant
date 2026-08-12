@@ -678,13 +678,18 @@ function assertRuntimeContents(
       'app/data/knowledge/kubernetes-docs/limit-range.md',
       'app/data/knowledge/kubernetes-docs/configmap.md',
       'app/data/knowledge/kubernetes-docs/deployment.md',
+      'app/data/knowledge/kubernetes-docs/statefulset.md',
       'app/data/knowledge/kubernetes-docs/images.md',
+      'app/data/knowledge/kubernetes-docs/storage-classes.md',
       'app/data/knowledge/kubernetes-examples/manifest.json',
       'app/data/knowledge/kubernetes-examples/resource-quota-mem-cpu.yaml',
       'app/data/knowledge/kubernetes-examples/limit-range-mem-cpu-container.yaml',
       'app/data/knowledge/kubernetes-examples/configmap-immutable.yaml',
       'app/data/knowledge/kubernetes-examples/deployment-nginx.yaml',
       'app/data/knowledge/kubernetes-examples/pod-nginx.yaml',
+      'app/data/knowledge/kubernetes-examples/statefulset-web.yaml',
+      'app/data/knowledge/kubernetes-examples/persistent-volume-claim-storage.yaml',
+      'app/data/knowledge/kubernetes-examples/storageclass-low-latency.yaml',
       ...(allowCandidateIndex ? CANDIDATE_INDEX_PATHS : []),
     ]) {
       if (!paths.includes(required)) fail(`runtime image missing ${required}`);

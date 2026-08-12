@@ -4,7 +4,7 @@
 
 `manifest.json` 固定 `kubernetes/website` 的精确提交、每份上游快照的 Git blob（版本对象）、CC-BY-4.0（知识共享署名 4.0）许可证、标题和适用目标。数据提供器先验证字节身份，再解析一次 YAML 并确认资源身份、`metadata.name` 和目标路径，最后用带来源信息的代码围栏构造 `example` 检索片段。
 
-示例用于配置参考，不声明字段一定被当前集群 schema（模式定义）接受，也不覆盖组织策略。当前只摄取有现有评估消费者的 ResourceQuota、LimitRange、ConfigMap、Deployment 和 Pod 示例；目录中的覆盖范围不代表产品承诺支持全部 Kubernetes 资源。
+示例用于配置参考，不声明字段一定被当前集群 schema（模式定义）接受，也不覆盖组织策略。当前只摄取有现有评估消费者的 ResourceQuota、LimitRange、ConfigMap、Deployment、Pod、StatefulSet、PersistentVolumeClaim 和 StorageClass 示例；目录中的覆盖范围不代表产品承诺支持全部 Kubernetes 资源。上游文件包含多个 YAML 文档时，数据提供器只接受目标资源身份唯一匹配的文档，歧义输入会被拒绝。
 
 更新流程：
 

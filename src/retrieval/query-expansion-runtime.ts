@@ -47,6 +47,7 @@ export type AliasRegistryLoadResult =
 
 export interface PreparedQueryExpansion {
   queryText: string;
+  rerankQueryText: string;
   boostResource?: string;
   boostPath?: string;
   trace: QueryExpansionTrace;
@@ -120,6 +121,7 @@ export function prepareQueryExpansion(
   routedResource: string | undefined,
   enabled: boolean,
   registry?: AliasRegistryLoadResult,
+  retargetQueryText?: (selectedResource: string) => string,
 ): PreparedQueryExpansion {
   const base = {
     enabled,
@@ -137,6 +139,7 @@ export function prepareQueryExpansion(
   if (!enabled) {
     return {
       queryText,
+      rerankQueryText: queryText,
       boostResource: routedResource,
       trace: { ...base, status: 'disabled' },
     };
@@ -145,6 +148,7 @@ export function prepareQueryExpansion(
   if (!registry?.ok) {
     return {
       queryText,
+      rerankQueryText: queryText,
       boostResource: routedResource,
       trace: {
         ...base,
@@ -163,12 +167,23 @@ export function prepareQueryExpansion(
     );
     const selectedResource =
       result.aliasSelectedResource ?? routedResource;
+    const rerankQueryText =
+      routedResource !== selectedResource &&
+      selectedResource !== undefined &&
+      retargetQueryText !== undefined
+        ? retargetQueryText(selectedResource)
+        : queryText;
+    const expandedQueryText =
+      result.expansionTerms.length > 0
+        ? `${rerankQueryText}\n\n字段术语: ${result.expansionTerms.join(' ')}`
+        : rerankQueryText;
     const onlyMatch =
       result.matchedAliases.length === 1
         ? result.matchedAliases[0]
         : undefined;
     return {
-      queryText: result.expandedQueryText,
+      queryText: expandedQueryText,
+      rerankQueryText,
       boostResource: selectedResource,
       boostPath:
         selectedResource && onlyMatch?.resource === selectedResource
@@ -178,7 +193,7 @@ export function prepareQueryExpansion(
         ...base,
         status:
           result.matchedAliases.length > 0 ? 'applied' : 'no_match',
-        expandedQueryText: result.expandedQueryText,
+        expandedQueryText,
         matchedAliases: result.matchedAliases,
         expansionTerms: result.expansionTerms,
         selectedResource,
@@ -190,6 +205,7 @@ export function prepareQueryExpansion(
   } catch {
     return {
       queryText,
+      rerankQueryText: queryText,
       boostResource: routedResource,
       trace: {
         ...base,

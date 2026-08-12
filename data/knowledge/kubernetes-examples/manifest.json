@@ -3,7 +3,7 @@
   "providerId": "example.kubernetes-official",
   "sourceType": "example",
   "version": "7eae8915497224dd9ba4803a8ebd0efec33b303b",
-  "capturedAt": "2026-08-09T08:20:45.000Z",
+  "capturedAt": "2026-08-10T16:07:26.000Z",
   "upstreamRepository": "https://github.com/kubernetes/website",
   "license": {
     "spdxId": "CC-BY-4.0",
@@ -92,6 +92,58 @@
           "apiVersion": "v1",
           "kind": "Pod",
           "path": "spec.containers.imagePullPolicy"
+        }
+      ]
+    },
+    {
+      "id": "statefulset-volume-claim-template",
+      "snapshot": "statefulset-web.yaml",
+      "upstreamPath": "content/zh-cn/examples/application/web/web.yaml",
+      "upstreamBlobSha1": "6f8f5133ffed956240b126798772db59fbea752d",
+      "title": "StatefulSet · spec.volumeClaimTemplates · 每个副本独立存储示例",
+      "targets": [
+        {
+          "apiVersion": "apps/v1",
+          "kind": "StatefulSet",
+          "path": "spec.volumeClaimTemplates"
+        }
+      ]
+    },
+    {
+      "id": "persistent-volume-claim-storage-request",
+      "snapshot": "persistent-volume-claim-storage.yaml",
+      "upstreamPath": "content/zh-cn/examples/pods/storage/pv-claim.yaml",
+      "upstreamBlobSha1": "b33f6faa4cbbbcb937d1160e8936bc4d904e3e6a",
+      "title": "PersistentVolumeClaim · spec.resources.requests · 存储容量申请示例",
+      "targets": [
+        {
+          "apiVersion": "v1",
+          "kind": "PersistentVolumeClaim",
+          "path": "spec.resources.requests"
+        },
+        {
+          "apiVersion": "v1",
+          "kind": "PersistentVolumeClaim",
+          "path": "spec.resources.requests.storage"
+        }
+      ]
+    },
+    {
+      "id": "storageclass-low-latency",
+      "snapshot": "storageclass-low-latency.yaml",
+      "upstreamPath": "content/zh-cn/examples/storage/storageclass-low-latency.yaml",
+      "upstreamBlobSha1": "279d6e160781b8f02227e8cae60bbe32d92ac994",
+      "title": "StorageClass · volumeBindingMode / allowVolumeExpansion · 完整配置示例",
+      "targets": [
+        {
+          "apiVersion": "storage.k8s.io/v1",
+          "kind": "StorageClass",
+          "path": "volumeBindingMode"
+        },
+        {
+          "apiVersion": "storage.k8s.io/v1",
+          "kind": "StorageClass",
+          "path": "allowVolumeExpansion"
         }
       ]
     }

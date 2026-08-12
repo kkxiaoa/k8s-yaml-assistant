@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   cpSync,
   mkdtempSync,
@@ -66,7 +67,14 @@ function writeManifest(
   );
 }
 
-test('官方示例数据提供器生成五个版本固定的完整 YAML 片段', () => {
+function gitBlobSha1(content: Buffer): string {
+  return createHash('sha1')
+    .update(`blob ${content.byteLength}\0`)
+    .update(content)
+    .digest('hex');
+}
+
+test('官方示例数据提供器生成八个版本固定的完整 YAML 片段', () => {
   const snapshot = loadKubernetesExamplesProviderSnapshot();
 
   assert.equal(snapshot.providerId, 'example.kubernetes-official');
@@ -74,7 +82,7 @@ test('官方示例数据提供器生成五个版本固定的完整 YAML 片段',
     snapshot.version,
     '7eae8915497224dd9ba4803a8ebd0efec33b303b',
   );
-  assert.equal(snapshot.chunks.length, 5);
+  assert.equal(snapshot.chunks.length, 8);
   assert.deepEqual(
     snapshot.chunks.map((chunk) => chunk.id),
     [
@@ -83,6 +91,9 @@ test('官方示例数据提供器生成五个版本固定的完整 YAML 片段',
       'example::kubernetes::configmap-immutable',
       'example::kubernetes::deployment-selector',
       'example::kubernetes::pod-image-pull-policy',
+      'example::kubernetes::statefulset-volume-claim-template',
+      'example::kubernetes::persistent-volume-claim-storage-request',
+      'example::kubernetes::storageclass-low-latency',
     ],
   );
 
@@ -106,6 +117,43 @@ test('官方示例数据提供器生成五个版本固定的完整 YAML 片段',
   ]);
   assert.match(resourceQuota.text, /requests\.cpu: "1"/u);
   assert.match(resourceQuota.text, /name: mem-cpu-demo/u);
+
+  const statefulSet = snapshot.chunks.find(
+    (chunk) =>
+      chunk.id === 'example::kubernetes::statefulset-volume-claim-template',
+  );
+  assert.ok(statefulSet);
+  assert.match(statefulSet.text, /^```yaml\napiVersion: apps\/v1/u);
+  assert.match(statefulSet.text, /volumeClaimTemplates:/u);
+  assert.match(statefulSet.text, /storage: 1Gi/u);
+  assert.doesNotMatch(statefulSet.text, /kind: Service/u);
+
+  const persistentVolumeClaim = snapshot.chunks.find(
+    (chunk) =>
+      chunk.id ===
+      'example::kubernetes::persistent-volume-claim-storage-request',
+  );
+  assert.ok(persistentVolumeClaim);
+  assert.match(persistentVolumeClaim.text, /kind: PersistentVolumeClaim/u);
+  assert.match(persistentVolumeClaim.text, /name: task-pv-claim/u);
+  assert.match(persistentVolumeClaim.text, /storage: 3Gi/u);
+
+  const storageClass = snapshot.chunks.at(-1)!;
+  assert.deepEqual(storageClass.targets, [
+    {
+      apiVersion: 'storage.k8s.io/v1',
+      kind: 'StorageClass',
+      path: 'allowVolumeExpansion',
+    },
+    {
+      apiVersion: 'storage.k8s.io/v1',
+      kind: 'StorageClass',
+      path: 'volumeBindingMode',
+    },
+  ]);
+  assert.match(storageClass.text, /name: low-latency/u);
+  assert.match(storageClass.text, /allowVolumeExpansion: true/u);
+  assert.match(storageClass.text, /volumeBindingMode: WaitForFirstConsumer/u);
 });
 
 test('官方示例数据提供器拒绝偏离固定 Git blob 的快照', () => {
@@ -127,6 +175,34 @@ test('官方示例数据提供器拒绝资源身份与目标不一致', () => {
   try {
     const manifest = readManifest(fixture.root);
     manifest.examples[0]!.targets[0]!.kind = 'LimitRange';
+    writeManifest(fixture.root, manifest);
+    assert.throws(
+      () => loadKubernetesExamplesProviderSnapshot(fixture.root),
+      /resource identity differs from targets/u,
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+});
+
+test('官方示例数据提供器拒绝多文档中的目标资源身份歧义', () => {
+  const fixture = copyFixture();
+  try {
+    const manifest = readManifest(fixture.root);
+    const example = manifest.examples.find(
+      (candidate) => candidate.id === 'statefulset-volume-claim-template',
+    );
+    assert.ok(example);
+    const path = join(fixture.root, example.snapshot);
+    const original = readFileSync(path, 'utf8');
+    const targetDocument = original.split(/^---\s*$/mu)[1];
+    assert.ok(targetDocument);
+    const ambiguous = Buffer.from(
+      `${original.trimEnd()}\n---\n${targetDocument.trimStart()}`,
+      'utf8',
+    );
+    writeFileSync(path, ambiguous);
+    example.upstreamBlobSha1 = gitBlobSha1(ambiguous);
     writeManifest(fixture.root, manifest);
     assert.throws(
       () => loadKubernetesExamplesProviderSnapshot(fixture.root),

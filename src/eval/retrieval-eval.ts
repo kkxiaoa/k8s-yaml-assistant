@@ -118,11 +118,14 @@ async function evaluateSemanticSearch(params: {
       };
       let ranked: Awaited<ReturnType<typeof searchCorpusTraced>>['hits'];
       let trace: Awaited<ReturnType<typeof searchCorpusTraced>>['trace'];
+      let targetResource: Awaited<
+        ReturnType<typeof searchCorpusTraced>
+      >['targetResource'];
       try {
-        ({ hits: ranked, trace } = await searchCorpusTraced(
-          evalCase.question,
-          { boostResource: routed },
-        ));
+        ({ hits: ranked, trace, targetResource } =
+          await searchCorpusTraced(evalCase.question, {
+            boostResource: routed,
+          }));
       } catch (error) {
         throw retrievalExecutionError(error, () => errorPayload);
       }
@@ -135,7 +138,7 @@ async function evaluateSemanticSearch(params: {
             ...trace,
             question: evalCase.question,
             mode: 'free',
-            resourceHint: routed,
+            resourceHint: targetResource,
             path: 'search',
             finalHits: ranked
               .slice(0, k)

@@ -466,7 +466,7 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
   },
   {
     id: "cm-immutable",
-    governance: FIELD_DEVELOPMENT,
+    governance: FIELD_REGRESSION,
     target: { kind: "ConfigMap" },
     question: "ConfigMap 怎么设为不可变?",
     expectedChunkIds: [
@@ -511,7 +511,7 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
   // ── ResourceQuota / LimitRange ─────────────────
   {
     id: "quota-hard",
-    governance: FIELD_DEVELOPMENT,
+    governance: FIELD_REGRESSION,
     target: { kind: "ResourceQuota" },
     question: "ResourceQuota 怎么设置命名空间的资源硬限制?",
     expectedChunkIds: [
@@ -721,6 +721,8 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     question: "怎么让卷延迟到 Pod 调度后再绑定?",
     expectedChunkIds: [
       "schema::storage.k8s.io/v1::StorageClass::volumeBindingMode",
+      "docs::kubernetes::storage-classes::volume-binding-mode",
+      "example::kubernetes::storageclass-low-latency",
     ],
   },
   {
@@ -739,6 +741,7 @@ export const RETRIEVAL_CASES = decodeSemanticRetrievalCases([
     question: "怎么允许 PVC 扩容?",
     expectedChunkIds: [
       "schema::storage.k8s.io/v1::StorageClass::allowVolumeExpansion",
+      "example::kubernetes::storageclass-low-latency",
     ],
   },
   {

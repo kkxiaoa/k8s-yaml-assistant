@@ -23,13 +23,15 @@
 | 限制范围 | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/policy/limit-range.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 | ConfigMap | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/configuration/configmap.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 | Deployment | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/workloads/controllers/deployment.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| StatefulSet | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/workloads/controllers/statefulset.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 | 容器镜像 | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/containers/images.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| StorageClass | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/storage/storage-classes.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 
 版权所有者为 Kubernetes 文档贡献者。仓库保存字节一致的上游简体中文 Markdown（标记语言）文件；运行时删除上游为翻译维护保留的英文 HTML（超文本标记语言）注释，只提取 manifest（清单）明确选择的中文章节，添加规范化标题、来源锚点和适用目标。未选择的配置示例不会进入 `docs` 知识源。
 
 ## Kubernetes 官方 YAML 示例
 
-`data/knowledge/kubernetes-examples/` 包含同一固定 `kubernetes/website` 提交中的五份完整 YAML（配置文件）示例：ResourceQuota、LimitRange、ConfigMap、Deployment 和 Pod。快照保持上游字节一致；数据提供器验证 Git blob（版本对象）、资源身份、`metadata.name` 和清单声明的目标路径后，以 `example` 来源提供带代码围栏的配置参考。
+`data/knowledge/kubernetes-examples/` 包含同一固定 `kubernetes/website` 提交中的八份 YAML（配置文件）示例：ResourceQuota、LimitRange、ConfigMap、Deployment、Pod、StatefulSet、PersistentVolumeClaim 和 StorageClass。快照保持上游字节一致；数据提供器验证 Git blob（版本对象）、资源身份、`metadata.name` 和清单声明的目标路径后，以 `example` 来源提供带代码围栏的配置参考。StatefulSet 上游快照同时包含 Service，摄取边界只提取其中唯一匹配清单身份的 StatefulSet 文档。
 
 这些示例同样由 Kubernetes 文档贡献者按 [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) 提供。本项目只添加固定版本来源信息、规范化标题与适用目标，不把示例解释为本项目自行创作，也不使用它替代当前集群 schema（模式定义）的合法性事实。
 

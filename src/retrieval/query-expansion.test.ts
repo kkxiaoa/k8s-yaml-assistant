@@ -218,6 +218,40 @@ check('alias-aware: routedResource 错误时仍可由 alias 选中正确资源',
   ]);
 });
 
+check('alias-aware: 多个跨资源强 alias 指向不同资源时保留原路由', () => {
+  const result = expandQueryWithAliases(
+    'Pod 调度后再绑定怎么配置?',
+    'Pod',
+    [
+      alias({
+        id: 'binding-mode',
+        resource: 'StorageClass',
+        path: 'volumeBindingMode',
+        chunkId:
+          'schema::storage.k8s.io/v1::StorageClass::volumeBindingMode',
+        weakZhAliases: [],
+        strongZhAliases: ['Pod 调度后再绑定'],
+      }),
+      alias({
+        id: 'synthetic-scheduling',
+        resource: 'PersistentVolumeClaim',
+        path: 'spec.volumeName',
+        chunkId: 'schema::v1::PersistentVolumeClaim::spec.volumeName',
+        weakZhAliases: [],
+        strongZhAliases: ['Pod 调度后再绑定'],
+      }),
+    ],
+    { resourceStrategy: 'alias-aware' },
+  );
+
+  assert.equal(result.aliasSelectedResource, 'Pod');
+  assert.equal(
+    result.resourceSelectionReason,
+    'ambiguous_cross_resource_strong_alias',
+  );
+  assert.equal(result.matchedAliases.length, 2);
+});
+
 check('same resource: weak alias 允许 expansion 但不改变 resource', () => {
   const result = expandQueryWithAliases('Deployment 容器镜像怎么写', 'Deployment', [
     alias({ id: 'image' }),

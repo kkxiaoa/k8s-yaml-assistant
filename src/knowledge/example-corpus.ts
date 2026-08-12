@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadAll } from 'js-yaml';
+import { dump, loadAll } from 'js-yaml';
 import { z } from 'zod';
 import {
   canonicalizeKnowledgeTargets,
@@ -138,10 +138,10 @@ function valuesAtPath(value: unknown, segments: readonly string[]): unknown[] {
   return valuesAtPath(value[head], tail);
 }
 
-function parseSingleKubernetesResource(
+function selectKubernetesResourceYaml(
   yaml: string,
   example: Example,
-): void {
+): string {
   let documents: unknown[];
   try {
     documents = loadAll(yaml).filter((document) => document != null);
@@ -150,27 +150,34 @@ function parseSingleKubernetesResource(
       `${example.id} YAML parse failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (documents.length !== 1 || !isRecord(documents[0])) {
-    throw new Error(`${example.id} must contain exactly one resource object`);
+  if (
+    documents.length === 0 ||
+    documents.some((document) => !isRecord(document))
+  ) {
+    throw new Error(`${example.id} must contain resource objects`);
   }
 
-  const resource = documents[0];
   const apiVersions = new Set(
     example.targets.map((target) => target.apiVersion),
   );
   const kinds = new Set(example.targets.map((target) => target.kind));
-  if (
-    apiVersions.size !== 1 ||
-    !apiVersions.has(
-      typeof resource.apiVersion === 'string'
-        ? resource.apiVersion
-        : undefined,
-    ) ||
-    kinds.size !== 1 ||
-    !kinds.has(typeof resource.kind === 'string' ? resource.kind : '')
-  ) {
+  if (apiVersions.size !== 1 || kinds.size !== 1) {
     throw new Error(`${example.id} resource identity differs from targets`);
   }
+  const matchingResources = documents.filter(
+    (document): document is Record<string, unknown> =>
+      isRecord(document) &&
+      apiVersions.has(
+        typeof document.apiVersion === 'string'
+          ? document.apiVersion
+          : undefined,
+      ) &&
+      kinds.has(typeof document.kind === 'string' ? document.kind : ''),
+  );
+  if (matchingResources.length !== 1) {
+    throw new Error(`${example.id} resource identity differs from targets`);
+  }
+  const resource = matchingResources[0]!;
 
   const metadata = isRecord(resource.metadata) ? resource.metadata : undefined;
   if (
@@ -190,6 +197,10 @@ function parseSingleKubernetesResource(
       throw new Error(`${example.id} target path missing: ${String(path)}`);
     }
   }
+
+  return documents.length === 1
+    ? yaml
+    : dump(resource, { lineWidth: -1, noRefs: true });
 }
 
 function exampleChunk(
@@ -197,8 +208,7 @@ function exampleChunk(
   example: Example,
   content: Buffer,
 ): Chunk {
-  const yaml = content.toString('utf8');
-  parseSingleKubernetesResource(yaml, example);
+  const yaml = selectKubernetesResourceYaml(content.toString('utf8'), example);
   return {
     id: `example::kubernetes::${example.id}`,
     title: example.title,

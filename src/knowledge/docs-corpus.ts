@@ -225,7 +225,10 @@ function markdownHeadings(lines: readonly string[]): MarkdownHeading[] {
   return headings;
 }
 
-function normalizeSectionMarkdown(markdown: string): string {
+function normalizeSectionMarkdown(
+  markdown: string,
+  sourceUri: string,
+): string {
   const normalized: string[] = [];
   let fence: MarkdownFence | undefined;
   let previousBlank = false;
@@ -249,15 +252,20 @@ function normalizeSectionMarkdown(markdown: string): string {
     }
 
     const presentationShortcode =
-      /^\{\{[<%]\s*\/?(?:note|feature-state)\b.*[>%]\}\}$/u.test(
+      /^\{\{[<%]\s*\/?(?:note|feature-state|code_sample)\b.*[>%]\}\}$/u.test(
         line.trim(),
       );
     const visibleLine = presentationShortcode
       ? ''
-      : line.replace(
-          /\]\((\/(?:zh-cn\/)?docs\/[^)\s]+)\)/gu,
-          (_match, path: string) => `](https://kubernetes.io${path})`,
-        );
+      : line
+          .replace(
+            /\]\((\/(?:zh-cn\/)?docs\/[^)\s]+)\)/gu,
+            (_match, path: string) => `](https://kubernetes.io${path})`,
+          )
+          .replace(
+            /\]\(#([a-z0-9]+(?:-[a-z0-9]+)*)\)/gu,
+            (_match, anchor: string) => `](${sourceUri}#${anchor})`,
+          );
     const blank = visibleLine.trim().length === 0;
     if (blank && previousBlank) continue;
     normalized.push(visibleLine);
@@ -299,6 +307,7 @@ function extractSection(
   );
   const text = normalizeSectionMarkdown(
     trimBlankLines(lines.slice(selected.line + 1, next?.line ?? lines.length)),
+    document.sourceUri,
   );
   if (text.length === 0) {
     throw new Error(`${document.id} section ${section.id} is empty`);

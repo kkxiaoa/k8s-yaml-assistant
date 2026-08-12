@@ -3,7 +3,7 @@
   "providerId": "docs.kubernetes-official",
   "sourceType": "docs",
   "version": "7eae8915497224dd9ba4803a8ebd0efec33b303b",
-  "capturedAt": "2026-08-09T08:20:45.000Z",
+  "capturedAt": "2026-08-11T10:04:40.000Z",
   "upstreamRepository": "https://github.com/kubernetes/website",
   "license": {
     "spdxId": "CC-BY-4.0",
@@ -114,6 +114,41 @@
       ]
     },
     {
+      "id": "statefulset",
+      "snapshot": "statefulset.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/workloads/controllers/statefulset.md",
+      "upstreamBlobSha1": "34494f8451d35259e5e474df248b7c07242461f3",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/statefulset/",
+      "sections": [
+        {
+          "id": "volume-claim-templates",
+          "heading": "卷申领模板",
+          "anchor": "volume-claim-templates",
+          "title": "StatefulSet · spec.volumeClaimTemplates · 卷申领模板",
+          "targets": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "StatefulSet",
+              "path": "spec.volumeClaimTemplates"
+            }
+          ]
+        },
+        {
+          "id": "stable-storage",
+          "heading": "稳定的存储",
+          "anchor": "stable-storage",
+          "title": "StatefulSet · spec.volumeClaimTemplates · 每个 Pod 的稳定存储",
+          "targets": [
+            {
+              "apiVersion": "apps/v1",
+              "kind": "StatefulSet",
+              "path": "spec.volumeClaimTemplates"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "images",
       "snapshot": "images.md",
       "upstreamPath": "content/zh-cn/docs/concepts/containers/images.md",
@@ -130,6 +165,28 @@
               "apiVersion": "v1",
               "kind": "Pod",
               "path": "spec.containers.imagePullPolicy"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "storage-classes",
+      "snapshot": "storage-classes.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/storage/storage-classes.md",
+      "upstreamBlobSha1": "0729a6842ca2a82711d6fac592d7928a8765a64c",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/storage/storage-classes/",
+      "sections": [
+        {
+          "id": "volume-binding-mode",
+          "heading": "卷绑定模式",
+          "anchor": "volume-binding-mode",
+          "title": "StorageClass · volumeBindingMode · 卷绑定模式",
+          "targets": [
+            {
+              "apiVersion": "storage.k8s.io/v1",
+              "kind": "StorageClass",
+              "path": "volumeBindingMode"
             }
           ]
         }

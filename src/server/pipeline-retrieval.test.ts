@@ -93,41 +93,54 @@ function requiredLocalSink(
 
 function fakeSearchFor(
   chunkId: string,
+  targetResource?: string,
 ): NonNullable<RetrieveContextOptions['search']> {
-  return fakeSearchForIds([chunkId]);
+  return fakeSearchForIds([chunkId], targetResource);
 }
 
 function fakeSearchForIds(
   chunkIds: readonly string[],
+  targetResource?: string,
 ): NonNullable<RetrieveContextOptions['search']> {
   const found = chunkIds.map(chunk);
-  return async (queryText, options = {}) => ({
-    hits: found.map((candidate, index) => ({
-      chunk: candidate,
-      score: 0.9 - index * 0.1,
-    })),
-    trace: {
-      queryText,
-      queryExpansion: {
-        enabled: false,
-        status: 'disabled',
-        originalQueryText: queryText,
-        expandedQueryText: queryText,
-        matchedAliases: [],
-        expansionTerms: [],
-        routedResource: options.boostResource,
-        selectedResource: options.boostResource,
+  return async (queryText, options = {}) => {
+    const selectedResource = targetResource ?? options.boostResource;
+    return {
+      hits: found.map((candidate, index) => ({
+        chunk: candidate,
+        score: 0.9 - index * 0.1,
+      })),
+      targetResource: selectedResource,
+      trace: {
+        queryText,
+        queryExpansion: {
+          enabled: targetResource !== undefined,
+          status: targetResource === undefined ? 'disabled' : 'applied',
+          originalQueryText: queryText,
+          expandedQueryText: queryText,
+          matchedAliases: [],
+          expansionTerms: [],
+          routedResource: options.boostResource,
+          selectedResource,
+          ...(targetResource !== undefined &&
+          targetResource !== options.boostResource
+            ? {
+                resourceSelectionReason:
+                  'cross_resource_strong_alias' as const,
+              }
+            : {}),
+        },
+        coarseHits: found.map((candidate, index) =>
+          toTraceHit(candidate, 0.8 - index * 0.1),
+        ),
+        rerankHits: found.map((candidate, index) =>
+          toTraceHit(candidate, 0.9 - index * 0.1),
+        ),
+        latencyMs: { total: 1 },
+        cache: { index: { status: 'hit' }, embeddingHit: false },
       },
-      coarseHits: found.map((candidate, index) =>
-        toTraceHit(candidate, 0.8 - index * 0.1),
-      ),
-      rerankHits: found.map((candidate, index) =>
-        toTraceHit(candidate, 0.9 - index * 0.1),
-      ),
-      latencyMs: { total: 1 },
-      cache: { index: { status: 'hit' }, embeddingHit: false },
-    },
-  });
+    };
+  };
 }
 
 const exactCases = [
@@ -306,6 +319,200 @@ await check('配置型 Ask 在真实编辑器上下文中附加目标资源的�
   assert.doesNotMatch(
     withDifferentCurrentYaml.trace.queryText,
     /StorageClass|storage\.k8s\.io|reclaimPolicy/u,
+  );
+});
+
+await check('配置型 Ask 的官方示例不占用三条核心证据槽', async () => {
+  const exampleId = 'example::kubernetes::limit-range-mem-cpu-container';
+  const coreIds = [
+    'docs::kubernetes::limit-range::constraints-on-resource-limits-and-requests',
+    'schema::v1::LimitRange::spec.limits.default',
+    'schema::v1::LimitRange::spec.limits.defaultRequest',
+  ];
+  const rankedIds = [
+    exampleId,
+    ...coreIds,
+    'policy.limitrange.per-namespace.recommended',
+  ];
+  const search = fakeSearchForIds(rankedIds);
+
+  const prepared = await prepareAsk({
+    question: 'LimitRange 怎么给容器设默认资源?',
+    k: 3,
+    mode: 'free',
+    retrievalOptions: { search, queryExpansion: false },
+  });
+  assert.deepEqual(
+    prepared.trace.rerankHits.map((hit) => hit.id),
+    rankedIds,
+  );
+  assert.deepEqual(
+    prepared.hits.map((hit) => hit.id),
+    [...coreIds, exampleId],
+  );
+  assert.deepEqual(
+    prepared.trace.finalHits.map((hit) => hit.id),
+    prepared.hits.map((hit) => hit.id),
+  );
+
+  const disabled = await prepareAsk({
+    question: 'LimitRange 怎么给容器设默认资源?',
+    k: 3,
+    mode: 'free',
+    retrievalOptions: {
+      search,
+      queryExpansion: false,
+      resourceExampleScaffoldEvidence: false,
+    },
+  });
+  assert.deepEqual(
+    disabled.hits.map((hit) => hit.id),
+    rankedIds.slice(0, 3),
+  );
+});
+
+await check('申请类配置问题按核心字段追加唯一官方示例', async () => {
+  const cases = [
+    {
+      question: 'StatefulSet 怎么给每个副本申请独立存储?',
+      rankedIds: [
+        'docs::kubernetes::statefulset::volume-claim-templates',
+        'docs::kubernetes::statefulset::stable-storage',
+        'schema::apps/v1::StatefulSet::spec.volumeClaimTemplates',
+      ],
+      exampleId:
+        'example::kubernetes::statefulset-volume-claim-template',
+      expectedKind: 'StatefulSet',
+    },
+    {
+      question: 'PVC 怎么申请存储大小?',
+      rankedIds: [
+        'policy.pvc.resources.requests.storage.required',
+        'schema::v1::PersistentVolumeClaim::spec.resources.requests',
+        'schema::v1::PersistentVolumeClaim::spec.resources',
+      ],
+      exampleId:
+        'example::kubernetes::persistent-volume-claim-storage-request',
+      expectedKind: 'PersistentVolumeClaim',
+    },
+  ] as const;
+
+  for (const candidate of cases) {
+    const prepared = await prepareAsk({
+      question: candidate.question,
+      k: 3,
+      mode: 'free',
+      retrievalOptions: {
+        search: fakeSearchForIds(candidate.rankedIds),
+        queryExpansion: false,
+      },
+    });
+    assert.deepEqual(prepared.hits.map((hit) => hit.id), [
+      ...candidate.rankedIds,
+      candidate.exampleId,
+    ]);
+    assert.match(prepared.context, new RegExp(`kind: ${candidate.expectedKind}`, 'u'));
+    if (candidate.expectedKind === 'StatefulSet') {
+      assert.match(
+        prepared.context,
+        /设置 `\.spec\.volumeClaimTemplates` 字段来创建/u,
+      );
+      assert.match(
+        prepared.context,
+        /每个 Pod 接收到一个 PersistentVolumeClaim/u,
+      );
+    }
+  }
+});
+
+await check('配置型 Ask 按核心证据而非问题中的关联资源选择官方示例', async () => {
+  const rankedIds = [
+    'docs::kubernetes::storage-classes::volume-binding-mode',
+    'schema::storage.k8s.io/v1::StorageClass::volumeBindingMode',
+    'schema::v1::Pod::spec.nodeName',
+  ];
+  const prepared = await prepareAsk({
+    question: '怎么让卷延迟到 Pod 调度后再绑定?',
+    k: 3,
+    mode: 'free',
+    editorContext: {
+      yaml: 'apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: current',
+      kind: 'StorageClass',
+      apiVersion: 'storage.k8s.io/v1',
+    },
+    retrievalOptions: {
+      search: fakeSearchForIds(rankedIds, 'StorageClass'),
+      queryExpansion: false,
+    },
+  });
+
+  assert.equal(prepared.trace.resourceHint, 'StorageClass');
+  assert.equal(prepared.trace.queryExpansion?.routedResource, 'Pod');
+  assert.equal(
+    prepared.trace.queryExpansion?.selectedResource,
+    'StorageClass',
+  );
+  assert.deepEqual(
+    prepared.hits.map((hit) => hit.id),
+    [...rankedIds, 'example::kubernetes::storageclass-low-latency'],
+  );
+  assert.match(prepared.context, /kind: StorageClass/u);
+  assert.match(prepared.context, /name: low-latency/u);
+  assert.doesNotMatch(prepared.context, /Pod · metadata\.name/u);
+});
+
+await check('跨资源最终目标驱动无示例时的通用骨架身份', async () => {
+  const rankedIds = [
+    'schema::autoscaling/v2::HorizontalPodAutoscaler::spec.maxReplicas',
+  ];
+  const prepared = await prepareAsk({
+    question: 'Pod 怎么设置最大副本数?',
+    k: 3,
+    mode: 'free',
+    retrievalOptions: {
+      search: fakeSearchForIds(rankedIds, 'HorizontalPodAutoscaler'),
+      queryExpansion: true,
+    },
+  });
+
+  assert.equal(prepared.trace.resourceHint, 'HorizontalPodAutoscaler');
+  assert.deepEqual(
+    prepared.hits.map((hit) => hit.id),
+    [
+      ...rankedIds,
+      'schema::autoscaling/v2::HorizontalPodAutoscaler::metadata.name',
+    ],
+  );
+  assert.doesNotMatch(prepared.context, /Pod · metadata\.name/u);
+});
+
+await check('多资源核心证据分别匹配官方示例时不猜测', async () => {
+  const rankedIds = [
+    'schema::v1::ResourceQuota::spec.hard',
+    'schema::v1::LimitRange::spec.limits.default',
+  ];
+  const prepared = await prepareAsk({
+    question: '这些资源怎么配置?',
+    k: 3,
+    mode: 'free',
+    editorContext: {
+      yaml: 'apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: current',
+      kind: 'ResourceQuota',
+      apiVersion: 'v1',
+    },
+    retrievalOptions: {
+      search: fakeSearchForIds(rankedIds),
+      queryExpansion: false,
+    },
+  });
+
+  assert.deepEqual(
+    prepared.hits.map((hit) => hit.id),
+    rankedIds,
+  );
+  assert.equal(
+    prepared.hits.some((hit) => hit.sourceType === 'example'),
+    false,
   );
 });
 
@@ -776,6 +983,7 @@ await check('exact path 未命中时回到 search path', async () => {
     boostPath = options.boostPath;
     return {
       hits: [{ chunk: indexedServiceType, score: 0.9 }],
+      targetResource: options.boostResource,
       trace: {
         queryText,
         queryExpansion: {
@@ -908,6 +1116,7 @@ await check('对象字段错误进入 search 路径以检索子字段证据', as
         chunk: schemaChunk,
         score: 0.9 - index * 0.1,
       })),
+      targetResource: options.boostResource,
       trace: {
         queryText,
         queryExpansion: {
