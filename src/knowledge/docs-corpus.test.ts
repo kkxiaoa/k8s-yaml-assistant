@@ -57,6 +57,7 @@ function withMarkdownFixture(
     const manifest = readManifestFixture();
     const [document] = manifest.documents;
     assert.ok(document);
+    manifest.documents = [document];
     document.upstreamBlobSha1 = gitBlobSha1(markdown);
     configure(manifest);
     writeFileSync(
@@ -78,7 +79,7 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
     snapshot.version,
     '7eae8915497224dd9ba4803a8ebd0efec33b303b',
   );
-  assert.equal(snapshot.chunks.length, 1);
+  assert.equal(snapshot.chunks.length, 8);
 
   const chunk = snapshot.chunks[0]!;
   assert.deepEqual(decodeKnowledgeChunk(chunk), chunk);
@@ -114,6 +115,115 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
   assert.doesNotMatch(chunk.text, /<!--|-->/u);
   assert.doesNotMatch(chunk.text, /apiVersion: v1|kind: ResourceQuota/u);
   assert.doesNotMatch(chunk.text, /扩展资源的配额/u);
+
+  const chunksById = new Map(
+    snapshot.chunks.map((candidate) => [candidate.id, candidate] as const),
+  );
+  const limitRange = chunksById.get(
+    'docs::kubernetes::limit-range::constraints-on-resource-limits-and-requests',
+  );
+  const configMap = chunksById.get(
+    'docs::kubernetes::configmap::configmap-immutable',
+  );
+  const deployment = chunksById.get(
+    'docs::kubernetes::deployment::selector',
+  );
+  const statefulSetVolumeClaimTemplates = chunksById.get(
+    'docs::kubernetes::statefulset::volume-claim-templates',
+  );
+  const statefulSetStableStorage = chunksById.get(
+    'docs::kubernetes::statefulset::stable-storage',
+  );
+  const images = chunksById.get(
+    'docs::kubernetes::images::image-pull-policy',
+  );
+  const storageClass = chunksById.get(
+    'docs::kubernetes::storage-classes::volume-binding-mode',
+  );
+  assert.ok(limitRange);
+  assert.ok(configMap);
+  assert.ok(deployment);
+  assert.ok(statefulSetVolumeClaimTemplates);
+  assert.ok(statefulSetStableStorage);
+  assert.ok(images);
+  assert.ok(storageClass);
+  assert.match(limitRange.text, /设置默认请求值与限制值/u);
+  assert.match(configMap.text, /将 `immutable` 字段设置为 `true`/u);
+  assert.match(
+    deployment.text,
+    /`\.spec\.selector` 必须匹配 `\.spec\.template\.metadata\.labels`/u,
+  );
+  assert.deepEqual(statefulSetVolumeClaimTemplates.targets, [
+    {
+      apiVersion: 'apps/v1',
+      kind: 'StatefulSet',
+      path: 'spec.volumeClaimTemplates',
+    },
+  ]);
+  assert.deepEqual(statefulSetStableStorage.targets, [
+    {
+      apiVersion: 'apps/v1',
+      kind: 'StatefulSet',
+      path: 'spec.volumeClaimTemplates',
+    },
+  ]);
+  assert.equal(
+    statefulSetVolumeClaimTemplates.provenance.sourceUri,
+    'https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/statefulset/#volume-claim-templates',
+  );
+  assert.equal(
+    statefulSetStableStorage.provenance.sourceUri,
+    'https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/statefulset/#stable-storage',
+  );
+  assert.match(
+    statefulSetVolumeClaimTemplates.text,
+    /设置 `\.spec\.volumeClaimTemplates` 字段来创建/u,
+  );
+  assert.match(
+    statefulSetVolumeClaimTemplates.text,
+    /https:\/\/kubernetes\.io\/zh-cn\/docs\/concepts\/storage\/persistent-volumes\/#persistentvolumeclaims/u,
+  );
+  assert.match(
+    statefulSetStableStorage.text,
+    /每个 Pod 接收到一个 PersistentVolumeClaim/u,
+  );
+  assert.match(
+    statefulSetStableStorage.text,
+    /PersistentVolume 并不会被删除/u,
+  );
+  assert.doesNotMatch(
+    statefulSetVolumeClaimTemplates.text,
+    /You can set|The StorageClass specified/u,
+  );
+  assert.doesNotMatch(
+    statefulSetStableStorage.text,
+    /For each VolumeClaimTemplate|This must be done manually/u,
+  );
+  assert.match(images.text, /`IfNotPresent`/u);
+  assert.match(images.text, /默认镜像拉取策略/u);
+  assert.deepEqual(storageClass.targets, [
+    {
+      apiVersion: 'storage.k8s.io/v1',
+      kind: 'StorageClass',
+      path: 'volumeBindingMode',
+    },
+  ]);
+  assert.match(storageClass.text, /`WaitForFirstConsumer`/u);
+  assert.match(storageClass.text, /直到使用该 PersistentVolumeClaim 的 Pod 被创建/u);
+  assert.match(storageClass.text, /PVC 将停留在 `pending` 状态/u);
+  assert.match(
+    storageClass.text,
+    /https:\/\/kubernetes\.io\/zh-cn\/docs\/concepts\/scheduling-eviction\/assign-pod-node\/#nodeselector/u,
+  );
+  assert.match(
+    storageClass.text,
+    /https:\/\/kubernetes\.io\/zh-cn\/docs\/concepts\/storage\/storage-classes\/#local/u,
+  );
+  assert.doesNotMatch(storageClass.text, /\]\(#local\)/u);
+  assert.doesNotMatch(storageClass.text, /\{\{% code_sample/u);
+  assert.doesNotMatch(configMap.text, /\{\{< feature-state/u);
+  assert.doesNotMatch(deployment.text, /\{\{< \/?note/u);
+  assert.doesNotMatch(images.text, /\{\{< \/?note/u);
 });
 
 test('官方文档数据提供器拒绝偏离固定 Git blob 的快照', () => {

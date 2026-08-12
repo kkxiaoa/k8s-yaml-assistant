@@ -13,17 +13,18 @@ function targetText(target: KnowledgeTarget): string {
 }
 
 /**
- * 官方文档正文经常省略由标题和 targets 携带的资源、字段身份；这些元数据只进入检索输入，
- * 不改写展示给回答模型的原始证据。其他来源保持既有正文输入。
+ * 官方文档和示例正文经常省略由标题和 targets 携带的资源、字段身份；这些元数据只进入
+ * 检索输入，不改写展示给回答模型的原始证据。schema / policy 保持既有正文输入。
  */
 export function retrievalDocumentText(
   chunk: KnowledgeChunk,
   includeTitle = false,
 ): string {
-  const includeDocsMetadata = chunk.sourceType === 'docs';
+  const includeKnowledgeMetadata =
+    chunk.sourceType === 'docs' || chunk.sourceType === 'example';
   const lines: string[] = [];
-  if (includeDocsMetadata || includeTitle) lines.push(chunk.title);
-  if (includeDocsMetadata && chunk.targets.length > 0) {
+  if (includeKnowledgeMetadata || includeTitle) lines.push(chunk.title);
+  if (includeKnowledgeMetadata && chunk.targets.length > 0) {
     lines.push(`规范目标: ${chunk.targets.map(targetText).join(' | ')}`);
   }
   lines.push(chunk.text);

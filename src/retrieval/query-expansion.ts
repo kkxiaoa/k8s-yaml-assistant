@@ -41,6 +41,7 @@ export type ResourceSelectionReason =
   | 'same_resource'
   | 'no_route_strong_alias'
   | 'cross_resource_strong_alias'
+  | 'ambiguous_cross_resource_strong_alias'
   | 'weak_alias_no_resource_override'
   | 'no_alias_match';
 
@@ -76,6 +77,37 @@ interface AliasHit {
   strength: AliasStrength;
   reason: ResourceSelectionReason;
   canSelectResource: boolean;
+}
+
+function selectAliasResource(
+  matches: readonly AliasHit[],
+  routedResource: string | undefined,
+): Pick<
+  QueryExpansionResult,
+  'aliasSelectedResource' | 'resourceSelectionReason'
+> {
+  const selectable = matches.filter((match) => match.canSelectResource);
+  const hasCrossResourceMatch = selectable.some(
+    (match) => match.reason === 'cross_resource_strong_alias',
+  );
+  if (routedResource && hasCrossResourceMatch) {
+    const resources = new Set(
+      selectable.map((match) => match.alias.resource),
+    );
+    if (resources.size !== 1 || resources.has(routedResource)) {
+      return {
+        aliasSelectedResource: routedResource,
+        resourceSelectionReason:
+          'ambiguous_cross_resource_strong_alias',
+      };
+    }
+  }
+
+  return {
+    aliasSelectedResource:
+      selectable[0]?.alias.resource ?? routedResource,
+    resourceSelectionReason: matches[0]?.reason ?? 'no_alias_match',
+  };
 }
 
 function requiredString(
@@ -317,7 +349,7 @@ export function expandQueryWithAliases(
     };
   }
 
-  const matched = aliases
+  const candidates = aliases
     .filter((alias) => alias.reviewed)
     .map((alias): AliasHit | null => {
       const match = bestAliasMatch(queryText, alias);
@@ -366,8 +398,8 @@ export function expandQueryWithAliases(
 
       return null;
     })
-    .filter((hit): hit is AliasHit => hit !== null)
-    .slice(0, maxFields);
+    .filter((hit): hit is AliasHit => hit !== null);
+  const matched = candidates.slice(0, maxFields);
 
   const matchedAliases: MatchedAlias[] = matched.map(({ alias, zhAlias, strength }) => ({
     chunkId: alias.chunkId,
@@ -380,9 +412,8 @@ export function expandQueryWithAliases(
   const expansionTerms = uniq(
     matched.flatMap(({ alias }) => [...alias.fieldTerms, alias.path].slice(0, maxTermsPerField)),
   );
-  const aliasSelectedResource =
-    matched.find((hit) => hit.canSelectResource)?.alias.resource ?? routedResource;
-  const resourceSelectionReason = matched[0]?.reason ?? 'no_alias_match';
+  const { aliasSelectedResource, resourceSelectionReason } =
+    selectAliasResource(candidates, routedResource);
 
   return {
     originalQueryText,

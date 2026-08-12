@@ -28,6 +28,8 @@ Web（网页）界面提供：
 
 - `data/schemas/generated/` 是字段事实层，保存资源入口和 `$ref` 定义闭包；
 - `data/policies.json` 是组织策略层，不覆盖 Kubernetes Schema（模式定义）事实；
+- `data/knowledge/kubernetes-docs/` 保存版本固定的 Kubernetes 官方行为文档章节；
+- `data/knowledge/kubernetes-examples/` 保存版本固定的官方完整 YAML（配置文件）示例，作为配置参考而非 Schema（模式定义）证明；
 - `data/aliases/` 只为已审核的字段别名补充查询表达；
 - 检索结果使用 `sourceType + provenance + targets` 表达来源、出处和目标字段；
 - Ask（询问）先发送 `sources` 事件，再发送 `delta` 事件，前端可以在答案完成前展示依据；
@@ -41,7 +43,8 @@ OpenAPI / CRD
       ▼
 schema ingestion ──► generated schema registry ──► validation
                               │
-policies + reviewed aliases ──┼──► corpus + immutable index
+policies + reviewed aliases ──┤
+official docs + examples ─────┼──► corpus + immutable index
                               │                │
                               └────────────────┴──► retrieval
                                                      │
@@ -53,7 +56,7 @@ Monaco editor context ───────────────────�
 主要实现位置：
 
 - `app/`：Next.js（React 全栈框架）页面和 API（应用程序接口）；
-- `src/knowledge/`：Schema（模式定义）、策略和语料装配；
+- `src/knowledge/`：Schema（模式定义）、策略、官方文档、示例和语料装配；
 - `src/retrieval/`：字段精确命中、查询扩展、向量检索和重排；
 - `src/server/`：Ask / Validate / Generate / Fix（询问 / 校验 / 生成 / 修复）共享流水线；
 - `src/eval/`：检索、忠实度、生成和修复评估；

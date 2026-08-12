@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { ZodError } from 'zod';
+import { readBadCases } from '../bad-cases';
 import { preflightFixCases, type FixCase } from '../assertions';
 import { FIX_CASES } from './fix-cases';
 import { GENERATION_CASES } from './generation-cases';
@@ -529,10 +530,7 @@ assert.deepEqual(
         fixCaseId: 'fix-missing-deployment-selector',
         question:
           'Deployment 为什么提示缺少 spec.selector，应该怎么修复？',
-        expectedChunkIds: [
-          'schema::apps/v1::Deployment::spec.selector',
-          'schema::apps/v1::Deployment::spec.selector.matchLabels',
-        ],
+        expectedChunkIds: ['schema::apps/v1::Deployment::spec.selector'],
       },
       governance: ERROR_BAD_CASE_REGRESSION,
       hasCopiedYaml: false,
@@ -549,20 +547,110 @@ const quotaRetrievalCase = RETRIEVAL_CASES.find(
 const quotaGroundedAnswerCase = resolvedGroundedAnswerCases.find(
   (evalCase) => evalCase.id === 'quota-hard',
 );
+const limitRangeRetrievalCase = RETRIEVAL_CASES.find(
+  (evalCase) => evalCase.id === 'limitrange-limits',
+);
+const limitRangeGroundedAnswerCase = resolvedGroundedAnswerCases.find(
+  (evalCase) => evalCase.id === 'limitrange-limits',
+);
+const storageClassBindingRetrievalCase = RETRIEVAL_CASES.find(
+  (evalCase) => evalCase.id === 'sc-volumebindingmode',
+);
+const storageClassBindingGroundedAnswerCase =
+  resolvedGroundedAnswerCases.find(
+    (evalCase) => evalCase.id === 'sc-volumebindingmode',
+  );
+const storageClassExpansionRetrievalCase = RETRIEVAL_CASES.find(
+  (evalCase) => evalCase.id === 'sc-allowexpansion',
+);
+const storageClassExpansionGroundedAnswerCase =
+  resolvedGroundedAnswerCases.find(
+    (evalCase) => evalCase.id === 'sc-allowexpansion',
+  );
+const statefulSetVolumeClaimGroundedAnswerCase =
+  resolvedGroundedAnswerCases.find(
+    (evalCase) => evalCase.id === 'sts-volumeclaimtemplates',
+  );
+const persistentVolumeClaimResourcesGroundedAnswerCase =
+  resolvedGroundedAnswerCases.find(
+    (evalCase) => evalCase.id === 'pvc-resources',
+  );
 assert.ok(quotaRetrievalCase);
 assert.ok(quotaGroundedAnswerCase);
+assert.ok(limitRangeRetrievalCase);
+assert.ok(limitRangeGroundedAnswerCase);
+assert.ok(storageClassBindingRetrievalCase);
+assert.ok(storageClassBindingGroundedAnswerCase);
+assert.ok(storageClassExpansionRetrievalCase);
+assert.ok(storageClassExpansionGroundedAnswerCase);
+assert.ok(statefulSetVolumeClaimGroundedAnswerCase);
+assert.ok(persistentVolumeClaimResourcesGroundedAnswerCase);
 assert.deepEqual(quotaRetrievalCase.expectedChunkIds, [
   'schema::v1::ResourceQuota::spec.hard',
   'docs::kubernetes::resource-quotas::compute-resource-quota',
+  'example::kubernetes::resource-quota-mem-cpu',
 ]);
 assert.deepEqual(quotaGroundedAnswerCase.expectedChunkIds, [
   'schema::v1::ResourceQuota::spec.hard',
   'docs::kubernetes::resource-quotas::compute-resource-quota',
+  'example::kubernetes::resource-quota-mem-cpu',
 ]);
 assert.deepEqual(quotaGroundedAnswerCase.sourceExpectation, {
   mode: 'required',
-  types: ['schema', 'docs'],
+  types: ['schema', 'docs', 'example'],
 });
+assert.equal(
+  limitRangeRetrievalCase.question,
+  'LimitRange 怎么给容器设默认资源?',
+);
+assert.deepEqual(limitRangeRetrievalCase.expectedChunkIds, [
+  'schema::v1::LimitRange::spec.limits.default',
+  'schema::v1::LimitRange::spec.limits.defaultRequest',
+]);
+assert.deepEqual(
+  limitRangeGroundedAnswerCase.expectedChunkIds,
+  limitRangeRetrievalCase.expectedChunkIds,
+);
+assert.deepEqual(limitRangeGroundedAnswerCase.sourceExpectation, {
+  mode: 'required',
+  types: ['schema', 'docs', 'example'],
+});
+assert.deepEqual(storageClassBindingRetrievalCase.expectedChunkIds, [
+  'schema::storage.k8s.io/v1::StorageClass::volumeBindingMode',
+  'docs::kubernetes::storage-classes::volume-binding-mode',
+  'example::kubernetes::storageclass-low-latency',
+]);
+assert.deepEqual(
+  storageClassBindingGroundedAnswerCase.expectedChunkIds,
+  storageClassBindingRetrievalCase.expectedChunkIds,
+);
+assert.deepEqual(storageClassBindingGroundedAnswerCase.sourceExpectation, {
+  mode: 'required',
+  types: ['schema', 'docs', 'example'],
+});
+assert.deepEqual(storageClassExpansionRetrievalCase.expectedChunkIds, [
+  'schema::storage.k8s.io/v1::StorageClass::allowVolumeExpansion',
+  'example::kubernetes::storageclass-low-latency',
+]);
+assert.deepEqual(
+  storageClassExpansionGroundedAnswerCase.expectedChunkIds,
+  storageClassExpansionRetrievalCase.expectedChunkIds,
+);
+assert.deepEqual(storageClassExpansionGroundedAnswerCase.sourceExpectation, {
+  mode: 'required',
+  types: ['schema', 'example'],
+});
+assert.deepEqual(statefulSetVolumeClaimGroundedAnswerCase.sourceExpectation, {
+  mode: 'required',
+  types: ['schema', 'docs', 'example'],
+});
+assert.deepEqual(
+  persistentVolumeClaimResourcesGroundedAnswerCase.sourceExpectation,
+  {
+    mode: 'required',
+    types: ['schema', 'policy', 'example'],
+  },
+);
 assert.deepEqual(
   resolvedGroundedAnswerCases
     .filter((evalCase) => evalCase.governance.origin === 'bad_case')
@@ -583,8 +671,34 @@ assert.equal(
   resolvedGroundedAnswerCases.filter(
     (evalCase) => evalCase.governance.role === 'regression',
   ).length,
-  12,
+  14,
 );
+const closedBadCaseRegressionGaps = readBadCases()
+  .filter(
+    (badCase) =>
+      badCase.status === 'fixed' || badCase.status === 'converted_to_eval',
+  )
+  .flatMap((badCase) => {
+    const cases =
+      badCase.tracking.source === 'retrieval_eval'
+        ? RETRIEVAL_CASES
+        : resolvedGroundedAnswerCases;
+    const registered = cases.find(
+      (evalCase) => evalCase.id === badCase.tracking.evalCaseId,
+    );
+    return registered?.governance.role === 'regression'
+      ? []
+      : [
+          {
+            id: badCase.id,
+            evalCaseId: badCase.tracking.evalCaseId,
+            source: badCase.tracking.source,
+            status: badCase.status,
+            registeredRole: registered?.governance.role ?? null,
+          },
+        ];
+  });
+assert.deepEqual(closedBadCaseRegressionGaps, []);
 assert.deepEqual(
   GROUNDED_ANSWER_CASES.filter(
     (evalCase) =>
@@ -598,10 +712,6 @@ assert.deepEqual(
   })),
   [
     {
-      id: 'policy-conflict-latest',
-      sourceExpectation: { mode: 'required', types: ['schema', 'policy'] },
-    },
-    {
       id: 'policy-conflict-nodeport',
       sourceExpectation: { mode: 'required', types: ['schema', 'policy'] },
     },
@@ -611,6 +721,21 @@ assert.deepEqual(
     },
   ],
 );
+const latestPolicyCase = resolvedGroundedAnswerCases.find(
+  (evalCase) => evalCase.id === 'policy-conflict-latest',
+)!;
+assert.equal(latestPolicyCase.expectedBehavior, 'answer_with_sources');
+assert.deepEqual(latestPolicyCase.sourceExpectation, {
+  mode: 'required',
+  types: ['policy', 'docs'],
+});
+const deploymentSelectorErrorCase = resolvedGroundedAnswerCases.find(
+  (evalCase) => evalCase.id === 'error-deployment-missing-selector',
+)!;
+assert.deepEqual(deploymentSelectorErrorCase.sourceExpectation, {
+  mode: 'required',
+  types: ['schema', 'docs', 'example'],
+});
 const resolvedConflict = resolveGroundedAnswerCase(
   GROUNDED_ANSWER_CASES.find(
     (evalCase) => evalCase.id === 'policy-conflict-privileged',
@@ -742,6 +867,7 @@ assert.deepEqual(
     .map((evalCase) => evalCase.id)
     .sort(),
   [
+    'cm-immutable',
     'deploy-container-image',
     'endpoints-subsets',
     'pod-volumes',
@@ -749,6 +875,7 @@ assert.deepEqual(
     'policy-conflict-privileged',
     'pvc-resources',
     'pvc-volumemode',
+    'quota-hard',
     'rolebinding-subjects',
     'sc-allowexpansion',
     'sc-volumebindingmode',

@@ -125,6 +125,116 @@ check('strong alias 可扩展 query 并选择跨语言字段资源', () => {
   }
 });
 
+check('唯一跨资源强 alias 同时更新检索与重排的结构化目标', () => {
+  const registry = {
+    ok: true as const,
+    snapshot: {
+      aliases: [
+        {
+          ...reviewedAlias,
+          id: 'sc-volume-binding-mode',
+          resource: 'StorageClass',
+          path: 'volumeBindingMode',
+          chunkId:
+            'schema::storage.k8s.io/v1::StorageClass::volumeBindingMode',
+          fieldTerms: ['volumeBindingMode', 'WaitForFirstConsumer'],
+          weakZhAliases: [],
+          strongZhAliases: ['Pod 调度后再绑定'],
+        },
+      ],
+      registryHash: 'b'.repeat(64),
+      reviewedAliasCount: 1,
+    },
+  };
+  const result = prepareQueryExpansion(
+    [
+      '怎么让卷延迟到 Pod 调度后再绑定?',
+      '资源:Pod',
+      'apiVersion:v1',
+      '字段:spec.volumes',
+    ].join('\n'),
+    'Pod',
+    true,
+    registry,
+    (selectedResource) =>
+      [
+        '怎么让卷延迟到 Pod 调度后再绑定?',
+        `资源:${selectedResource}`,
+      ].join('\n'),
+  );
+
+  assert.equal(result.boostResource, 'StorageClass');
+  assert.equal(result.boostPath, 'volumeBindingMode');
+  assert.equal(result.trace.routedResource, 'Pod');
+  assert.equal(result.trace.selectedResource, 'StorageClass');
+  assert.equal(
+    result.trace.resourceSelectionReason,
+    'cross_resource_strong_alias',
+  );
+  assert.match(result.queryText, /资源:StorageClass/u);
+  assert.match(result.rerankQueryText, /资源:StorageClass/u);
+  assert.doesNotMatch(
+    `${result.queryText}\n${result.rerankQueryText}`,
+    /资源:Pod|apiVersion:v1|字段:spec\.volumes/u,
+  );
+});
+
+check('跨资源 strong alias 有歧义时不改写原查询', () => {
+  const registry = {
+    ok: true as const,
+    snapshot: {
+      aliases: [
+        {
+          ...reviewedAlias,
+          id: 'sc-volume-binding-mode',
+          resource: 'StorageClass',
+          path: 'volumeBindingMode',
+          chunkId:
+            'schema::storage.k8s.io/v1::StorageClass::volumeBindingMode',
+          weakZhAliases: [],
+          strongZhAliases: ['Pod 调度后再绑定'],
+        },
+        {
+          ...reviewedAlias,
+          id: 'pvc-volume-name',
+          resource: 'PersistentVolumeClaim',
+          path: 'spec.volumeName',
+          chunkId: 'schema::v1::PersistentVolumeClaim::spec.volumeName',
+          weakZhAliases: [],
+          strongZhAliases: ['Pod 调度后再绑定'],
+        },
+      ],
+      registryHash: 'c'.repeat(64),
+      reviewedAliasCount: 2,
+    },
+  };
+  const queryText = [
+    'Pod 调度后再绑定怎么配置?',
+    '资源:Pod',
+    'apiVersion:v1',
+  ].join('\n');
+  let retargetCalls = 0;
+  const result = prepareQueryExpansion(
+    queryText,
+    'Pod',
+    true,
+    registry,
+    () => {
+      retargetCalls += 1;
+      return '不应生成';
+    },
+  );
+
+  assert.equal(result.boostResource, 'Pod');
+  assert.equal(result.boostPath, undefined);
+  assert.equal(result.rerankQueryText, queryText);
+  assert.equal(retargetCalls, 0);
+  assert.equal(
+    result.trace.resourceSelectionReason,
+    'ambiguous_cross_resource_strong_alias',
+  );
+});
+
 check('多个 alias 命中时不推断单一 boost path', () => {
   const registry = {
     ok: true as const,

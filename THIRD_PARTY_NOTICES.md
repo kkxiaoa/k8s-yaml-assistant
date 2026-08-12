@@ -20,8 +20,35 @@
 | 文档 | 上游版本 | 上游路径 | 许可证 |
 | --- | --- | --- | --- |
 | 资源配额 | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/policy/resource-quotas.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| 限制范围 | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/policy/limit-range.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| ConfigMap | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/configuration/configmap.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| Deployment | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/workloads/controllers/deployment.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| StatefulSet | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/workloads/controllers/statefulset.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| 容器镜像 | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/containers/images.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| StorageClass | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/storage/storage-classes.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 
 版权所有者为 Kubernetes 文档贡献者。仓库保存字节一致的上游简体中文 Markdown（标记语言）文件；运行时删除上游为翻译维护保留的英文 HTML（超文本标记语言）注释，只提取 manifest（清单）明确选择的中文章节，添加规范化标题、来源锚点和适用目标。未选择的配置示例不会进入 `docs` 知识源。
+
+## Kubernetes 官方 YAML 示例
+
+`data/knowledge/kubernetes-examples/` 包含同一固定 `kubernetes/website` 提交中的八份 YAML（配置文件）示例：ResourceQuota、LimitRange、ConfigMap、Deployment、Pod、StatefulSet、PersistentVolumeClaim 和 StorageClass。快照保持上游字节一致；数据提供器验证 Git blob（版本对象）、资源身份、`metadata.name` 和清单声明的目标路径后，以 `example` 来源提供带代码围栏的配置参考。StatefulSet 上游快照同时包含 Service，摄取边界只提取其中唯一匹配清单身份的 StatefulSet 文档。
+
+这些示例同样由 Kubernetes 文档贡献者按 [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) 提供。本项目只添加固定版本来源信息、规范化标题与适用目标，不把示例解释为本项目自行创作，也不使用它替代当前集群 schema（模式定义）的合法性事实。
+
+## Highlight.js
+
+代码围栏语法高亮使用 [Highlight.js](https://highlightjs.org/) `11.11.1`，按 BSD-3-Clause（三条款 BSD 许可证）提供：
+
+Copyright (c) 2006, Ivan Sagalaev.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+- Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+- Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Runtime and development dependencies
 

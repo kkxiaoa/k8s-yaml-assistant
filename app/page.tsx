@@ -126,6 +126,18 @@ export default function Home() {
   }
 
   useEffect(() => {
+    const documentOverflow = document.documentElement.style.overflow;
+    const bodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    window.scrollTo(0, 0);
+    return () => {
+      document.documentElement.style.overflow = documentOverflow;
+      document.body.style.overflow = bodyOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
     let raw: string | null = null;
     try {
       raw = window.sessionStorage.getItem(DRAFT_KEY);
@@ -363,7 +375,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="app-shell flex h-screen flex-col overflow-hidden">
       <AppHeader
         experience={experience}
         onLogin={() => void beginLogin()}
@@ -438,7 +450,7 @@ export default function Home() {
 
         <aside
           style={{ width }}
-          className="flex shrink-0 flex-col gap-4 overflow-auto p-4"
+          className="flex shrink-0 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4"
         >
           {requestError && (
             <div

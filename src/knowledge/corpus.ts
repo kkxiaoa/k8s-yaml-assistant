@@ -1,5 +1,6 @@
 import type { Chunk, SourceType } from './chunk';
 import { loadKubernetesDocsProviderSnapshot } from './docs-corpus';
+import { loadKubernetesExamplesProviderSnapshot } from './example-corpus';
 import { buildSchemaCorpus } from './schema-corpus';
 import { buildPolicyCorpus } from './policy-corpus';
 import {
@@ -29,6 +30,7 @@ export const DEFAULT_CORPUS_SOURCES = [
   'schema',
   'policy',
   'docs',
+  'example',
 ] as const satisfies readonly SourceType[];
 
 function createCorpusProvider(
@@ -81,11 +83,25 @@ const KUBERNETES_DOCS_CORPUS_PROVIDER = createCorpusProvider(
   },
 );
 
+const KUBERNETES_EXAMPLES_SNAPSHOT =
+  loadKubernetesExamplesProviderSnapshot();
+
+const KUBERNETES_EXAMPLES_CORPUS_PROVIDER = createCorpusProvider(
+  KUBERNETES_EXAMPLES_SNAPSHOT.providerId,
+  'example',
+  () => KUBERNETES_EXAMPLES_SNAPSHOT.chunks,
+  {
+    version: KUBERNETES_EXAMPLES_SNAPSHOT.version,
+    generatedAt: KUBERNETES_EXAMPLES_SNAPSHOT.generatedAt,
+  },
+);
+
 const CORPUS_PROVIDERS = new Map<SourceType, CorpusProvider>(
   [
     SCHEMA_CORPUS_PROVIDER,
     POLICY_CORPUS_PROVIDER,
     KUBERNETES_DOCS_CORPUS_PROVIDER,
+    KUBERNETES_EXAMPLES_CORPUS_PROVIDER,
   ].map((provider) => [provider.sourceType, provider]),
 );
 

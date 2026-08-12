@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -7,6 +6,7 @@ import {
   KnowledgeTargetSchema,
   type Chunk,
 } from './chunk';
+import { readVerifiedProviderSnapshot } from './provider-snapshot';
 
 const DOCS_ROOT = join(
   process.cwd(),
@@ -166,13 +166,6 @@ interface MarkdownFenceDelimiter extends MarkdownFence {
   suffix: string;
 }
 
-function gitBlobSha1(content: Buffer): string {
-  return createHash('sha1')
-    .update(`blob ${content.byteLength}\0`)
-    .update(content)
-    .digest('hex');
-}
-
 function parseFenceDelimiter(line: string): MarkdownFenceDelimiter | null {
   const match = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
   if (!match) return null;
@@ -232,7 +225,10 @@ function markdownHeadings(lines: readonly string[]): MarkdownHeading[] {
   return headings;
 }
 
-function normalizeSectionMarkdown(markdown: string): string {
+function normalizeSectionMarkdown(
+  markdown: string,
+  sourceUri: string,
+): string {
   const normalized: string[] = [];
   let fence: MarkdownFence | undefined;
   let previousBlank = false;
@@ -255,10 +251,21 @@ function normalizeSectionMarkdown(markdown: string): string {
       continue;
     }
 
-    const visibleLine = line.replace(
-      /\]\((\/(?:zh-cn\/)?docs\/[^)\s]+)\)/gu,
-      (_match, path: string) => `](https://kubernetes.io${path})`,
-    );
+    const presentationShortcode =
+      /^\{\{[<%]\s*\/?(?:note|feature-state|code_sample)\b.*[>%]\}\}$/u.test(
+        line.trim(),
+      );
+    const visibleLine = presentationShortcode
+      ? ''
+      : line
+          .replace(
+            /\]\((\/(?:zh-cn\/)?docs\/[^)\s]+)\)/gu,
+            (_match, path: string) => `](https://kubernetes.io${path})`,
+          )
+          .replace(
+            /\]\(#([a-z0-9]+(?:-[a-z0-9]+)*)\)/gu,
+            (_match, anchor: string) => `](${sourceUri}#${anchor})`,
+          );
     const blank = visibleLine.trim().length === 0;
     if (blank && previousBlank) continue;
     normalized.push(visibleLine);
@@ -300,6 +307,7 @@ function extractSection(
   );
   const text = normalizeSectionMarkdown(
     trimBlankLines(lines.slice(selected.line + 1, next?.line ?? lines.length)),
+    document.sourceUri,
   );
   if (text.length === 0) {
     throw new Error(`${document.id} section ${section.id} is empty`);
@@ -308,19 +316,12 @@ function extractSection(
 }
 
 function readSnapshot(root: string, document: DocsDocument): string {
-  const path = join(root, document.snapshot);
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink()) {
-    throw new Error(`${document.snapshot} must be a regular file`);
-  }
-  const content = readFileSync(path);
-  const actualBlobSha1 = gitBlobSha1(content);
-  if (actualBlobSha1 !== document.upstreamBlobSha1) {
-    throw new Error(
-      `${document.snapshot} (${document.upstreamPath}) Git blob mismatch: expected ${document.upstreamBlobSha1}, got ${actualBlobSha1}`,
-    );
-  }
-  return content.toString('utf8');
+  return readVerifiedProviderSnapshot({
+    root,
+    snapshot: document.snapshot,
+    upstreamPath: document.upstreamPath,
+    upstreamBlobSha1: document.upstreamBlobSha1,
+  }).toString('utf8');
 }
 
 function docsChunkId(

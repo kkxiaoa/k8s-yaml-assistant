@@ -156,6 +156,7 @@ const QueryExpansionSchema = z
         'same_resource',
         'no_route_strong_alias',
         'cross_resource_strong_alias',
+        'ambiguous_cross_resource_strong_alias',
         'weak_alias_no_resource_override',
         'no_alias_match',
       ])

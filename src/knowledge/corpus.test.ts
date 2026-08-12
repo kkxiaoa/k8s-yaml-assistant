@@ -5,7 +5,6 @@ import {
   buildCorpusManifest,
   CORPUS,
   DEFAULT_CORPUS_SOURCES,
-  getCorpusProviders,
 } from './corpus';
 
 let passed = 0;
@@ -22,8 +21,13 @@ function check(name: string, fn: () => void): void {
 
 console.log('corpus builder:');
 
-check('默认构建 schema + policy + docs,与兼容 CORPUS 常量一致', () => {
-  assert.deepEqual([...DEFAULT_CORPUS_SOURCES], ['schema', 'policy', 'docs']);
+check('默认构建四类来源,与兼容 CORPUS 常量一致', () => {
+  assert.deepEqual([...DEFAULT_CORPUS_SOURCES], [
+    'schema',
+    'policy',
+    'docs',
+    'example',
+  ]);
   const built = buildCorpus();
   assert.deepEqual(built, CORPUS);
 });
@@ -32,16 +36,21 @@ check('source 选择可控', () => {
   const schemaOnly = buildCorpus({ sources: ['schema'] });
   const policyOnly = buildCorpus({ sources: ['policy'] });
   const docsOnly = buildCorpus({ sources: ['docs'] });
+  const examplesOnly = buildCorpus({ sources: ['example'] });
 
   assert.ok(schemaOnly.length > 0);
   assert.ok(policyOnly.length > 0);
   assert.ok(docsOnly.length > 0);
+  assert.ok(examplesOnly.length > 0);
   assert.ok(schemaOnly.every((chunk) => chunk.sourceType === 'schema'));
   assert.ok(policyOnly.every((chunk) => chunk.sourceType === 'policy'));
   assert.ok(docsOnly.every((chunk) => chunk.sourceType === 'docs'));
+  assert.ok(
+    examplesOnly.every((chunk) => chunk.sourceType === 'example'),
+  );
   assert.equal(
     buildCorpus().length,
-    schemaOnly.length + policyOnly.length + docsOnly.length,
+    schemaOnly.length + policyOnly.length + docsOnly.length + examplesOnly.length,
   );
 });
 
@@ -56,6 +65,7 @@ check('真实 provider manifest 使用稳定 providerId 和单一完整 identity
     })),
     [
       { providerId: 'docs.kubernetes-official', sourceType: 'docs' },
+      { providerId: 'example.kubernetes-official', sourceType: 'example' },
       { providerId: 'policy.organization', sourceType: 'policy' },
       { providerId: 'schema.curated-openapi', sourceType: 'schema' },
     ],
@@ -69,13 +79,6 @@ check('真实 provider manifest 使用稳定 providerId 和单一完整 identity
     assert.equal('identityVersion' in provider, false);
     assert.match(provider.manifestHash, /^[a-f0-9]{64}$/);
   }
-});
-
-check('未注册 sourceType 明确失败', () => {
-  assert.throws(
-    () => getCorpusProviders(['example']),
-    /未注册 corpus provider: example/,
-  );
 });
 
 check('source 子集使用同一 manifest contract', () => {

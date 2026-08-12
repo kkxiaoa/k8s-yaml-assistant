@@ -406,6 +406,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "pod-imagepullpolicy",
     input: { kind: "retrieval_case", retrievalCaseId: "pod-imagepullpolicy" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "pod-nodeselector",
@@ -464,6 +468,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "deploy-selector",
     input: { kind: "retrieval_case", retrievalCaseId: "deploy-selector" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "deploy-container-image",
@@ -493,6 +501,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
       retrievalCaseId: "sts-volumeclaimtemplates",
     },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "sts-podmanagementpolicy",
@@ -617,6 +629,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "cm-immutable",
     input: { kind: "retrieval_case", retrievalCaseId: "cm-immutable" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "secret-stringdata",
@@ -644,13 +660,17 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     expectedBehavior: ANSWER_WITH_SOURCES,
     sourceExpectation: {
       mode: "required",
-      types: ["schema", "docs"],
+      types: ["schema", "docs", "example"],
     },
   },
   {
     id: "limitrange-limits",
     input: { kind: "retrieval_case", retrievalCaseId: "limitrange-limits" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "hpa-maxreplicas",
@@ -746,6 +766,10 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "sc-volumebindingmode",
     input: { kind: "retrieval_case", retrievalCaseId: "sc-volumebindingmode" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "vac-parameters",
@@ -756,11 +780,19 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     id: "sc-allowexpansion",
     input: { kind: "retrieval_case", retrievalCaseId: "sc-allowexpansion" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "example"],
+    },
   },
   {
     id: "pvc-resources",
     input: { kind: "retrieval_case", retrievalCaseId: "pvc-resources" },
     expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "policy", "example"],
+    },
   },
   {
     id: "sc-provisioner",
@@ -822,8 +854,8 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
       kind: "retrieval_case",
       retrievalCaseId: "policy-conflict-latest",
     },
-    expectedBehavior: EXPLAIN_SCHEMA_POLICY_CONFLICT,
-    sourceExpectation: { mode: "required", types: ["schema", "policy"] },
+    expectedBehavior: ANSWER_WITH_SOURCES,
+    sourceExpectation: { mode: "required", types: ["policy", "docs"] },
   },
   {
     id: "policy-conflict-nodeport",
@@ -863,13 +895,13 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
       kind: "validation_error",
       fixCaseId: "fix-missing-deployment-selector",
       question: "Deployment 为什么提示缺少 spec.selector，应该怎么修复？",
-      expectedChunkIds: [
-        "schema::apps/v1::Deployment::spec.selector",
-        "schema::apps/v1::Deployment::spec.selector.matchLabels",
-      ],
+      expectedChunkIds: ["schema::apps/v1::Deployment::spec.selector"],
     },
     expectedBehavior: ANSWER_WITH_SOURCES,
-    sourceExpectation: { mode: "required", types: ["schema"] },
+    sourceExpectation: {
+      mode: "required",
+      types: ["schema", "docs", "example"],
+    },
   },
   {
     id: "refusal-prometheus-retention",

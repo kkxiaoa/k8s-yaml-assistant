@@ -248,9 +248,11 @@ export interface SearchOptions {
   runtimeAccess?: RetrievalRuntimeAccess;
   /** 在线请求的供应商调用与 usage（用量）消费者；评估和索引构建不传。 */
   requestObserver?: ProviderRequestObserver;
+  /** 查询扩展改写目标资源时，由原始查询生产者安全重建结构化检索文本。 */
+  retargetQueryText?: (selectedResource: string) => string;
 }
 
-/** searchCorpusTraced 返回:命中 + 检索过程 trace(不含 question/mode/hint,由上层补) */
+/** 返回命中、检索 trace 和查询扩展确定的最终目标资源。 */
 export type SearchTrace = Pick<
   RetrievalTrace,
   | 'queryText'
@@ -271,6 +273,7 @@ export async function searchCorpusTraced(
 ): Promise<{
   hits: Array<{ chunk: Chunk; score: number }>;
   trace: SearchTrace;
+  targetResource: string | undefined;
 }> {
   const {
     boostResource,
@@ -281,6 +284,7 @@ export async function searchCorpusTraced(
     queryExpansion,
     runtimeAccess,
     requestObserver,
+    retargetQueryText,
   } = options;
   const t0 = performance.now();
   const prepared = await executeRetrievalStage('retrieval', () => {
@@ -290,11 +294,18 @@ export async function searchCorpusTraced(
       boostResource,
       expansionEnabled,
       expansionEnabled ? getCachedAliasRegistry() : undefined,
+      retargetQueryText,
     );
   });
   const effectiveQueryText = prepared.queryText;
   const effectiveBoostResource = prepared.boostResource;
-  const effectiveBoostPath = boostPath ?? prepared.boostPath;
+  const resourceChanged = effectiveBoostResource !== boostResource;
+  const effectiveBoostPath = resourceChanged
+    ? prepared.boostPath
+    : (boostPath ?? prepared.boostPath);
+  const effectiveBoostApiVersion = resourceChanged
+    ? undefined
+    : boostApiVersion;
   const index = await executeRetrievalStage('index', () => getCorpusIndex());
   const indexCache = getCorpusIndexCache();
   if (!indexCache) {
@@ -323,7 +334,13 @@ export async function searchCorpusTraced(
     latencyMs: { embed: embedMs, total: performance.now() - t0 },
     cache: { index: indexCache, embeddingHit: false },
   });
-  if (!queryEmbedding) return { hits: [], trace: emptyTrace() };
+  if (!queryEmbedding) {
+    return {
+      hits: [],
+      trace: emptyTrace(),
+      targetResource: effectiveBoostResource,
+    };
+  }
 
   const tDense = performance.now();
   const coarse = await executeRetrievalStage('retrieval', () =>
@@ -333,12 +350,18 @@ export async function searchCorpusTraced(
       coarseN,
       effectiveBoostResource,
       effectiveBoostPath,
-      boostApiVersion,
+      effectiveBoostApiVersion,
       boostDirectSchemaChildren,
     ),
   );
   const denseMs = performance.now() - tDense;
-  if (coarse.length === 0) return { hits: [], trace: emptyTrace() };
+  if (coarse.length === 0) {
+    return {
+      hits: [],
+      trace: emptyTrace(),
+      targetResource: effectiveBoostResource,
+    };
+  }
 
   const tRerank = performance.now();
   const matchedAliasPaths = [
@@ -346,7 +369,7 @@ export async function searchCorpusTraced(
   ];
   const rerankQuery =
     matchedAliasPaths.length > 0
-      ? `${queryText}\n\n字段路径: ${matchedAliasPaths.join(' ')}`
+      ? `${prepared.rerankQueryText}\n\n字段路径: ${matchedAliasPaths.join(' ')}`
       : effectiveQueryText;
   const rr = await executeRetrievalStage('rerank', () =>
     rerank(
@@ -370,6 +393,7 @@ export async function searchCorpusTraced(
 
   return {
     hits,
+    targetResource: effectiveBoostResource,
     trace: {
       queryText: effectiveQueryText,
       queryExpansion: prepared.trace,
