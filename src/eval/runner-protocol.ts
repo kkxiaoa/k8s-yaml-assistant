@@ -46,6 +46,11 @@ import {
   type SemanticRetrievalCase,
 } from './cases/retrieval-cases';
 import {
+  canonicalEvidenceGroups,
+  evaluateEvidenceRanking,
+  type EvidenceGroup,
+} from './cases/evidence-groups';
+import {
   assertTuningEligibleCase,
   parseEvalSuiteArgs,
   selectCasesForSuite,
@@ -53,7 +58,7 @@ import {
   type EvalSuite,
   type GovernedEvalCase,
 } from './cases/governance';
-import type { FaithTrace } from './faith-store';
+import type { FaithTrace, FaithTraceArtifact } from './faith-store';
 import {
   FAITH_JUDGE_ATTEMPT_LIMIT,
   JUDGE_MAX_TOKENS,
@@ -246,8 +251,9 @@ export interface EvalSuiteCaseSelection<T> {
   scope: EvalSuite;
 }
 
-export interface RetrievalCaseSelection
-  extends EvalSuiteCaseSelection<SemanticRetrievalCase> {
+export interface RetrievalCaseSelection {
+  cases: SemanticRetrievalCase[];
+  scope: EvalSuite | 'targeted';
   k: number;
 }
 
@@ -261,14 +267,16 @@ export interface JudgeCaseSelection {
 function selectTargetedCases<T extends GovernedEvalCase>(
   argv: readonly string[],
   cases: readonly T[],
-  kind: 'faith' | 'judge',
+  kind: 'retrieval' | 'faith' | 'judge',
 ): T[] | null {
   if (!argv.includes('--case')) return null;
 
   const usage =
-    kind === 'faith'
-      ? '用法: npm run eval:faith -- [--case <case-id>]...'
-      : '用法: npm run eval:judge -- [--case <case-id>]...';
+    kind === 'retrieval'
+      ? '用法: npm run eval -- [--case <case-id>]...'
+      : kind === 'faith'
+        ? '用法: npm run eval:faith -- [--case <case-id>]...'
+        : '用法: npm run eval:judge -- [--case <case-id>]...';
   const requestedIds = new Set<string>();
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] !== '--case') throw new Error(usage);
@@ -292,15 +300,24 @@ function selectTargetedCases<T extends GovernedEvalCase>(
 export interface RetrievalEvalTracePayload {
   trace: RetrievalTrace;
   expected: {
-    chunkIds: string[];
+    evidenceGroups: EvidenceGroup[];
     k: number;
   };
   ranking: {
     topKIds: string[];
-    foundIds: string[];
+    matches: Array<{
+      groupIndex: number;
+      chunkId: string;
+      rank: number;
+    }>;
     firstRelevantRank: number | null;
     recall: number;
     reciprocalRank: number;
+  };
+  attribution: {
+    coarseMissingGroupIndexes: number[];
+    postRerankMissingGroupIndexes: number[];
+    fullRecall: boolean;
   };
 }
 
@@ -349,7 +366,9 @@ function retrievalCaseSnapshot(evalCase: SemanticRetrievalCase): unknown {
   return {
     id: evalCase.id,
     question: evalCase.question,
-    expectedChunkIds: [...evalCase.expectedChunkIds].sort(),
+    expectedEvidenceGroups: canonicalEvidenceGroups(
+      evalCase.expectedEvidenceGroups,
+    ),
     target: evalCase.target,
     governance: evalCase.governance,
   };
@@ -371,7 +390,9 @@ function groundedAnswerCaseSnapshot(
             types: [...sourceExpectation.types].sort(),
           },
     question: resolved.question,
-    expectedChunkIds: [...resolved.expectedChunkIds].sort(),
+    expectedEvidenceGroups: canonicalEvidenceGroups(
+      resolved.expectedEvidenceGroups,
+    ),
     target: resolved.target ?? null,
     editorContext: resolved.editorContext ?? null,
     governance: resolved.governance,
@@ -391,7 +412,39 @@ function faithTraceCaseSnapshot(trace: FaithTrace): unknown {
             types: [...trace.sourceExpectation.types].sort(),
           },
     question: trace.question,
-    expectedChunkIds: [...trace.retrieval.expectedChunkIds].sort(),
+    expectedEvidenceGroups: canonicalEvidenceGroups(
+      trace.retrieval.expectedEvidenceGroups,
+    ),
+    target: trace.target ?? null,
+    editorContext: trace.editorContext ?? null,
+    governance: trace.governance,
+  };
+}
+
+function legacyFaithTraceCaseSnapshot(trace: FaithTrace): unknown {
+  const expectedChunkIds = trace.retrieval.expectedEvidenceGroups.map(
+    (group) => {
+      if (group.anyOfChunkIds.length !== 1) {
+        throw new TypeError(
+          'legacy faith payload requires one exact chunk ID per evidence group',
+        );
+      }
+      return group.anyOfChunkIds[0]!;
+    },
+  );
+  return {
+    id: trace.id,
+    input: trace.input,
+    expectedBehavior: trace.expectedBehavior,
+    sourceExpectation:
+      trace.sourceExpectation === undefined
+        ? null
+        : {
+            mode: trace.sourceExpectation.mode,
+            types: [...trace.sourceExpectation.types].sort(),
+          },
+    question: trace.question,
+    expectedChunkIds: expectedChunkIds.sort(),
     target: trace.target ?? null,
     editorContext: trace.editorContext ?? null,
     governance: trace.governance,
@@ -480,6 +533,22 @@ export function selectRetrievalCases(
   argv: readonly string[] = [],
   cases: readonly SemanticRetrievalCase[] = RETRIEVAL_CASES,
 ): RetrievalCaseSelection {
+  const targeted = selectTargetedCases(
+    argv,
+    cases,
+    'retrieval',
+  );
+  if (targeted !== null) {
+    for (const evalCase of targeted) {
+      assertTuningEligibleCase(evalCase, 'retrieval targeted selection');
+    }
+    return {
+      cases: targeted,
+      scope: 'targeted',
+      k: 3,
+    };
+  }
+
   const parsed = parseEvalSuiteArgs(argv);
   if (parsed.remainingArgs.length > 1) {
     throw new Error(
@@ -495,7 +564,6 @@ export function selectRetrievalCases(
   }
   return {
     cases: selectCasesForSuite(cases, parsed.suite),
-    suite: parsed.suite,
     scope: parsed.suite,
     k,
   };
@@ -643,6 +711,27 @@ export function faithTraceDatasetIdentity(
     'faith/grounded-answer-selection',
     traces,
     faithTraceCaseSnapshot,
+  );
+}
+
+export function faithTraceArtifactDatasetIdentity(
+  artifacts: readonly FaithTraceArtifact[],
+): EvalDatasetIdentity {
+  const revisions = new Set(
+    artifacts.map((artifact) => artifact.sourcePayloadRevision),
+  );
+  if (revisions.size > 1) {
+    throw new TypeError('mixed faith payload revisions in one run');
+  }
+  if (revisions.has(1)) {
+    return datasetIdentity(
+      'faith/grounded-answer-selection',
+      artifacts.map((artifact) => artifact.trace),
+      legacyFaithTraceCaseSnapshot,
+    );
+  }
+  return faithTraceDatasetIdentity(
+    artifacts.map((artifact) => artifact.trace),
   );
 }
 
@@ -812,25 +901,54 @@ export function fixEvalConfig(): FixEvalConfig {
 
 export function buildRetrievalEvalTracePayload(params: {
   trace: RetrievalTrace;
-  expectedChunkIds: readonly string[];
+  expectedEvidenceGroups: readonly EvidenceGroup[];
   rankedIds: readonly string[];
   k: number;
 }): RetrievalEvalTracePayload {
-  const { trace, expectedChunkIds, rankedIds, k } = params;
-  const topKIds = rankedIds.slice(0, k);
-  const foundIds = expectedChunkIds.filter((id) => topKIds.includes(id));
-  const firstIndex = rankedIds.findIndex((id) => expectedChunkIds.includes(id));
-  const firstRelevantRank = firstIndex < 0 ? null : firstIndex + 1;
+  const { trace, expectedEvidenceGroups, rankedIds, k } = params;
+  const ranking = evaluateEvidenceRanking(
+    expectedEvidenceGroups,
+    rankedIds,
+    k,
+  );
+  const coarseIds = trace.coarseHits.map((hit) => hit.id);
+  const coarseRanking = evaluateEvidenceRanking(
+    expectedEvidenceGroups,
+    coarseIds,
+    coarseIds.length,
+  );
+  const coarseMatchedGroups = new Set(
+    coarseRanking.matches.map((match) => match.groupIndex),
+  );
+  const finalMatchedGroups = new Set(
+    ranking.matches.map((match) => match.groupIndex),
+  );
+  const allGroupIndexes = expectedEvidenceGroups.map((_group, index) => index);
 
   return toPersistedPayload({
     trace,
-    expected: { chunkIds: [...expectedChunkIds], k },
+    expected: {
+      evidenceGroups: expectedEvidenceGroups.map((group) => ({
+        anyOfChunkIds: [...group.anyOfChunkIds],
+      })),
+      k,
+    },
     ranking: {
-      topKIds,
-      foundIds,
-      firstRelevantRank,
-      recall: foundIds.length / expectedChunkIds.length,
-      reciprocalRank: firstRelevantRank === null ? 0 : 1 / firstRelevantRank,
+      topKIds: ranking.topKIds,
+      matches: ranking.matches,
+      firstRelevantRank: ranking.firstRelevantRank,
+      recall: ranking.recall,
+      reciprocalRank: ranking.reciprocalRank,
+    },
+    attribution: {
+      coarseMissingGroupIndexes: allGroupIndexes.filter(
+        (index) => !coarseMatchedGroups.has(index),
+      ),
+      postRerankMissingGroupIndexes: allGroupIndexes.filter(
+        (index) =>
+          coarseMatchedGroups.has(index) && !finalMatchedGroups.has(index),
+      ),
+      fullRecall: ranking.fullRecall,
     },
   });
 }

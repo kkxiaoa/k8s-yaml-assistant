@@ -1,4 +1,4 @@
-// 对比 voyage-3 与 voyage-4 在 retrieval bad cases 和 policy conflict cases 上的 Recall/MRR。
+// 对比 voyage-3 与 voyage-4 在 retrieval bad cases 和 policy conflict cases 上的 Recall/MRR@3。
 // 前置:VOYAGE_EMBEDDING_MODEL=voyage-4 INDEX_DIR=data/index-ab npm run index:build
 // 用法:npm run voyage:ab
 
@@ -7,6 +7,11 @@ config({ override: true });
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RETRIEVAL_CASES } from '../src/eval/cases/retrieval-cases';
+import {
+  evaluateEvidenceRanking,
+  exactEvidenceGroups,
+  type EvidenceGroup,
+} from '../src/eval/cases/evidence-groups';
 import { buildCorpusManifest, CORPUS } from '../src/knowledge/corpus';
 import { embed } from '../src/retrieval/embeddings';
 import { readIndex } from '../src/retrieval/index-store';
@@ -17,13 +22,16 @@ import { denseSearch, type IndexedChunk } from '../src/retrieval/retrieve';
 interface ABCase {
   label: string;
   question: string;
-  expectedChunkIds: string[];
+  expectedEvidenceGroups: EvidenceGroup[];
 }
 
 interface BadCaseRow {
   id: string;
   input?: { question?: string };
-  expected?: { sourceIds?: string[] };
+  expected?: {
+    sourceIds?: string[];
+    sourceIdGroups?: EvidenceGroup[];
+  };
   failure?: { type?: string };
 }
 
@@ -54,12 +62,16 @@ function loadABCases(): ABCase[] {
       (row) =>
         row.failure?.type === 'retrieval_miss' &&
         row.input?.question &&
-        row.expected?.sourceIds?.length,
+        row.expected &&
+        ((row.expected.sourceIdGroups?.length ?? 0) > 0 ||
+          (row.expected.sourceIds?.length ?? 0) > 0),
     )
     .map((row) => ({
       label: row.id,
       question: row.input!.question!,
-      expectedChunkIds: row.expected!.sourceIds!,
+      expectedEvidenceGroups:
+        row.expected!.sourceIdGroups ??
+        exactEvidenceGroups(row.expected!.sourceIds!),
     }));
 
   const conflictCases = RETRIEVAL_CASES.filter(
@@ -67,16 +79,10 @@ function loadABCases(): ABCase[] {
   ).map((c) => ({
     label: c.id,
     question: c.question,
-    expectedChunkIds: c.expectedChunkIds,
+    expectedEvidenceGroups: c.expectedEvidenceGroups,
   }));
 
   return [...badCases, ...conflictCases];
-}
-
-function recallAt(ids: string[], expected: string[], k: number): number {
-  const topK = ids.slice(0, k);
-  const found = expected.filter((id) => topK.includes(id)).length;
-  return found / expected.length;
 }
 
 async function evaluateModel(
@@ -117,18 +123,27 @@ async function evaluateModel(
       coarse.length,
     );
     const rankedIds = rr.map((r) => coarse[r.index]!.chunk.id);
-    const firstIdx = rankedIds.findIndex((id) => ec.expectedChunkIds.includes(id));
+    const top3 = evaluateEvidenceRanking(
+      ec.expectedEvidenceGroups,
+      rankedIds,
+      3,
+    );
+    const top5 = evaluateEvidenceRanking(
+      ec.expectedEvidenceGroups,
+      rankedIds,
+      5,
+    );
     const result: CaseResult = {
       label: ec.label,
-      recall3: recallAt(rankedIds, ec.expectedChunkIds, 3),
-      recall5: recallAt(rankedIds, ec.expectedChunkIds, 5),
-      reciprocalRank: firstIdx >= 0 ? 1 / (firstIdx + 1) : 0,
+      recall3: top3.recall,
+      recall5: top5.recall,
+      reciprocalRank: top3.reciprocalRank,
       top5: rankedIds.slice(0, 5),
     };
     caseResults.push(result);
     console.error(
       `[${label}] ${result.recall3 === 1 ? '✓' : '✗'} ${ec.label} ` +
-        `R@3=${result.recall3.toFixed(2)} R@5=${result.recall5.toFixed(2)} MRR=${result.reciprocalRank.toFixed(3)}`,
+        `R@3=${result.recall3.toFixed(2)} R@5=${result.recall5.toFixed(2)} MRR@3=${result.reciprocalRank.toFixed(3)}`,
     );
   }
 
@@ -149,10 +164,10 @@ function printDiff(v3: ModelResult, v4: ModelResult): void {
 
   console.error('\n━━━━━━ A/B 汇总 ━━━━━━');
   console.error(
-    `voyage-3: R@3 ${(v3.recall3 * 100).toFixed(1)}% | R@5 ${(v3.recall5 * 100).toFixed(1)}% | MRR ${v3.mrr.toFixed(3)}`,
+    `voyage-3: R@3 ${(v3.recall3 * 100).toFixed(1)}% | R@5 ${(v3.recall5 * 100).toFixed(1)}% | MRR@3 ${v3.mrr.toFixed(3)}`,
   );
   console.error(
-    `voyage-4: R@3 ${(v4.recall3 * 100).toFixed(1)}% | R@5 ${(v4.recall5 * 100).toFixed(1)}% | MRR ${v4.mrr.toFixed(3)}`,
+    `voyage-4: R@3 ${(v4.recall3 * 100).toFixed(1)}% | R@5 ${(v4.recall5 * 100).toFixed(1)}% | MRR@3 ${v4.mrr.toFixed(3)}`,
   );
   console.error(`voyage-4 新命中(R@3): ${gained.join(', ') || '无'}`);
   console.error(`voyage-4 回退(R@3): ${lost.join(', ') || '无'}`);

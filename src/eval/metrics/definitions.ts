@@ -164,20 +164,26 @@ function average(
 }
 
 const retrievalDefinitions: MetricDefinition[] = [
-  ratio(
-    'retrieval.semantic.recall',
-    'retrieval',
-    'higher_is_better',
-    'completed_semantic_retrieval_cases',
-    'required',
-  ),
-  ratio(
-    'retrieval.semantic.mrr',
-    'retrieval',
-    'higher_is_better',
-    'completed_semantic_retrieval_cases',
-    'required',
-  ),
+  {
+    ...ratio(
+      'retrieval.semantic.recall',
+      'retrieval',
+      'higher_is_better',
+      'completed_semantic_retrieval_cases',
+      'required',
+    ),
+    revision: 2,
+  },
+  {
+    ...ratio(
+      'retrieval.semantic.mrr',
+      'retrieval',
+      'higher_is_better',
+      'completed_semantic_retrieval_cases',
+      'required',
+    ),
+    revision: 3,
+  },
   count(
     'retrieval.semantic.case_count',
     'retrieval',

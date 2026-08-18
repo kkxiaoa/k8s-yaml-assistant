@@ -23,8 +23,10 @@
 | 限制范围 | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/policy/limit-range.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 | ConfigMap | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/configuration/configmap.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 | Deployment | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/workloads/controllers/deployment.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| HorizontalPodAutoscaler | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 | StatefulSet | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/workloads/controllers/statefulset.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 | 容器镜像 | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/containers/images.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
+| Pod 卷 | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/storage/volumes.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 | StorageClass | `kubernetes/website@7eae8915497224dd9ba4803a8ebd0efec33b303b` | `content/zh-cn/docs/concepts/storage/storage-classes.md` | [CC-BY-4.0](https://github.com/kubernetes/website/blob/7eae8915497224dd9ba4803a8ebd0efec33b303b/LICENSE) |
 
 版权所有者为 Kubernetes 文档贡献者。仓库保存字节一致的上游简体中文 Markdown（标记语言）文件；运行时删除上游为翻译维护保留的英文 HTML（超文本标记语言）注释，只提取 manifest（清单）明确选择的中文章节，添加规范化标题、来源锚点和适用目标。未选择的配置示例不会进入 `docs` 知识源。

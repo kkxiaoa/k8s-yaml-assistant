@@ -8,11 +8,13 @@
 
 - ResourceQuota 的基础设施资源配额；
 - LimitRange 的资源限制、默认请求与准入语义；
-- ConfigMap 的不可变更语义；
+- ConfigMap 的 Pod 卷引用与不可变更语义；
 - Deployment 选择算符与 Pod 模板标签约束；
+- HorizontalPodAutoscaler 的扩缩目标关系；
 - StatefulSet 卷申领模板及每个 Pod 的稳定存储关系；
 - Pod 镜像拉取策略及默认规则；
-- StorageClass 的卷绑定模式、调度时机与拓扑约束。
+- Pod 引用 PersistentVolumeClaim 与 Secret 作为卷的语义；
+- StorageClass 的卷绑定模式、调度时机、拓扑约束及 PVC 扩容关系。
 
 上游原文中的其他章节和代码样例不会自动进入 `docs` 语料；完整 YAML 示例由 `data/knowledge/kubernetes-examples/` 的独立数据提供器维护。
 

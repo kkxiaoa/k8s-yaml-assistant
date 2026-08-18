@@ -79,7 +79,7 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
     snapshot.version,
     '7eae8915497224dd9ba4803a8ebd0efec33b303b',
   );
-  assert.equal(snapshot.chunks.length, 8);
+  assert.equal(snapshot.chunks.length, 13);
 
   const chunk = snapshot.chunks[0]!;
   assert.deepEqual(decodeKnowledgeChunk(chunk), chunk);
@@ -125,8 +125,14 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
   const configMap = chunksById.get(
     'docs::kubernetes::configmap::configmap-immutable',
   );
+  const configMapPodVolume = chunksById.get(
+    'docs::kubernetes::volumes::config-map',
+  );
   const deployment = chunksById.get(
     'docs::kubernetes::deployment::selector',
+  );
+  const horizontalPodAutoscaler = chunksById.get(
+    'docs::kubernetes::horizontal-pod-autoscale::scale-target',
   );
   const statefulSetVolumeClaimTemplates = chunksById.get(
     'docs::kubernetes::statefulset::volume-claim-templates',
@@ -140,15 +146,31 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
   const storageClass = chunksById.get(
     'docs::kubernetes::storage-classes::volume-binding-mode',
   );
+  const volumeExpansion = chunksById.get(
+    'docs::kubernetes::storage-classes::volume-expansion',
+  );
+  const podPersistentVolumeClaim = chunksById.get(
+    'docs::kubernetes::volumes::persistent-volume-claim',
+  );
+  const podSecret = chunksById.get('docs::kubernetes::volumes::secret');
   assert.ok(limitRange);
   assert.ok(configMap);
+  assert.ok(configMapPodVolume);
   assert.ok(deployment);
+  assert.ok(horizontalPodAutoscaler);
   assert.ok(statefulSetVolumeClaimTemplates);
   assert.ok(statefulSetStableStorage);
   assert.ok(images);
   assert.ok(storageClass);
+  assert.ok(volumeExpansion);
+  assert.ok(podPersistentVolumeClaim);
+  assert.ok(podSecret);
   assert.match(limitRange.text, /设置默认请求值与限制值/u);
   assert.match(configMap.text, /将 `immutable` 字段设置为 `true`/u);
+  assert.match(configMapPodVolume.text, /被 `configMap` 类型的卷引用/u);
+  assert.deepEqual(configMapPodVolume.targets, [
+    { apiVersion: 'v1', kind: 'Pod', path: 'spec.volumes.configMap' },
+  ]);
   assert.match(
     deployment.text,
     /`\.spec\.selector` 必须匹配 `\.spec\.template\.metadata\.labels`/u,
@@ -201,6 +223,19 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
   );
   assert.match(images.text, /`IfNotPresent`/u);
   assert.match(images.text, /默认镜像拉取策略/u);
+  assert.match(
+    horizontalPodAutoscaler.text,
+    /由 `scaleTargetRef` 定义的目标资源/u,
+  );
+  assert.match(horizontalPodAutoscaler.text, /Deployment 及其 ReplicaSet/u);
+  assert.doesNotMatch(horizontalPodAutoscaler.text, /mermaid|classDef/u);
+  assert.deepEqual(horizontalPodAutoscaler.targets, [
+    {
+      apiVersion: 'autoscaling/v2',
+      kind: 'HorizontalPodAutoscaler',
+      path: 'spec.scaleTargetRef',
+    },
+  ]);
   assert.deepEqual(storageClass.targets, [
     {
       apiVersion: 'storage.k8s.io/v1',
@@ -221,6 +256,35 @@ test('官方文档数据提供器只生成清单选中的简体中文章节', ()
   );
   assert.doesNotMatch(storageClass.text, /\]\(#local\)/u);
   assert.doesNotMatch(storageClass.text, /\{\{% code_sample/u);
+  assert.match(volumeExpansion.text, /编辑相应的 PVC 对象/u);
+  assert.match(volumeExpansion.text, /`allowVolumeExpansion` 字段设置为 true/u);
+  assert.deepEqual(volumeExpansion.targets, [
+    {
+      apiVersion: 'storage.k8s.io/v1',
+      kind: 'StorageClass',
+      path: 'allowVolumeExpansion',
+    },
+    {
+      apiVersion: 'v1',
+      kind: 'PersistentVolumeClaim',
+      path: 'spec.resources.requests',
+    },
+  ]);
+  assert.match(
+    podPersistentVolumeClaim.text,
+    /`persistentVolumeClaim` 卷用来将/u,
+  );
+  assert.match(podSecret.text, /`secret` 卷用来给 Pod 传递敏感信息/u);
+  assert.deepEqual(podPersistentVolumeClaim.targets, [
+    {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      path: 'spec.volumes.persistentVolumeClaim',
+    },
+  ]);
+  assert.deepEqual(podSecret.targets, [
+    { apiVersion: 'v1', kind: 'Pod', path: 'spec.volumes.secret' },
+  ]);
   assert.doesNotMatch(configMap.text, /\{\{< feature-state/u);
   assert.doesNotMatch(deployment.text, /\{\{< \/?note/u);
   assert.doesNotMatch(images.text, /\{\{< \/?note/u);
@@ -281,6 +345,29 @@ test('官方文档数据提供器在清单标题偏离快照时失败', () => {
   );
 });
 
+test('官方文档数据提供器解析上游未显式声明的 ASCII 标题锚点', () => {
+  const markdown = ['### persistentVolumeClaim', '', '中文章节正文。'].join(
+    '\n',
+  );
+  withMarkdownFixture(
+    markdown,
+    (manifest) => {
+      const section = manifest.documents[0]!.sections[0]!;
+      section.heading = 'persistentVolumeClaim';
+      section.anchor = 'persistentvolumeclaim';
+    },
+    (temporary) => {
+      const [chunk] = loadKubernetesDocsProviderSnapshot(temporary).chunks;
+      assert.ok(chunk);
+      assert.equal(chunk.text, '中文章节正文。');
+      assert.match(
+        chunk.provenance.sourceUri ?? '',
+        /#persistentvolumeclaim$/u,
+      );
+    },
+  );
+});
+
 test('官方文档数据提供器忽略代码围栏内的伪标题并停在下一同级章节', () => {
   const markdown = [
     '## 目标章节 {#target-section}',
@@ -293,6 +380,11 @@ test('官方文档数据提供器忽略代码围栏内的伪标题并停在下�
     '```',
     '',
     '仍属于目标章节。',
+    '',
+    '{{< mermaid >}}',
+    'graph LR',
+    'a --> b',
+    '{{< /mermaid >}}',
     '',
     '## 下一章节 {#next-section}',
     '',
@@ -311,6 +403,7 @@ test('官方文档数据提供器忽略代码围栏内的伪标题并停在下�
       assert.ok(chunk);
       assert.match(chunk.text, /围栏内的伪标题/u);
       assert.match(chunk.text, /仍属于目标章节/u);
+      assert.doesNotMatch(chunk.text, /graph LR|a --> b|mermaid/u);
       assert.doesNotMatch(chunk.text, /不得进入目标 chunk/u);
     },
   );

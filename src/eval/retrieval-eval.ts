@@ -2,6 +2,7 @@
 //       npm run eval -- 5                  (tuning, k=5)
 //       npm run eval -- --holdout          (holdout, k=3)
 //       npm run eval -- 5 --full           (full, k=5)
+//       npm run eval -- --case <id> [--case <id> ...]
 
 import { config } from 'dotenv';
 import { CORPUS } from '../knowledge/corpus';
@@ -12,7 +13,7 @@ import { toTraceHit, type RetrievalTrace } from '../retrieval/trace';
 import { retrievalMiss, upsertBadCases, type BadCase } from './bad-cases';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
 import type { TraceEnvelope } from './protocol';
-import type { EvalSuite } from './cases/governance';
+import type { EvalScope } from './protocol';
 import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
 import {
   buildGovernanceReport,
@@ -104,7 +105,7 @@ function retrievalGovernanceMetrics(
 async function evaluateSemanticSearch(params: {
   cases: readonly SemanticRetrievalCase[];
   k: number;
-  scope: EvalSuite;
+  scope: EvalScope;
   runId: string;
   session: EvalRunSession;
 }): Promise<SemanticResult> {
@@ -114,7 +115,10 @@ async function evaluateSemanticSearch(params: {
     evaluate: async (evalCase): Promise<SemanticCaseResult> => {
       const routed = inferResource(evalCase.question) ?? undefined;
       const errorPayload = {
-        expected: { chunkIds: evalCase.expectedChunkIds, k },
+        expected: {
+          evidenceGroups: evalCase.expectedEvidenceGroups,
+          k,
+        },
       };
       let ranked: Awaited<ReturnType<typeof searchCorpusTraced>>['hits'];
       let trace: Awaited<ReturnType<typeof searchCorpusTraced>>['trace'];
@@ -147,7 +151,7 @@ async function evaluateSemanticSearch(params: {
           }) satisfies RetrievalTrace;
           const payload = buildRetrievalEvalTracePayload({
             trace: retrievalTrace,
-            expectedChunkIds: evalCase.expectedChunkIds,
+            expectedEvidenceGroups: evalCase.expectedEvidenceGroups,
             rankedIds,
             k,
           });
@@ -174,7 +178,10 @@ async function evaluateSemanticSearch(params: {
           kind: 'retrieval',
           payload:
             failure.payload ?? {
-              expected: { chunkIds: evalCase.expectedChunkIds, k },
+              expected: {
+                evidenceGroups: evalCase.expectedEvidenceGroups,
+                k,
+              },
             },
           stage: failure.stage,
           error: failure.originalError,
@@ -193,8 +200,9 @@ async function evaluateSemanticSearch(params: {
         traceId: value.envelope.traceId,
         question: value.evalCase.question,
         resource: value.evalCase.target.kind,
-        expectedChunkIds: value.evalCase.expectedChunkIds,
+        expectedEvidenceGroups: value.evalCase.expectedEvidenceGroups,
         actualTopIds: value.payload.ranking.topKIds,
+        coarseIds: value.payload.trace.coarseHits.map((hit) => hit.id),
         rankedIds: value.rankedIds,
         k,
         scope,

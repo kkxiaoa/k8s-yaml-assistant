@@ -13,6 +13,7 @@ import {
   type MetricVerdict,
 } from '../src/eval/metrics/compare';
 import {
+  METRIC_DEFINITION_VERSION,
   metricDefinitionsForKind,
   type MetricDefinition,
 } from '../src/eval/metrics/definitions';
@@ -88,9 +89,11 @@ function main(): void {
     return;
   }
   const runId = args[0];
-  const current = runId ? readRun(runId) : latestRun();
+  const current = runId
+    ? readRun(runId)
+    : latestRun({ metricDefinitionVersion: METRIC_DEFINITION_VERSION });
   if (!current) {
-    console.error('没有可对比的 run。先执行对应 eval。');
+    console.error('没有符合当前指标契约的 run。先执行对应 eval。');
     process.exitCode = 1;
     return;
   }

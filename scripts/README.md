@@ -19,16 +19,18 @@
 
 | 入口 | 写盘 | 边界 |
 | --- | --- | --- |
-| `npm run eval:compare -- <runId>` | 无 | 只比较兼容运行和基线 |
+| `npm run eval:compare [-- <runId>]` | 无 | 默认选择当前指标契约的最新运行；显式 ID 可诊断旧运行与基线的兼容性 |
 | `npm run eval:promote -- <runId>` | `data/eval/baselines/<kind>.json` | 仅接受完整、已审核且通过晋升门禁的运行 |
 | `npm run badcases:faith -- <runId> [--case <evalCaseId> ...] [--write]` | 默认不写；可按人工审核后的 Case（用例）选择，显式 `--write` 更新问题台账 | Holdout（留出集）轨迹不能回灌 |
-| `npm run build:calibration` | `data/eval/judge-calibration.jsonl` | 从人工标签物化校准快照 |
+| `npm run build:calibration` | `data/eval/judge-calibration.jsonl` | 只从人工标签明确引用的 Faith（忠实度）运行物化校准快照 |
 | `npm run aliases:review -- <draft> [--apply]` | 默认只预览；显式 `--apply` 更新正式别名 | 草稿必须完整审核且可追溯 |
 
 `npm run eval`、`npm run eval:faith`、`npm run eval:judge`、`npm run eval:gen`、`npm run eval:fix`、`npm run aliases:generate`、`npm run aliases:ab` 和 `npm run voyage:ab` 会访问外部模型或检索供应商。运行前必须核对输入范围、索引身份和费用预算。
 
 Faith（忠实度评估）定向复测使用重复的 `--case <case-id>`，只接受非 Holdout（非留出集）用例并记录 `targeted`（定向）范围；不得把定向运行晋升为 baseline（基线）。
 Faith 每条用例只执行一次回答请求；空文本或请求失败会显式记录为该用例的评估框架错误，不隐式重跑整条用例。有效回答再执行最多两次 Judge（裁判）尝试，并在首个有效结果后停止。
+
+Retrieval（检索）定向复测同样使用重复的 `--case <case-id>`，固定 `k=3` 且只接受非 Holdout（非留出集）用例；Recall@k（前 k 召回率）与 MRR@k（前 k 平均倒数排名）使用相同的前 `k` 截断。定向运行不得直接晋升 baseline（基线）。
 
 ## 数据与发布工具
 

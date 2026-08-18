@@ -27,10 +27,12 @@ import {
   type GroundedAnswerCase,
 } from './cases/grounded-answer-cases';
 import type { SemanticRetrievalCase } from './cases/retrieval-cases';
+import { exactEvidenceGroups } from './cases/evidence-groups';
 import {
   assessFaith,
   currentFaithOutcome,
   decodeFaithTrace,
+  FAITH_TRACE_PAYLOAD_REVISION,
   type FaithOutcome,
   type FaithTrace,
 } from './faith-store';
@@ -128,7 +130,7 @@ const MINI_RETRIEVAL_CASES: SemanticRetrievalCase[] = [
       role: 'development',
     },
     question: '问题 A',
-    expectedChunkIds: ['Chunk::a'],
+    expectedEvidenceGroups: exactEvidenceGroups(['Chunk::a']),
     target: { kind: 'Pod' },
   },
   {
@@ -139,7 +141,7 @@ const MINI_RETRIEVAL_CASES: SemanticRetrievalCase[] = [
       role: 'development',
     },
     question: '问题 B',
-    expectedChunkIds: ['Chunk::b'],
+    expectedEvidenceGroups: exactEvidenceGroups(['Chunk::b']),
     target: { kind: 'Deployment' },
   },
 ];
@@ -210,23 +212,27 @@ function verdict(
 function inputTrace(id: 'case-a' | 'case-b'): FaithTrace {
   const evalCase = MINI_GROUNDED_CASES.find((item) => item.id === id)!;
   const resolved = resolveGroundedAnswerCase(evalCase, MINI_RETRIEVAL_CASES);
+  const expectedChunkId =
+    resolved.expectedEvidenceGroups[0]?.anyOfChunkIds[0];
+  assert.ok(expectedChunkId);
   return {
+    payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
     id: evalCase.id,
     governance: resolved.governance,
     input: evalCase.input,
     question: resolved.question,
     expectedBehavior: evalCase.expectedBehavior,
     target: resolved.target,
-    context: contextSnapshot(resolved.expectedChunkIds[0]!),
+    context: contextSnapshot(expectedChunkId),
     retrieval: {
-      expectedChunkIds: resolved.expectedChunkIds,
-      topIds: resolved.expectedChunkIds,
-      foundCount: resolved.expectedChunkIds.length,
+      expectedEvidenceGroups: resolved.expectedEvidenceGroups,
+      topIds: [expectedChunkId],
+      satisfiedGroupCount: resolved.expectedEvidenceGroups.length,
       fullRecall: true,
       queryExpansionConfig: QUERY_EXPANSION_CONFIG,
       searchTrace: searchTrace(
         resolved.question,
-        resolved.expectedChunkIds[0]!,
+        expectedChunkId,
       ),
     },
     answer: 'answer',
@@ -313,10 +319,11 @@ function trace(
           outcome === 'passed',
           isRefusal ? 'refusal' : 'answer',
         );
-  const expectedChunkIds = isRefusal
+  const expectedEvidenceGroups = isRefusal
     ? []
-    : ['schema::v1::Pod::spec.containers.name'];
+    : exactEvidenceGroups(['schema::v1::Pod::spec.containers.name']);
   return {
+    payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
     id: 'case-1',
     input: isRefusal
       ? { kind: 'standalone_question', question: '这个字段怎么用?' }
@@ -326,10 +333,10 @@ function trace(
     ...(isRefusal ? {} : { target: { kind: 'Pod' } }),
     context: contextSnapshot('schema::v1::Pod::spec.containers.name'),
     retrieval: {
-      expectedChunkIds,
+      expectedEvidenceGroups,
       topIds: ['schema::v1::Pod::spec.containers.name'],
-      foundCount: expectedChunkIds.length,
-      fullRecall: expectedChunkIds.length > 0,
+      satisfiedGroupCount: expectedEvidenceGroups.length,
+      fullRecall: expectedEvidenceGroups.length > 0,
       queryExpansionConfig: QUERY_EXPANSION_CONFIG,
       searchTrace: searchTrace(
         '这个字段怎么用?',
@@ -993,8 +1000,10 @@ check('reports retrieval-incomplete evidence independently from unsupported clai
   const incomplete = trace('failed', {
     retrieval: {
       ...trace('failed').retrieval,
-      expectedChunkIds: ['schema::v1::Pod::spec.containers.image'],
-      foundCount: 0,
+      expectedEvidenceGroups: exactEvidenceGroups([
+        'schema::v1::Pod::spec.containers.image',
+      ]),
+      satisfiedGroupCount: 0,
       fullRecall: false,
     },
   });

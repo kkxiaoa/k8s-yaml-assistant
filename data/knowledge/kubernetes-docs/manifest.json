@@ -3,7 +3,7 @@
   "providerId": "docs.kubernetes-official",
   "sourceType": "docs",
   "version": "7eae8915497224dd9ba4803a8ebd0efec33b303b",
-  "capturedAt": "2026-08-11T10:04:40.000Z",
+  "capturedAt": "2026-08-16T11:19:03.000Z",
   "upstreamRepository": "https://github.com/kubernetes/website",
   "license": {
     "spdxId": "CC-BY-4.0",
@@ -76,6 +76,28 @@
               "apiVersion": "v1",
               "kind": "ConfigMap",
               "path": "immutable"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "horizontal-pod-autoscale",
+      "snapshot": "horizontal-pod-autoscale.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale.md",
+      "upstreamBlobSha1": "a72f633e2360fdb8b3e0849195972ad6b9635dc8",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/",
+      "sections": [
+        {
+          "id": "scale-target",
+          "heading": "HorizontalPodAutoscaler 是如何工作的？",
+          "anchor": "how-does-a-horizontalpodautoscaler-work",
+          "title": "HorizontalPodAutoscaler · spec.scaleTargetRef · 指定扩缩目标",
+          "targets": [
+            {
+              "apiVersion": "autoscaling/v2",
+              "kind": "HorizontalPodAutoscaler",
+              "path": "spec.scaleTargetRef"
             }
           ]
         }
@@ -171,6 +193,54 @@
       ]
     },
     {
+      "id": "volumes",
+      "snapshot": "volumes.md",
+      "upstreamPath": "content/zh-cn/docs/concepts/storage/volumes.md",
+      "upstreamBlobSha1": "eeafca5f1219838818a1af4ac4d19fecb8ca0537",
+      "sourceUri": "https://kubernetes.io/zh-cn/docs/concepts/storage/volumes/",
+      "sections": [
+        {
+          "id": "config-map",
+          "heading": "configMap",
+          "anchor": "configmap",
+          "title": "Pod · spec.volumes.configMap · 使用 ConfigMap 卷",
+          "targets": [
+            {
+              "apiVersion": "v1",
+              "kind": "Pod",
+              "path": "spec.volumes.configMap"
+            }
+          ]
+        },
+        {
+          "id": "persistent-volume-claim",
+          "heading": "persistentVolumeClaim",
+          "anchor": "persistentvolumeclaim",
+          "title": "Pod · spec.volumes.persistentVolumeClaim · 引用 PVC 卷",
+          "targets": [
+            {
+              "apiVersion": "v1",
+              "kind": "Pod",
+              "path": "spec.volumes.persistentVolumeClaim"
+            }
+          ]
+        },
+        {
+          "id": "secret",
+          "heading": "secret",
+          "anchor": "secret",
+          "title": "Pod · spec.volumes.secret · 使用 Secret 卷",
+          "targets": [
+            {
+              "apiVersion": "v1",
+              "kind": "Pod",
+              "path": "spec.volumes.secret"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "storage-classes",
       "snapshot": "storage-classes.md",
       "upstreamPath": "content/zh-cn/docs/concepts/storage/storage-classes.md",
@@ -187,6 +257,24 @@
               "apiVersion": "storage.k8s.io/v1",
               "kind": "StorageClass",
               "path": "volumeBindingMode"
+            }
+          ]
+        },
+        {
+          "id": "volume-expansion",
+          "heading": "卷扩展",
+          "anchor": "allow-volume-expansion",
+          "title": "PersistentVolumeClaim / StorageClass · 卷扩展所需字段",
+          "targets": [
+            {
+              "apiVersion": "v1",
+              "kind": "PersistentVolumeClaim",
+              "path": "spec.resources.requests"
+            },
+            {
+              "apiVersion": "storage.k8s.io/v1",
+              "kind": "StorageClass",
+              "path": "allowVolumeExpansion"
             }
           ]
         }

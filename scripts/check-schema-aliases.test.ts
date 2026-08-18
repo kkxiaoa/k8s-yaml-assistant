@@ -38,7 +38,7 @@ const holdoutCase: SemanticRetrievalCase = {
     role: 'holdout',
   },
   question: 'holdout question',
-  expectedChunkIds: ['Chunk::holdout'],
+  expectedEvidenceGroups: [{ anyOfChunkIds: ['Chunk::holdout'] }],
   target: { kind: 'Pod' },
 };
 assert.throws(

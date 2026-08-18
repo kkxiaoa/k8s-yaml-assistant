@@ -29,6 +29,7 @@ import {
   type BadCase,
   type BadCaseTracking,
 } from './bad-cases';
+import { exactEvidenceGroups } from './cases/evidence-groups';
 import {
   EVAL_SCHEMA_VERSION,
   metricObservation,
@@ -180,8 +181,9 @@ function withTempDir(fn: (directory: string) => void): void {
     traceId: 'trace-a',
     question: 'Pod 用哪个字段挂载卷来源?',
     resource: 'Pod',
-    expectedChunkIds: ['schema::v1::Pod::spec.volumes'],
+    expectedEvidenceGroups: exactEvidenceGroups(['schema::v1::Pod::spec.volumes']),
     actualTopIds: ['schema::v1::Pod::spec.volumes.projected.sources'],
+    coarseIds: ['schema::v1::Pod::spec.volumes.projected.sources'],
     rankedIds: ['schema::v1::Pod::spec.volumes.projected.sources'],
     k: 3,
     scope: 'tuning',
@@ -217,8 +219,9 @@ function withTempDir(fn: (directory: string) => void): void {
         traceId: 'trace-a',
         question: 'Pod 用哪个字段挂载卷来源?',
         resource: 'Pod',
-        expectedChunkIds: ['schema::v1::Pod::spec.volumes'],
+        expectedEvidenceGroups: exactEvidenceGroups(['schema::v1::Pod::spec.volumes']),
         actualTopIds: [],
+        coarseIds: [],
         rankedIds: [],
         k: 3,
         scope: 'tuning',
@@ -236,8 +239,9 @@ function withTempDir(fn: (directory: string) => void): void {
         traceId: 'trace-a',
         question: 'Pod 用哪个字段挂载卷来源?',
         resource: 'Pod',
-        expectedChunkIds: ['schema::v1::Pod::spec.volumes'],
+        expectedEvidenceGroups: exactEvidenceGroups(['schema::v1::Pod::spec.volumes']),
         actualTopIds: [],
+        coarseIds: [],
         rankedIds: [],
         k: 3,
         scope: 'tuning',
@@ -253,11 +257,12 @@ function withTempDir(fn: (directory: string) => void): void {
     traceId: 'trace-a',
     question: 'Endpoints 用哪个字段声明后端地址和端口?',
     resource: 'Endpoints',
-    expectedChunkIds: [
+    expectedEvidenceGroups: exactEvidenceGroups([
       'schema::v1::Endpoints::subsets.addresses',
       'schema::v1::Endpoints::subsets.ports',
-    ],
+    ]),
     actualTopIds: ['schema::v1::Endpoints::subsets.ports', 'schema::v1::Endpoints::subsets.ports.port'],
+    coarseIds: ['schema::v1::Endpoints::subsets.ports', 'schema::v1::Endpoints::subsets.ports.port'],
     rankedIds: ['schema::v1::Endpoints::subsets.ports', 'schema::v1::Endpoints::subsets.ports.port'],
     k: 3,
     scope: 'tuning',
@@ -266,9 +271,9 @@ function withTempDir(fn: (directory: string) => void): void {
   assert.equal(miss.failure.layer, 'retrieval');
   assert.match(
     miss.failure.note ?? '',
-    /未进候选: schema::v1::Endpoints::subsets.addresses/,
+    /未进候选: \{schema::v1::Endpoints::subsets.addresses\}/,
   );
-  assert.match(miss.failure.note ?? '', /top-3 命中 1\/2/);
+  assert.match(miss.failure.note ?? '', /top-3 满足 1\/2 个证据组/);
 }
 
 {
@@ -278,8 +283,14 @@ function withTempDir(fn: (directory: string) => void): void {
     traceId: 'trace-a',
     question: 'PVC 怎么申请存储大小?',
     resource: 'PersistentVolumeClaim',
-    expectedChunkIds: ['schema::v1::PersistentVolumeClaim::spec.resources.requests'],
+    expectedEvidenceGroups: exactEvidenceGroups(['schema::v1::PersistentVolumeClaim::spec.resources.requests']),
     actualTopIds: ['schema::v1::PersistentVolumeClaim::status.allocatedResources'],
+    coarseIds: [
+      'schema::v1::PersistentVolumeClaim::status.allocatedResources',
+      'schema::v1::PersistentVolumeClaim::status.allocatedResourceStatuses',
+      'schema::v1::PersistentVolume::spec.capacity',
+      'schema::v1::PersistentVolumeClaim::spec.resources.requests',
+    ],
     rankedIds: [
       'schema::v1::PersistentVolumeClaim::status.allocatedResources',
       'schema::v1::PersistentVolumeClaim::status.allocatedResourceStatuses',
@@ -294,7 +305,7 @@ function withTempDir(fn: (directory: string) => void): void {
   assert.equal(miss.failure.type, 'rerank_miss');
   assert.match(
     miss.failure.note ?? '',
-    /候选中但排在 top-3 外: schema::v1::PersistentVolumeClaim::spec.resources.requests\(rank=4\)/,
+    /候选中但排在 top-3 外: \{schema::v1::PersistentVolumeClaim::spec.resources.requests\}\(rank=4\)/,
   );
 }
 
@@ -611,8 +622,9 @@ function withTempDir(fn: (directory: string) => void): void {
       traceId: envelope.traceId,
       question: 'question',
       resource: 'Pod',
-      expectedChunkIds: ['Chunk::expected'],
+      expectedEvidenceGroups: exactEvidenceGroups(['Chunk::expected']),
       actualTopIds: ['Chunk::actual'],
+      coarseIds: ['Chunk::actual'],
       rankedIds: ['Chunk::actual'],
       k: 1,
       scope: 'tuning',
@@ -651,8 +663,9 @@ function withTempDir(fn: (directory: string) => void): void {
       traceId: envelope.traceId,
       question: 'holdout question',
       resource: 'Pod',
-      expectedChunkIds: ['Chunk::expected'],
+      expectedEvidenceGroups: exactEvidenceGroups(['Chunk::expected']),
       actualTopIds: [],
+      coarseIds: [],
       rankedIds: [],
       k: 3,
       scope: 'full',

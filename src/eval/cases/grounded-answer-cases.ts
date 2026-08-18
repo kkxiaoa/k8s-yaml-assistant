@@ -15,6 +15,10 @@ import {
   type SemanticRetrievalCase,
 } from "./retrieval-cases";
 import {
+  exactEvidenceGroups,
+  type EvidenceGroup,
+} from "./evidence-groups";
+import {
   governanceSchemaForCaseFamily,
   type EvalCaseGovernance,
 } from "./governance";
@@ -298,7 +302,7 @@ export interface ResolvedGroundedAnswerCase {
   expectedBehavior: GroundedAnswerCase["expectedBehavior"];
   sourceExpectation?: SourceExpectation;
   question: string;
-  expectedChunkIds: string[];
+  expectedEvidenceGroups: EvidenceGroup[];
   target?: SemanticRetrievalCase["target"] | ResourceIdentity;
   editorContext?: {
     yaml: string;
@@ -317,7 +321,7 @@ export function resolveGroundedAnswerCase(
     return {
       ...evalCase,
       question: evalCase.input.question,
-      expectedChunkIds: [],
+      expectedEvidenceGroups: [],
     };
   }
   if (isValidationErrorGroundedAnswerCase(evalCase)) {
@@ -333,7 +337,9 @@ export function resolveGroundedAnswerCase(
     return {
       ...evalCase,
       question: evalCase.input.question,
-      expectedChunkIds: [...evalCase.input.expectedChunkIds],
+      expectedEvidenceGroups: exactEvidenceGroups(
+        evalCase.input.expectedChunkIds,
+      ),
       target: fixCase.target,
       editorContext: {
         yaml: fixCase.brokenYaml,
@@ -357,7 +363,7 @@ export function resolveGroundedAnswerCase(
     ...evalCase,
     governance: retrievalCase.governance,
     question: retrievalCase.question,
-    expectedChunkIds: retrievalCase.expectedChunkIds,
+    expectedEvidenceGroups: retrievalCase.expectedEvidenceGroups,
     target: retrievalCase.target,
   };
 }
@@ -782,7 +788,7 @@ export const GROUNDED_ANSWER_CASES = decodeGroundedAnswerCases([
     expectedBehavior: ANSWER_WITH_SOURCES,
     sourceExpectation: {
       mode: "required",
-      types: ["schema", "example"],
+      types: ["example"],
     },
   },
   {

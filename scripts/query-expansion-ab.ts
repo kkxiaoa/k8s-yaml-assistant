@@ -10,6 +10,10 @@ import {
   type SemanticRetrievalCase,
 } from '../src/eval/cases/retrieval-cases';
 import {
+  evaluateEvidenceRanking,
+  type EvidenceGroup,
+} from '../src/eval/cases/evidence-groups';
+import {
   resolveTuningEligibleCasesById,
   selectCasesForSuite,
 } from '../src/eval/cases/governance';
@@ -63,7 +67,7 @@ interface QueryVariant {
 interface ABResult {
   evalCaseId: string;
   metric: boolean;
-  expectedChunkIds: string[];
+  expectedEvidenceGroups: EvidenceGroup[];
   autoResource: string | undefined;
   oracleResource: string | undefined;
   variants: Record<QueryVariant['label'], RetrievalSide>;
@@ -107,27 +111,24 @@ function loadABCases(): ABCase[] {
   return [...byEvalId.values()];
 }
 
-function recallAt(ids: string[], expected: string[], k: number): number {
-  const topK = ids.slice(0, k);
-  return expected.filter((id) => topK.includes(id)).length / expected.length;
-}
-
-function reciprocalRank(ids: string[], expected: string[]): number {
-  const firstIdx = ids.findIndex((id) => expected.includes(id));
-  return firstIdx >= 0 ? 1 / (firstIdx + 1) : 0;
-}
-
-function side(ids: string[], expected: string[]): RetrievalSide {
+function side(ids: string[], evidenceGroups: EvidenceGroup[]): RetrievalSide {
+  const top3 = evaluateEvidenceRanking(evidenceGroups, ids, 3);
   return {
     top3: ids.slice(0, 3),
     top5: ids.slice(0, 5),
-    recall3: recallAt(ids, expected, 3),
-    reciprocalRank: reciprocalRank(ids, expected),
+    recall3: top3.recall,
+    reciprocalRank: top3.reciprocalRank,
   };
 }
 
 function uniq(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function formatEvidenceGroups(groups: readonly EvidenceGroup[]): string {
+  return groups
+    .map((group) => `{${group.anyOfChunkIds.join(' | ')}}`)
+    .join(' & ');
 }
 
 function forceTargetExpansion(
@@ -155,7 +156,7 @@ function forceTargetExpansion(
 
 async function evaluateVariant(
   variant: QueryVariant,
-  expectedChunkIds: string[],
+  expectedEvidenceGroups: EvidenceGroup[],
 ): Promise<{
   side: RetrievalSide;
   diagnostics: Omit<QueryVariant, 'label' | 'queryExpansion'>;
@@ -174,7 +175,7 @@ async function evaluateVariant(
   return {
     side: side(
       result.hits.map((hit) => hit.chunk.id),
-      expectedChunkIds,
+      expectedEvidenceGroups,
     ),
     diagnostics: {
       queryText: result.trace.queryText,
@@ -200,7 +201,7 @@ async function evaluateVariant(
 
 interface AllABResult {
   evalCaseId: string;
-  expectedChunkIds: string[];
+  expectedEvidenceGroups: EvidenceGroup[];
   autoResource: string | undefined;
   noExpansion: RetrievalSide;
   aliasExpansion: RetrievalSide;
@@ -254,7 +255,9 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
   ];
 
   const [autoNoExpansion, autoAliasExpansion, oracleAliasExpansion, forcedTargetExpansion] = await Promise.all(
-    variants.map((variant) => evaluateVariant(variant, evalCase.expectedChunkIds)),
+    variants.map((variant) =>
+      evaluateVariant(variant, evalCase.expectedEvidenceGroups),
+    ),
   );
   if (
     !autoNoExpansion ||
@@ -268,7 +271,7 @@ async function evaluateCase(abCase: ABCase, aliases: SchemaFieldAlias[]): Promis
   return {
     evalCaseId: evalCase.id,
     metric: abCase.metric,
-    expectedChunkIds: evalCase.expectedChunkIds,
+    expectedEvidenceGroups: evalCase.expectedEvidenceGroups,
     autoResource,
     oracleResource,
     variants: {
@@ -308,15 +311,15 @@ async function evaluateAllCase(
 
   return {
     evalCaseId: evalCase.id,
-    expectedChunkIds: evalCase.expectedChunkIds,
+    expectedEvidenceGroups: evalCase.expectedEvidenceGroups,
     autoResource,
     noExpansion: side(
       noExpansion.hits.map((hit) => hit.chunk.id),
-      evalCase.expectedChunkIds,
+      evalCase.expectedEvidenceGroups,
     ),
     aliasExpansion: side(
       aliasExpansion.hits.map((hit) => hit.chunk.id),
-      evalCase.expectedChunkIds,
+      evalCase.expectedEvidenceGroups,
     ),
     diagnostics: {
       queryText: aliasExpansion.trace.queryText,
@@ -337,7 +340,7 @@ function printDiagnostic(result: ABResult, label: QueryVariant['label']): void {
   const diagnostic = result.diagnostics[label];
   const sideResult = result.variants[label];
   console.log(
-    `${label.padEnd(24)} R@3=${pct(sideResult.recall3)} MRR=${sideResult.reciprocalRank.toFixed(3)} boost=${diagnostic.boostResource ?? '<none>'}`,
+    `${label.padEnd(24)} R@3=${pct(sideResult.recall3)} MRR@3=${sideResult.reciprocalRank.toFixed(3)} boost=${diagnostic.boostResource ?? '<none>'}`,
   );
   console.log(`  reason: ${diagnostic.resourceSelectionReason}`);
   console.log(
@@ -359,7 +362,7 @@ function printCase(result: ABResult): void {
   const marker = delta > 0 ? 'FORCED_GAIN' : delta < 0 ? 'FORCED_LOSS' : 'FORCED_SAME';
   console.log(`\n━━ ${result.evalCaseId} [${result.metric ? 'metric' : 'observation'}] ${marker}`);
   console.log(`autoResource: ${result.autoResource ?? '<none>'}; oracleResource: ${result.oracleResource ?? '<none>'}`);
-  console.log(`expected: ${result.expectedChunkIds.join(' | ')}`);
+  console.log(`expected: ${formatEvidenceGroups(result.expectedEvidenceGroups)}`);
   printDiagnostic(result, 'auto/no-expansion');
   printDiagnostic(result, 'auto/alias-expansion');
   printDiagnostic(result, 'oracle/alias-expansion');
@@ -385,7 +388,7 @@ function printSummary(results: ABResult[]): void {
   console.log(`metric cases: ${metric.length}; observation cases: ${observations.length}`);
   for (const label of labels) {
     console.log(
-      `${label.padEnd(24)} R@3=${pct(avg(metric, (r) => r.variants[label].recall3))} MRR=${avg(metric, (r) => r.variants[label].reciprocalRank).toFixed(3)}`,
+      `${label.padEnd(24)} R@3=${pct(avg(metric, (r) => r.variants[label].recall3))} MRR@3=${avg(metric, (r) => r.variants[label].reciprocalRank).toFixed(3)}`,
     );
   }
 
@@ -407,7 +410,7 @@ function printAllDetails(label: string, results: AllABResult[]): void {
   console.log(`\n${label}: ${results.map((r) => r.evalCaseId).join(', ') || '无'}`);
   for (const result of results) {
     console.log(`\n━━ ${result.evalCaseId}`);
-    console.log(`expected: ${result.expectedChunkIds.join(' | ')}`);
+    console.log(`expected: ${formatEvidenceGroups(result.expectedEvidenceGroups)}`);
     console.log(`autoResource: ${result.autoResource ?? '<none>'}`);
     console.log(`reason: ${result.diagnostics.resourceSelectionReason}`);
     console.log(
@@ -419,10 +422,10 @@ function printAllDetails(label: string, results: AllABResult[]): void {
     );
     console.log(`terms: ${result.diagnostics.expansionTerms.join(' ') || '<none>'}`);
     console.log(
-      `no-expansion:    R@3=${pct(result.noExpansion.recall3)} MRR=${result.noExpansion.reciprocalRank.toFixed(3)} top3=${result.noExpansion.top3.join(' | ')}`,
+      `no-expansion:    R@3=${pct(result.noExpansion.recall3)} MRR@3=${result.noExpansion.reciprocalRank.toFixed(3)} top3=${result.noExpansion.top3.join(' | ')}`,
     );
     console.log(
-      `alias-expansion: R@3=${pct(result.aliasExpansion.recall3)} MRR=${result.aliasExpansion.reciprocalRank.toFixed(3)} top3=${result.aliasExpansion.top3.join(' | ')}`,
+      `alias-expansion: R@3=${pct(result.aliasExpansion.recall3)} MRR@3=${result.aliasExpansion.reciprocalRank.toFixed(3)} top3=${result.aliasExpansion.top3.join(' | ')}`,
     );
   }
 }
@@ -440,10 +443,10 @@ function printAllSummary(results: AllABResult[]): void {
   console.log('\n━━━━━━ A3 full eval A/B 汇总 ━━━━━━');
   console.log(`semantic cases: ${results.length}; alias matched cases: ${matched.length}`);
   console.log(
-    `no-expansion:    R@3=${pct(avg(results, (r) => r.noExpansion.recall3))} MRR=${avg(results, (r) => r.noExpansion.reciprocalRank).toFixed(3)}`,
+    `no-expansion:    R@3=${pct(avg(results, (r) => r.noExpansion.recall3))} MRR@3=${avg(results, (r) => r.noExpansion.reciprocalRank).toFixed(3)}`,
   );
   console.log(
-    `alias-expansion: R@3=${pct(avg(results, (r) => r.aliasExpansion.recall3))} MRR=${avg(results, (r) => r.aliasExpansion.reciprocalRank).toFixed(3)}`,
+    `alias-expansion: R@3=${pct(avg(results, (r) => r.aliasExpansion.recall3))} MRR@3=${avg(results, (r) => r.aliasExpansion.reciprocalRank).toFixed(3)}`,
   );
   console.log(`gained(R@3): ${gained.map((r) => r.evalCaseId).join(', ') || '无'}`);
   console.log(`lost(R@3): ${lost.map((r) => r.evalCaseId).join(', ') || '无'}`);
@@ -485,7 +488,7 @@ async function runAll(): Promise<void> {
     console.error(
       `[${marker}] ${result.evalCaseId} ` +
         `R@3 ${pct(result.noExpansion.recall3)}→${pct(result.aliasExpansion.recall3)} ` +
-        `MRR ${result.noExpansion.reciprocalRank.toFixed(3)}→${result.aliasExpansion.reciprocalRank.toFixed(3)}`,
+        `MRR@3 ${result.noExpansion.reciprocalRank.toFixed(3)}→${result.aliasExpansion.reciprocalRank.toFixed(3)}`,
     );
   }
   printAllSummary(results);

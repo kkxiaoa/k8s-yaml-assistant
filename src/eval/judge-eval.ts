@@ -1,12 +1,12 @@
 // Judge 校准(§7.2 元评估):对固化的 calibration set 跑线上裁判,比人工 label,算一致率 + 复盘分歧。
 // 用法: npm run eval:judge  (先 npm run build:calibration 生成 calibration set)
 
-import type Anthropic from '@anthropic-ai/sdk';
-import { config } from 'dotenv';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { judgeOnce, JUDGE_MODEL } from './judge';
-import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
+import type Anthropic from "@anthropic-ai/sdk";
+import { config } from "dotenv";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { judgeOnce, JUDGE_MODEL } from "./judge";
+import { evalArtifactPath, runPath, traceRelativePath } from "./artifacts";
 import {
   buildJudgeCalibrationTrace,
   computeJudgeCalibrationMetrics,
@@ -15,19 +15,19 @@ import {
   POLICY_DIMENSIONS,
   type JudgeCalibrationCase,
   type JudgeCalibrationTrace,
-} from './metrics/judge-metrics';
+} from "./metrics/judge-metrics";
 import {
   LiveJudgeAttemptSchema,
   type JudgeAttempt,
   type LiveJudgeAttempt,
-} from './judge-votes';
-import { METRIC_DEFINITION_VERSION } from './metrics/definitions';
+} from "./judge-votes";
+import { METRIC_DEFINITION_VERSION } from "./metrics/definitions";
 import {
   buildGovernanceReport,
   formatGovernanceReport,
   requireGovernanceMetric,
   type GovernanceDisplayMetric,
-} from './governance-report';
+} from "./governance-report";
 import {
   JUDGE_CALIBRATION_VOTES,
   harnessErrorMetrics,
@@ -36,7 +36,7 @@ import {
   judgeEnvelopeOutcome,
   judgeEvalConfig,
   selectJudgeCases,
-} from './runner-protocol';
+} from "./runner-protocol";
 import {
   createErrorTraceEnvelope,
   createTraceEnvelope,
@@ -45,19 +45,19 @@ import {
   executeEvalRunStage,
   failEvalRunSession,
   startEvalRun,
-} from './run-session';
+} from "./run-session";
 
 const CALIBRATION_PATH = join(
   process.cwd(),
-  'data',
-  'eval',
-  'judge-calibration.jsonl',
+  "data",
+  "eval",
+  "judge-calibration.jsonl",
 );
 const ACCEPTABLE = 0.8;
 
 function readCalibrationCases(): JudgeCalibrationCase[] {
   return parseJudgeCalibrationCasesJsonl(
-    readFileSync(CALIBRATION_PATH, 'utf8'),
+    readFileSync(CALIBRATION_PATH, "utf8"),
   );
 }
 
@@ -77,7 +77,7 @@ async function evaluateCalibrationCase(
   const attempts: LiveJudgeAttempt[] = [];
   for (let index = 0; index < plannedVotes; index++) {
     const rawAttempt = await executeEvalCaseStage(
-      'judge_request',
+      "judge_request",
       () =>
         judgeOnce(client, {
           question: calibrationCase.question,
@@ -87,7 +87,7 @@ async function evaluateCalibrationCase(
       judgeErrorPayload(calibrationCase, attempts, plannedVotes),
     );
     const attempt = await executeEvalCaseStage(
-      'judge_parse',
+      "judge_parse",
       () => LiveJudgeAttemptSchema.parse(rawAttempt),
       judgeErrorPayload(calibrationCase, attempts, plannedVotes),
     );
@@ -95,7 +95,7 @@ async function evaluateCalibrationCase(
   }
 
   return executeEvalCaseStage(
-    'judge_quorum',
+    "judge_quorum",
     () =>
       buildJudgeCalibrationTrace({
         calibrationCase,
@@ -118,10 +118,10 @@ function reportJudgeCase(trace: JudgeCalibrationTrace): void {
   const behaviorResult = trace.responseBehavior;
   const behaviorMark =
     behaviorResult === undefined
-      ? ''
+      ? ""
       : behaviorResult.judge === null
         ? ` responseBehavior=${behaviorResult.indeterminateReason}(${behaviorResult.validVotes}/${behaviorResult.quorum})`
-        : ` responseBehavior=${behaviorResult.agree ? '✓' : '✗'}(${behaviorResult.judge}, ${behaviorResult.validVotes}票)${behaviorResult.unstable ? '⚠' : ''}`;
+        : ` responseBehavior=${behaviorResult.agree ? "✓" : "✗"}(${behaviorResult.judge}, ${behaviorResult.validVotes}票)${behaviorResult.unstable ? "⚠" : ""}`;
   for (const dimension of POLICY_DIMENSIONS) {
     const result = trace.policy[dimension];
     if (!result) continue;
@@ -131,13 +131,13 @@ function reportJudgeCase(trace: JudgeCalibrationTrace): void {
       );
     } else {
       policyMarks.push(
-        `${dimension}=${result.agree ? '✓' : '✗'}(${result.trueVotes}/${result.validVotes})${result.unstable ? '⚠' : ''}`,
+        `${dimension}=${result.agree ? "✓" : "✗"}(${result.trueVotes}/${result.validVotes})${result.unstable ? "⚠" : ""}`,
       );
     }
   }
 
   console.error(
-    `${trace.majority.agree ? '✓一致' : '✗分歧'} ${trace.id.padEnd(28)} human=${trace.human.faithful} judge=${trace.majority.faithful}(${trace.majority.trueVotes}/${trace.majority.validVotes})${trace.majority.unstable ? ' ⚠不稳' : ''}${behaviorMark}  [${trace.category}]${policyMarks.length ? ` policy: ${policyMarks.join(' ')}` : ''}`,
+    `${trace.majority.agree ? "✓一致" : "✗分歧"} ${trace.id.padEnd(28)} human=${trace.human.faithful} judge=${trace.majority.faithful}(${trace.majority.trueVotes}/${trace.majority.validVotes})${trace.majority.unstable ? " ⚠不稳" : ""}${behaviorMark}  [${trace.category}]${policyMarks.length ? ` policy: ${policyMarks.join(" ")}` : ""}`,
   );
 }
 
@@ -147,30 +147,25 @@ function judgeGovernanceMetrics(
   const metrics = judgeMetricsRecord(computeJudgeCalibrationMetrics(traces));
   return [
     {
-      label: 'agreement',
-      unit: 'ratio',
-      observation: requireGovernanceMetric(metrics, 'judge.agreement_rate'),
+      label: "agreement",
+      unit: "ratio",
+      observation: requireGovernanceMetric(metrics, "judge.agreement_rate"),
     },
     {
-      label: 'quorum-failure',
-      unit: 'count',
-      observation: requireGovernanceMetric(metrics, 'judge.indeterminate'),
+      label: "quorum-failure",
+      unit: "count",
+      observation: requireGovernanceMetric(metrics, "judge.indeterminate"),
     },
   ];
 }
 
-export function judgeReasonForMajority(
-  trace: JudgeCalibrationTrace,
-): string {
+export function judgeReasonForMajority(trace: JudgeCalibrationTrace): string {
   const majority = trace.majority.faithful;
-  if (majority === null) return '';
+  if (majority === null) return "";
   const attempt = [...trace.attempts.items]
     .reverse()
-    .find(
-      (item) =>
-        item.status === 'valid' && item.vote.faithful === majority,
-    );
-  return attempt?.status === 'valid' ? attempt.vote.reason : '';
+    .find((item) => item.status === "valid" && item.vote.faithful === majority);
+  return attempt?.status === "valid" ? attempt.vote.reason : "";
 }
 
 function reportDisagreements(traces: readonly JudgeCalibrationTrace[]): void {
@@ -178,7 +173,7 @@ function reportDisagreements(traces: readonly JudgeCalibrationTrace[]): void {
     (trace) => trace.majority.agree === false,
   );
   if (disagreements.length) {
-    console.error('\n分歧复盘(§7.4):');
+    console.error("\n分歧复盘(§7.4):");
     for (const disagreement of disagreements) {
       console.error(
         `\n▸ ${disagreement.id} [${disagreement.category}]  human=${disagreement.human.faithful} vs judge=${disagreement.majority.faithful}`,
@@ -195,10 +190,10 @@ function reportDisagreements(traces: readonly JudgeCalibrationTrace[]): void {
     }),
   );
   if (policyDisagreements.length) {
-    console.error('\npolicy 维度分歧复盘:');
+    console.error("\npolicy 维度分歧复盘:");
     for (const { trace, dimension, result } of policyDisagreements) {
       console.error(
-        `\n▸ ${trace.id} ${dimension} human=${result.human} vs judge=${result.judge ?? 'missing'}`,
+        `\n▸ ${trace.id} ${dimension} human=${result.human} vs judge=${result.judge ?? "missing"}`,
       );
       console.error(`  human 依据: ${trace.human.note}`);
     }
@@ -208,7 +203,7 @@ function reportDisagreements(traces: readonly JudgeCalibrationTrace[]): void {
     (trace) => trace.responseBehavior?.agree === false,
   );
   if (behaviorDisagreements.length) {
-    console.error('\n回答行为维度分歧复盘:');
+    console.error("\n回答行为维度分歧复盘:");
     for (const trace of behaviorDisagreements) {
       console.error(
         `\n▸ ${trace.id} human=${trace.responseBehavior?.human} vs judge=${trace.responseBehavior?.judge}`,
@@ -224,7 +219,7 @@ function reportInvalidResponseDiagnostics(
   const groups = new Map<string, number>();
   for (const trace of traces) {
     for (const attempt of trace.attempts.items) {
-      if (attempt.status !== 'invalid') continue;
+      if (attempt.status !== "invalid") continue;
       const key = attempt.response
         ? `${attempt.code}: stop=${attempt.response.stopReason}, textBlocks=${attempt.response.textBlockCount}, nonTextBlocks=${attempt.response.nonTextBlockCount}`
         : `${attempt.code}: legacy response metadata missing`;
@@ -233,7 +228,7 @@ function reportInvalidResponseDiagnostics(
   }
   if (groups.size === 0) return;
 
-  console.error('\ninvalid response diagnostics:');
+  console.error("\ninvalid response diagnostics:");
   for (const [key, count] of [...groups].sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
@@ -242,7 +237,7 @@ function reportInvalidResponseDiagnostics(
 }
 
 async function main(argv: readonly string[]): Promise<void> {
-  const setup = await executeEvalRunStage('dataset_preflight', () => {
+  const setup = await executeEvalRunStage("dataset_preflight", () => {
     const selection = selectJudgeCases(argv, readCalibrationCases());
     return {
       selection,
@@ -251,11 +246,11 @@ async function main(argv: readonly string[]): Promise<void> {
   });
   const { cases } = setup.selection;
   const runConfig = judgeEvalConfig(JUDGE_CALIBRATION_VOTES);
-  const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-judge${setup.selection.suffix}`;
-  const session = await executeEvalRunStage('artifact_write', () =>
+  const runId = `${new Date().toISOString().replace(/[:.]/g, "-")}-judge${setup.selection.suffix}`;
+  const session = await executeEvalRunStage("artifact_write", () =>
     startEvalRun({
       id: runId,
-      kind: 'judge',
+      kind: "judge",
       scope: setup.selection.scope,
       dataset: setup.dataset,
       metricDefinitionVersion: METRIC_DEFINITION_VERSION,
@@ -266,12 +261,12 @@ async function main(argv: readonly string[]): Promise<void> {
 
   try {
     const client = await executeEvalRunStage(
-      'runner_initialization',
+      "runner_initialization",
       async () => {
         if (!process.env.DEEPSEEK_API_KEY) {
-          throw new Error('DEEPSEEK_API_KEY 未设置');
+          throw new Error("DEEPSEEK_API_KEY 未设置");
         }
-        const { getClient } = await import('../server/pipeline');
+        const { getClient } = await import("../server/pipeline");
         return getClient();
       },
     );
@@ -282,18 +277,14 @@ async function main(argv: readonly string[]): Promise<void> {
     const batch = await executeEvalCases({
       cases,
       evaluate: (calibrationCase) =>
-        evaluateCalibrationCase(
-          client,
-          calibrationCase,
-          runConfig.voteCount,
-        ),
+        evaluateCalibrationCase(client, calibrationCase, runConfig.voteCount),
       appendSuccess: (calibrationCase, trace) => {
         session.appendCase(
           createTraceEnvelope({
             runId,
             evalCaseId: calibrationCase.id,
             governance: calibrationCase.governance,
-            kind: 'judge',
+            kind: "judge",
             outcome: judgeEnvelopeOutcome(trace),
             payload: trace,
           }),
@@ -305,14 +296,10 @@ async function main(argv: readonly string[]): Promise<void> {
             runId,
             evalCaseId: calibrationCase.id,
             governance: calibrationCase.governance,
-            kind: 'judge',
+            kind: "judge",
             payload:
               failure.payload ??
-              judgeErrorPayload(
-                calibrationCase,
-                [],
-                runConfig.voteCount,
-              ),
+              judgeErrorPayload(calibrationCase, [], runConfig.voteCount),
             stage: failure.stage,
             error: failure.originalError,
           }),
@@ -325,12 +312,12 @@ async function main(argv: readonly string[]): Promise<void> {
 
     for (const trace of batch.results) reportJudgeCase(trace);
 
-    const metrics = await executeEvalRunStage('metric_aggregation', () =>
+    const metrics = await executeEvalRunStage("metric_aggregation", () =>
       computeJudgeCalibrationMetrics(batch.results),
     );
-    console.error('\n━━━━━━ 汇总 ━━━━━━');
+    console.error("\n━━━━━━ 汇总 ━━━━━━");
     console.error(
-      `一致率 = ${metrics.agreementRate === null ? 'N/A' : `${(metrics.agreementRate * 100).toFixed(1)}%`}  (${metrics.agree}/${metrics.judged})`,
+      `一致率 = ${metrics.agreementRate === null ? "N/A" : `${(metrics.agreementRate * 100).toFixed(1)}%`}  (${metrics.agree}/${metrics.judged})`,
     );
     console.error(
       `quality fail/disagreement=${metrics.judged - metrics.agree} 条`,
@@ -346,7 +333,7 @@ async function main(argv: readonly string[]): Promise<void> {
     );
     const behaviorRate = metrics.responseBehavior.agreementRate;
     console.error(
-      `回答行为一致率(仅人工明确标注)= ${behaviorRate === null ? 'N/A（不适用）' : `${(behaviorRate * 100).toFixed(1)}%`} (${metrics.responseBehavior.agree}/${metrics.responseBehavior.judged}, indeterminate=${metrics.responseBehavior.indeterminate}, unstable=${metrics.responseBehavior.unstable})`,
+      `回答行为一致率(仅人工明确标注)= ${behaviorRate === null ? "N/A（不适用）" : `${(behaviorRate * 100).toFixed(1)}%`} (${metrics.responseBehavior.agree}/${metrics.responseBehavior.judged}, indeterminate=${metrics.responseBehavior.indeterminate}, unstable=${metrics.responseBehavior.unstable})`,
     );
     console.error(
       formatGovernanceReport(
@@ -359,15 +346,13 @@ async function main(argv: readonly string[]): Promise<void> {
         }),
       ),
     );
-    console.error('\npolicy 维度一致率(只统计 human.policy 明确标注的维度):');
+    console.error("\npolicy 维度一致率(只统计 human.policy 明确标注的维度):");
     for (const dimension of POLICY_DIMENSIONS) {
       const summary = metrics.policy[dimension];
       const rate =
-        summary.agreementRate === null
-          ? null
-          : summary.agreementRate * 100;
+        summary.agreementRate === null ? null : summary.agreementRate * 100;
       console.error(
-        `- ${dimension}: ${rate === null ? 'N/A' : `${rate.toFixed(1)}%`} (${summary.agree}/${summary.judged}, indeterminate=${summary.indeterminate}, unstable=${summary.unstable})`,
+        `- ${dimension}: ${rate === null ? "N/A" : `${rate.toFixed(1)}%`} (${summary.agree}/${summary.judged}, indeterminate=${summary.indeterminate}, unstable=${summary.unstable})`,
       );
     }
 
@@ -375,23 +360,21 @@ async function main(argv: readonly string[]): Promise<void> {
     reportDisagreements(batch.results);
 
     const metricRecord = await executeEvalRunStage(
-      'metric_aggregation',
+      "metric_aggregation",
       () => ({
         ...judgeMetricsRecord(metrics),
-        ...harnessErrorMetrics('judge', batch.harnessErrors.length),
+        ...harnessErrorMetrics("judge", batch.harnessErrors.length),
       }),
     );
-    await executeEvalRunStage('artifact_write', () =>
+    await executeEvalRunStage("artifact_write", () =>
       session.complete(metricRecord),
     );
     completed = true;
-    const tracePath = evalArtifactPath(traceRelativePath(runId, 'judge'));
-    console.error(
-      `\n逐条 trace → ${tracePath}\n汇总 run → ${runPath(runId)}`,
-    );
+    const tracePath = evalArtifactPath(traceRelativePath(runId, "judge"));
+    console.error(`\n逐条 trace → ${tracePath}\n汇总 run → ${runPath(runId)}`);
     console.error(
       metrics.agreementRate === null
-        ? '\n裁判一致率为 N/A,没有可用于阈值判断的有效 case。'
+        ? "\n裁判一致率为 N/A,没有可用于阈值判断的有效 case。"
         : metrics.agreementRate >= ACCEPTABLE
           ? `\n裁判一致率 ≥ ${ACCEPTABLE * 100}%,仅通过主一致率门槛；扩大 grounding eval(§7.2) 前仍须审核不可判定、无效票和不稳定项。`
           : `\n一致率 < ${ACCEPTABLE * 100}%,先复盘/修裁判再用。`,
@@ -405,7 +388,10 @@ async function main(argv: readonly string[]): Promise<void> {
 if (isDirectExecution(import.meta.url)) {
   config({ override: true });
   main(process.argv.slice(2)).catch((error: unknown) => {
-    console.error('错误:', error instanceof Error ? error.message : String(error));
+    console.error(
+      "错误:",
+      error instanceof Error ? error.message : String(error),
+    );
     process.exitCode = 1;
   });
 }
