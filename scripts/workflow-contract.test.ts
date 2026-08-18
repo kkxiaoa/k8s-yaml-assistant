@@ -29,6 +29,7 @@ const releasePleaseConfigPath = join(root, 'release-please-config.json');
 const releasePleaseManifestPath = join(root, '.release-please-manifest.json');
 const codeownersPath = join(root, '.github', 'CODEOWNERS');
 const dockerfilePath = join(root, 'Dockerfile');
+const trivyIgnorePath = join(root, '.trivyignore.yaml');
 
 const applicationImage = 'ghcr.io/kkxiaoa/k8s-yaml-assistant';
 const indexImage = 'ghcr.io/kkxiaoa/k8s-yaml-assistant-index';
@@ -267,6 +268,24 @@ function assertCodeowners(): void {
   }
 }
 
+function validateTrivyIgnore(): void {
+  assert.ok(existsSync(trivyIgnorePath), '.trivyignore.yaml must exist');
+  const policy = object(
+    load(readFileSync(trivyIgnorePath, 'utf8')),
+    'Trivy ignore policy',
+  );
+  assert.deepEqual(Object.keys(policy), ['vulnerabilities']);
+  assert.deepEqual(policy.vulnerabilities, [
+    {
+      id: 'CVE-2026-14456',
+      purls: ['pkg:deb/debian/libssl3@3.0.20-1~deb12u2'],
+      expired_at: new Date('2026-09-30T00:00:00.000Z'),
+      statement:
+        'OpenSSL 3.0 is not affected according to https://openssl-library.org/news/secadv/20260813.txt',
+    },
+  ]);
+}
+
 function validateReleasePleaseConfig(): void {
   const config = json(releasePleaseConfigPath);
   assert.equal(config['bootstrap-sha'], undefined);
@@ -365,6 +384,7 @@ function validatePrWorkflow(value: JsonObject, source: string): void {
       severity: 'HIGH,CRITICAL',
       scanners: 'vuln',
       'hide-progress': true,
+      trivyignores: '.trivyignore.yaml',
       version: 'v0.70.0',
     },
   );
@@ -710,6 +730,7 @@ function validateReleaseArtifactsWorkflow(
       severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL',
       scanners: 'vuln',
       'hide-progress': true,
+      trivyignores: '.trivyignore.yaml',
       version: 'v0.70.0',
     },
   );
@@ -1101,6 +1122,10 @@ test('pull request workflow owns source gates and checks release indexes without
   const actual = workflow(prWorkflowPath, 'PR workflow');
   validatePrWorkflow(actual.value, actual.source);
   assertCodeowners();
+});
+
+test('runtime vulnerability suppression is exact, package-scoped, and time-bounded', () => {
+  validateTrivyIgnore();
 });
 
 test('only the fixed production deployment workflow may route to the production runner', () => {

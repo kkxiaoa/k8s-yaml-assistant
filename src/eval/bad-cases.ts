@@ -8,7 +8,12 @@ import {
   readTraceEnvelopes,
 } from './artifacts';
 import { FaithOutcomeSchema } from './faith-store';
-import type { EvalSuite } from './cases/governance';
+import {
+  EvidenceGroupSchema,
+  evaluateEvidenceRanking,
+  type EvidenceGroup,
+} from './cases/evidence-groups';
+import type { EvalScope } from './protocol';
 import type { EvalRun, TraceEnvelope } from './protocol';
 import { readRun } from './run-store';
 
@@ -201,6 +206,7 @@ const ConsistencyCheckSchema = z.enum([
 
 const ExpectedSchema = z.strictObject({
   sourceIds: z.array(z.string()).optional(),
+  sourceIdGroups: z.array(EvidenceGroupSchema).optional(),
   expectedKinds: z.array(z.string()).optional(),
   mustHavePaths: z.array(z.string()).optional(),
   consistencyChecks: z.array(ConsistencyCheckSchema).optional(),
@@ -602,11 +608,12 @@ export function retrievalMiss(params: {
   traceId: string;
   question: string;
   resource: string;
-  expectedChunkIds: string[];
+  expectedEvidenceGroups: EvidenceGroup[];
   actualTopIds: string[];
+  coarseIds: string[];
   rankedIds: string[];
   k: number;
-  scope: EvalSuite;
+  scope: EvalScope;
 }): BadCase {
   const {
     evalCaseId,
@@ -614,8 +621,9 @@ export function retrievalMiss(params: {
     traceId,
     question,
     resource,
-    expectedChunkIds,
+    expectedEvidenceGroups,
     actualTopIds,
+    coarseIds,
     rankedIds,
     k,
     scope,
@@ -623,31 +631,60 @@ export function retrievalMiss(params: {
   if (!evalCaseId) throw new Error('retrievalMiss requires evalCaseId');
   if (!runId) throw new Error('retrievalMiss requires runId');
   if (!traceId) throw new Error('retrievalMiss requires traceId');
-  const topHitCount = expectedChunkIds.filter((id) =>
-    actualTopIds.includes(id),
-  ).length;
-  const ranks = expectedChunkIds.map((id) => {
-    const index = rankedIds.indexOf(id);
-    return { id, rank: index >= 0 ? index + 1 : 0 };
+  const finalCoverage = evaluateEvidenceRanking(
+    expectedEvidenceGroups,
+    actualTopIds,
+    actualTopIds.length,
+  );
+  const coarseCoverage = evaluateEvidenceRanking(
+    expectedEvidenceGroups,
+    coarseIds,
+    coarseIds.length,
+  );
+  const finalMatchedGroups = new Set(
+    finalCoverage.matches.map((match) => match.groupIndex),
+  );
+  const coarseMatchedGroups = new Set(
+    coarseCoverage.matches.map((match) => match.groupIndex),
+  );
+  const groupRanks = expectedEvidenceGroups.map((group, groupIndex) => {
+    const rankIndex = rankedIds.findIndex((id) =>
+      group.anyOfChunkIds.includes(id),
+    );
+    return {
+      groupIndex,
+      label: `{${group.anyOfChunkIds.join(' | ')}}`,
+      rank: rankIndex < 0 ? 0 : rankIndex + 1,
+    };
   });
-  const missingFromCandidates = ranks.filter((rank) => rank.rank === 0);
-  const outsideTopK = ranks.filter((rank) => rank.rank > k);
+  const missingFromCandidates = groupRanks.filter(
+    ({ groupIndex }) => !coarseMatchedGroups.has(groupIndex),
+  );
+  const outsideTopK = groupRanks.filter(
+    ({ groupIndex }) =>
+      coarseMatchedGroups.has(groupIndex) &&
+      !finalMatchedGroups.has(groupIndex),
+  );
   const layer: BadCaseFailureLayer =
     missingFromCandidates.length > 0 ? 'retrieval' : 'rerank';
   const failureType: BadCaseFailureType =
     layer === 'retrieval' ? 'retrieval_miss' : 'rerank_miss';
   const missingNote =
     missingFromCandidates.length > 0
-      ? `未进候选: ${missingFromCandidates.map((rank) => rank.id).join(', ')}`
+      ? `未进候选: ${missingFromCandidates.map((rank) => rank.label).join(', ')}`
       : '';
   const rerankNote =
     outsideTopK.length > 0
       ? `候选中但排在 top-${k} 外: ${outsideTopK
-          .map((rank) => `${rank.id}(rank=${rank.rank})`)
+          .map((rank) =>
+            rank.rank === 0
+              ? `${rank.label}(rerank 未返回)`
+              : `${rank.label}(rank=${rank.rank})`,
+          )
           .join(', ')}`
       : '';
   const note = [
-    `top-${k} 命中 ${topHitCount}/${expectedChunkIds.length}`,
+    `top-${k} 满足 ${finalCoverage.matches.length}/${expectedEvidenceGroups.length} 个证据组`,
     missingNote,
     rerankNote,
   ]
@@ -660,7 +697,11 @@ export function retrievalMiss(params: {
     createdAt,
     taskType: 'explain_field',
     input: { question, context: { kind: resource } },
-    expected: { sourceIds: expectedChunkIds },
+    expected: {
+      sourceIdGroups: expectedEvidenceGroups.map((group) => ({
+        anyOfChunkIds: [...group.anyOfChunkIds],
+      })),
+    },
     actual: { sourceIds: actualTopIds },
     failure: { layer, type: failureType, note },
     severity: layer === 'retrieval' ? 'high' : 'medium',

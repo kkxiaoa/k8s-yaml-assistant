@@ -1,0 +1,6 @@
+vulnerabilities:
+  - id: CVE-2026-14456
+    purls:
+      - pkg:deb/debian/libssl3@3.0.20-1~deb12u2
+    expired_at: 2026-09-30
+    statement: OpenSSL 3.0 is not affected according to https://openssl-library.org/news/secadv/20260813.txt

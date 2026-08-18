@@ -297,6 +297,7 @@ jobs:
           severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
           scanners: vuln
           hide-progress: true
+          trivyignores: .trivyignore.yaml
           version: v0.70.0
 
       - name: Reject high and critical vulnerabilities

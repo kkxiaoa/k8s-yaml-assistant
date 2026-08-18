@@ -197,10 +197,15 @@ function parseHeading(line: string, lineNumber: number): MarkdownHeading | null 
   const title = anchorMatch
     ? headingText.slice(0, anchorMatch.index).trimEnd()
     : headingText;
+  const anchor =
+    anchorMatch?.[1] ??
+    (/^[A-Za-z][A-Za-z0-9]*$/u.test(title)
+      ? title.toLowerCase()
+      : undefined);
   return {
     level: match[1]!.length,
     title,
-    ...(anchorMatch === null ? {} : { anchor: anchorMatch[1] }),
+    ...(anchor === undefined ? {} : { anchor }),
     line: lineNumber,
   };
 }
@@ -231,9 +236,22 @@ function normalizeSectionMarkdown(
 ): string {
   const normalized: string[] = [];
   let fence: MarkdownFence | undefined;
+  let mermaid = false;
   let previousBlank = false;
 
   for (const line of markdown.split('\n')) {
+    const trimmed = line.trim();
+    if (mermaid) {
+      if (/^\{\{[<%]\s*\/mermaid\s*[>%]\}\}$/u.test(trimmed)) {
+        mermaid = false;
+      }
+      continue;
+    }
+    if (/^\{\{[<%]\s*mermaid\s*[>%]\}\}$/u.test(trimmed)) {
+      mermaid = true;
+      continue;
+    }
+
     const delimiter = parseFenceDelimiter(line);
     if (delimiter) {
       normalized.push(line);
@@ -253,7 +271,7 @@ function normalizeSectionMarkdown(
 
     const presentationShortcode =
       /^\{\{[<%]\s*\/?(?:note|feature-state|code_sample)\b.*[>%]\}\}$/u.test(
-        line.trim(),
+        trimmed,
       );
     const visibleLine = presentationShortcode
       ? ''

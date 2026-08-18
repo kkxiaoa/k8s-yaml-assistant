@@ -6,4 +6,6 @@ data/knowledge/kubernetes-docs/deployment.md -whitespace
 data/knowledge/kubernetes-docs/statefulset.md -whitespace
 data/knowledge/kubernetes-docs/images.md -whitespace
 data/knowledge/kubernetes-docs/storage-classes.md -whitespace
+data/knowledge/kubernetes-docs/horizontal-pod-autoscale.md -whitespace
+data/knowledge/kubernetes-docs/volumes.md -whitespace
 data/knowledge/kubernetes-examples/*.yaml -whitespace

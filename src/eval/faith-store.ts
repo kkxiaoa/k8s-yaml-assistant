@@ -15,6 +15,11 @@ import {
 } from './cases/grounded-answer-cases';
 import { EvalCaseGovernanceSchema } from './cases/governance';
 import {
+  EvidenceGroupSchema,
+  evaluateEvidenceRanking,
+  exactEvidenceGroups,
+} from './cases/evidence-groups';
+import {
   LiveJudgeAttemptSchema,
   LiveJudgeVoteSchema,
   type JudgeResponseBehavior,
@@ -134,6 +139,8 @@ const FaithKnowledgeChunkSchema = z.strictObject({
   provenance: ProvenanceSchema,
   targets: z.array(FaithKnowledgeTargetSchema),
 });
+
+export const FAITH_TRACE_PAYLOAD_REVISION = 2 as const;
 
 const QueryExpansionTraceSchema = z.strictObject({
   enabled: z.boolean(),
@@ -285,7 +292,28 @@ export const FaithEditorContextSnapshotSchema = z.strictObject({
     .min(1),
 });
 
+const FaithRetrievalSchema = z.strictObject({
+  routed: z.string().optional(),
+  expectedEvidenceGroups: z.array(EvidenceGroupSchema),
+  topIds: z.array(z.string()),
+  satisfiedGroupCount: z.int().nonnegative(),
+  fullRecall: z.boolean(),
+  queryExpansionConfig: QueryExpansionConfigSchema,
+  searchTrace: FaithSearchTraceSchema.optional(),
+});
+
+const LegacyFaithRetrievalSchema = z.strictObject({
+  routed: z.string().optional(),
+  expectedChunkIds: z.array(z.string()),
+  topIds: z.array(z.string()),
+  foundCount: z.int().nonnegative(),
+  fullRecall: z.boolean(),
+  queryExpansionConfig: QueryExpansionConfigSchema,
+  searchTrace: FaithSearchTraceSchema.optional(),
+});
+
 export const FaithTraceSchema = z.strictObject({
+  payloadRevision: z.literal(FAITH_TRACE_PAYLOAD_REVISION),
   id: z.string().min(1),
   governance: EvalCaseGovernanceSchema,
   input: GroundedAnswerInputSchema,
@@ -302,15 +330,7 @@ export const FaithTraceSchema = z.strictObject({
       name: z.string().trim().min(1).optional(),
     })
     .optional(),
-  retrieval: z.strictObject({
-    routed: z.string().optional(),
-    expectedChunkIds: z.array(z.string()),
-    topIds: z.array(z.string()),
-    foundCount: z.int().nonnegative(),
-    fullRecall: z.boolean(),
-    queryExpansionConfig: QueryExpansionConfigSchema,
-    searchTrace: FaithSearchTraceSchema.optional(),
-  }),
+  retrieval: FaithRetrievalSchema,
   answer: z.string(),
   judgeAttempts: z.array(LiveJudgeAttemptSchema),
   verdict: LiveJudgeVoteSchema.nullable(),
@@ -341,11 +361,11 @@ export const FaithTraceSchema = z.strictObject({
         path: ['target'],
       });
     }
-    if (trace.retrieval.expectedChunkIds.length !== 0) {
+    if (trace.retrieval.expectedEvidenceGroups.length !== 0) {
       context.addIssue({
         code: 'custom',
-        message: 'standalone faith trace cannot include expected chunk ids',
-        path: ['retrieval', 'expectedChunkIds'],
+        message: 'standalone faith trace cannot include expected evidence groups',
+        path: ['retrieval', 'expectedEvidenceGroups'],
       });
     }
     if (
@@ -366,17 +386,19 @@ export const FaithTraceSchema = z.strictObject({
         path: ['target'],
       });
     }
-    if (trace.retrieval.expectedChunkIds.length === 0) {
+    if (trace.retrieval.expectedEvidenceGroups.length === 0) {
       context.addIssue({
         code: 'custom',
-        message: 'referenced faith trace requires expected chunk ids',
-        path: ['retrieval', 'expectedChunkIds'],
+        message: 'referenced faith trace requires expected evidence groups',
+        path: ['retrieval', 'expectedEvidenceGroups'],
       });
     }
   }
 
   if (trace.input.kind === 'validation_error') {
-    const expectedChunkIds = trace.input.expectedChunkIds;
+    const expectedEvidenceGroups = exactEvidenceGroups(
+      trace.input.expectedChunkIds,
+    );
     if (trace.question !== trace.input.question) {
       context.addIssue({
         code: 'custom',
@@ -385,17 +407,16 @@ export const FaithTraceSchema = z.strictObject({
       });
     }
     if (
-      trace.retrieval.expectedChunkIds.length !==
-        expectedChunkIds.length ||
-      trace.retrieval.expectedChunkIds.some(
-        (id, index) => id !== expectedChunkIds[index],
+      !isDeepStrictEqual(
+        trace.retrieval.expectedEvidenceGroups,
+        expectedEvidenceGroups,
       )
     ) {
       context.addIssue({
         code: 'custom',
         message:
-          'validation-error faith trace expected chunk ids do not match input',
-        path: ['retrieval', 'expectedChunkIds'],
+          'validation-error faith trace expected evidence groups do not match input',
+        path: ['retrieval', 'expectedEvidenceGroups'],
       });
     }
     if (trace.editorContext === undefined) {
@@ -588,19 +609,25 @@ export const FaithTraceSchema = z.strictObject({
     }
   }
 
-  const foundCount = trace.retrieval.expectedChunkIds.filter((id) =>
-    trace.retrieval.topIds.includes(id),
-  ).length;
-  if (trace.retrieval.foundCount !== foundCount) {
+  const coverage =
+    trace.retrieval.expectedEvidenceGroups.length === 0
+      ? null
+      : evaluateEvidenceRanking(
+          trace.retrieval.expectedEvidenceGroups,
+          trace.retrieval.topIds,
+          trace.retrieval.topIds.length,
+        );
+  const satisfiedGroupCount = coverage?.matches.length ?? 0;
+  if (trace.retrieval.satisfiedGroupCount !== satisfiedGroupCount) {
     context.addIssue({
       code: 'custom',
-      message: 'retrieval foundCount does not match expected/top ids',
-      path: ['retrieval', 'foundCount'],
+      message: 'retrieval satisfiedGroupCount does not match expected/top ids',
+      path: ['retrieval', 'satisfiedGroupCount'],
     });
   }
   const fullRecall =
-    trace.retrieval.expectedChunkIds.length > 0 &&
-    foundCount === trace.retrieval.expectedChunkIds.length;
+    trace.retrieval.expectedEvidenceGroups.length > 0 &&
+    coverage?.fullRecall === true;
   if (trace.retrieval.fullRecall !== fullRecall) {
     context.addIssue({
       code: 'custom',
@@ -672,7 +699,65 @@ export type FaithEditorContextSnapshot = z.infer<
 >;
 export type FaithSearchTrace = z.infer<typeof FaithSearchTraceSchema>;
 export type FaithTrace = z.infer<typeof FaithTraceSchema>;
+export type FaithTraceArtifact = {
+  sourcePayloadRevision: 1 | typeof FAITH_TRACE_PAYLOAD_REVISION;
+  trace: FaithTrace;
+};
 
 export function decodeFaithTrace(value: unknown): FaithTrace {
   return FaithTraceSchema.parse(value);
+}
+
+export function decodeFaithTraceArtifact(value: unknown): FaithTraceArtifact {
+  const current = FaithTraceSchema.safeParse(value);
+  if (current.success) {
+    return {
+      sourcePayloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
+      trace: current.data,
+    };
+  }
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.hasOwn(value, 'payloadRevision')
+  ) {
+    throw current.error;
+  }
+
+  const root = value as Record<string, unknown>;
+  const legacyRetrieval = LegacyFaithRetrievalSchema.parse(root.retrieval);
+  const foundCount = legacyRetrieval.expectedChunkIds.filter((chunkId) =>
+    legacyRetrieval.topIds.includes(chunkId),
+  ).length;
+  if (legacyRetrieval.foundCount !== foundCount) {
+    throw new TypeError(
+      'legacy faith retrieval foundCount does not match expected/top ids',
+    );
+  }
+  const fullRecall =
+    legacyRetrieval.expectedChunkIds.length > 0 &&
+    foundCount === legacyRetrieval.expectedChunkIds.length;
+  if (legacyRetrieval.fullRecall !== fullRecall) {
+    throw new TypeError(
+      'legacy faith retrieval fullRecall does not match expected/top ids',
+    );
+  }
+  const {
+    expectedChunkIds,
+    foundCount: _foundCount,
+    ...sharedRetrieval
+  } = legacyRetrieval;
+  const trace = FaithTraceSchema.parse({
+    ...root,
+    payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
+    retrieval: {
+      ...sharedRetrieval,
+      expectedEvidenceGroups: expectedChunkIds.map((chunkId) => ({
+        anyOfChunkIds: [chunkId],
+      })),
+      satisfiedGroupCount: foundCount,
+    },
+  });
+  return { sourcePayloadRevision: 1, trace };
 }

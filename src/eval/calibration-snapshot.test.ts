@@ -3,7 +3,12 @@ import {
   buildJudgeCalibrationCaseFromFaith,
   type JudgeCalibrationLabel,
 } from './calibration-snapshot';
-import { decodeFaithTrace, type FaithTrace } from './faith-store';
+import {
+  decodeFaithTrace,
+  FAITH_TRACE_PAYLOAD_REVISION,
+  type FaithTrace,
+} from './faith-store';
+import { exactEvidenceGroups } from './cases/evidence-groups';
 
 const GOVERNANCE = {
   task: 'field_explanation',
@@ -42,6 +47,7 @@ const SNAPSHOT_CONTEXT = {
 };
 
 const BASE_TRACE: FaithTrace = {
+  payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
   id: 'case-1',
   governance: GOVERNANCE,
   input: { kind: 'retrieval_case', retrievalCaseId: 'case-1' },
@@ -50,9 +56,9 @@ const BASE_TRACE: FaithTrace = {
   target: { kind: 'Pod' },
   context: SNAPSHOT_CONTEXT,
   retrieval: {
-    expectedChunkIds: ['Chunk::expected'],
+    expectedEvidenceGroups: exactEvidenceGroups(['Chunk::expected']),
     topIds: ['Chunk::actual'],
-    foundCount: 0,
+    satisfiedGroupCount: 0,
     fullRecall: false,
     queryExpansionConfig: {
       enabled: false,

@@ -22,11 +22,13 @@ import {
   groundedAnswerAskMode,
   type ResolvedGroundedAnswerCase,
 } from './cases/grounded-answer-cases';
+import { evaluateEvidenceRanking } from './cases/evidence-groups';
 import { evalArtifactPath, runPath, traceRelativePath } from './artifacts';
 import {
   assessFaith,
   currentFaithOutcome,
   decodeFaithTrace,
+  FAITH_TRACE_PAYLOAD_REVISION,
   FaithSearchTraceSchema,
   type FaithContextSnapshot,
   type FaithErrorPhase,
@@ -85,9 +87,14 @@ function errorTrace(params: FaithErrorTraceInput): FaithTrace {
     judgeAttempts = [],
   } = params;
   const topIds = context?.chunks.map((chunk) => chunk.id) ?? [];
-  const foundCount = resolved.expectedChunkIds.filter((id) =>
-    topIds.includes(id),
-  ).length;
+  const coverage =
+    resolved.expectedEvidenceGroups.length === 0
+      ? null
+      : evaluateEvidenceRanking(
+          resolved.expectedEvidenceGroups,
+          topIds,
+          topIds.length,
+        );
   const sourceCoverage = evaluateSourceExpectation(
     resolved.sourceExpectation,
     context?.chunks.map((chunk) => chunk.sourceType) ?? [],
@@ -95,6 +102,7 @@ function errorTrace(params: FaithErrorTraceInput): FaithTrace {
 
   return decodeFaithTrace(
     toPersistedPayload({
+      payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
       id: resolved.id,
       governance: resolved.governance,
       input: resolved.input,
@@ -107,12 +115,12 @@ function errorTrace(params: FaithErrorTraceInput): FaithTrace {
       context,
       retrieval: {
         routed,
-        expectedChunkIds: resolved.expectedChunkIds,
+        expectedEvidenceGroups: resolved.expectedEvidenceGroups,
         topIds,
-        foundCount,
+        satisfiedGroupCount: coverage?.matches.length ?? 0,
         fullRecall:
-          resolved.expectedChunkIds.length > 0 &&
-          foundCount === resolved.expectedChunkIds.length,
+          resolved.expectedEvidenceGroups.length > 0 &&
+          coverage?.fullRecall === true,
         queryExpansionConfig: runConfig.queryExpansion,
         searchTrace,
       },
@@ -184,9 +192,14 @@ async function processCase(
         throw new TypeError('Ask user message must be text');
       }
       const topIds = contextChunks.map((chunk) => chunk.id);
-      const foundCount = !isRefusal
-        ? resolved.expectedChunkIds.filter((id) => topIds.includes(id)).length
-        : 0;
+      const coverage =
+        !isRefusal && resolved.expectedEvidenceGroups.length > 0
+          ? evaluateEvidenceRanking(
+              resolved.expectedEvidenceGroups,
+              topIds,
+              topIds.length,
+            )
+          : null;
       return {
         contextSnapshot: {
           text: userMessage,
@@ -194,9 +207,8 @@ async function processCase(
           sources: prepared.sources,
         } satisfies FaithContextSnapshot,
         topIds,
-        foundCount,
-        fullRecall:
-          !isRefusal && foundCount === resolved.expectedChunkIds.length,
+        satisfiedGroupCount: coverage?.matches.length ?? 0,
+        fullRecall: !isRefusal && coverage?.fullRecall === true,
         sourceCoverage: evaluateSourceExpectation(
           resolved.sourceExpectation,
           contextChunks.map((chunk) => chunk.sourceType),
@@ -214,7 +226,7 @@ async function processCase(
   const {
     contextSnapshot,
     topIds,
-    foundCount,
+    satisfiedGroupCount,
     fullRecall,
     sourceCoverage,
   } = contextResult;
@@ -265,6 +277,7 @@ async function processCase(
     () =>
       decodeFaithTrace(
         toPersistedPayload({
+          payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
           id: resolved.id,
           governance: resolved.governance,
           input: resolved.input,
@@ -277,9 +290,9 @@ async function processCase(
           context: contextSnapshot,
           retrieval: {
             routed,
-            expectedChunkIds: resolved.expectedChunkIds,
+            expectedEvidenceGroups: resolved.expectedEvidenceGroups,
             topIds,
-            foundCount,
+            satisfiedGroupCount,
             fullRecall,
             queryExpansionConfig: runConfig.queryExpansion,
             searchTrace,
@@ -514,9 +527,13 @@ async function main(): Promise<void> {
         trace.expectedBehavior === 'refuse_insufficient_context';
       const tag = isRefusal ? '[应拒答]' : '[应回答]';
       const { verdict, retrieval } = trace;
-      const { fullRecall, foundCount, expectedChunkIds } = retrieval;
+      const {
+        fullRecall,
+        satisfiedGroupCount,
+        expectedEvidenceGroups,
+      } = retrieval;
       const retrievalLabel = !isRefusal
-        ? ` 检索${fullRecall ? '✓' : '✗'}${expectedChunkIds.length > 1 ? ` ${foundCount}/${expectedChunkIds.length}` : ''}`
+        ? ` 检索${fullRecall ? '✓' : '✗'}${expectedEvidenceGroups.length > 1 ? ` ${satisfiedGroupCount}/${expectedEvidenceGroups.length}` : ''}`
         : '';
       const answer = trace.answer.replace(/\s+/g, ' ').slice(0, 90);
 

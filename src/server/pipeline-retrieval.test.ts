@@ -27,6 +27,7 @@ import {
 import { ServingRedactionError } from '../observability/redaction';
 import { decodeServingRetrievalObservation } from '../observability/serving-observation';
 import { toTraceHit, type RetrievalTrace } from '../retrieval/trace';
+import { evaluateEvidenceRanking } from '../eval/cases/evidence-groups';
 import {
   ANSWER_MODEL,
   ASK_MAX_TOKENS,
@@ -181,7 +182,10 @@ const exactCases = [
     name: 'PVC resource requests',
     kind: 'PersistentVolumeClaim',
     cursorPath: 'spec.resources.requests',
-    expectedIds: ['schema::v1::PersistentVolumeClaim::spec.resources.requests'],
+    expectedIds: [
+      'schema::v1::PersistentVolumeClaim::spec.resources.requests',
+      'docs::kubernetes::storage-classes::volume-expansion',
+    ],
   },
 ];
 
@@ -195,6 +199,10 @@ await check('Ask 使用统一的严格证据与拒答边界', () => {
   assert.match(ASK_SYSTEM, /字段、资源、API、参数、键、命令/);
   assert.match(ASK_SYSTEM, /限制本身不能推出未明示的补救动作/);
   assert.match(ASK_SYSTEM, /核心问题已有完整答案时立即结束/);
+  assert.match(
+    ASK_SYSTEM,
+    /问题只询问字段或路径时.*最直接匹配字段.*立即结束.*不得展开其他候选片段/u,
+  );
   assert.match(ASK_SYSTEM, /即使是否定描述.*不得点名证据中未出现的字段或选项/);
   assert.match(ASK_SYSTEM, /path 是完整字段路径.*必须原样使用/);
   assert.match(ASK_SYSTEM, /单字段段 path 表示顶层字段/);
@@ -388,8 +396,8 @@ await check('申请类配置问题按核心字段追加唯一官方示例', asyn
       question: 'PVC 怎么申请存储大小?',
       rankedIds: [
         'policy.pvc.resources.requests.storage.required',
+        'docs::kubernetes::storage-classes::volume-expansion',
         'schema::v1::PersistentVolumeClaim::spec.resources.requests',
-        'schema::v1::PersistentVolumeClaim::spec.resources',
       ],
       exampleId:
         'example::kubernetes::persistent-volume-claim-storage-request',
@@ -486,7 +494,7 @@ await check('跨资源最终目标驱动无示例时的通用骨架身份', asyn
   assert.doesNotMatch(prepared.context, /Pod · metadata\.name/u);
 });
 
-await check('多资源核心证据分别匹配官方示例时不猜测', async () => {
+await check('跨资源核心证据只为最终目标资源选择官方示例', async () => {
   const rankedIds = [
     'schema::v1::ResourceQuota::spec.hard',
     'schema::v1::LimitRange::spec.limits.default',
@@ -508,11 +516,7 @@ await check('多资源核心证据分别匹配官方示例时不猜测', async (
 
   assert.deepEqual(
     prepared.hits.map((hit) => hit.id),
-    rankedIds,
-  );
-  assert.equal(
-    prepared.hits.some((hit) => hit.sourceType === 'example'),
-    false,
+    [...rankedIds, 'example::kubernetes::resource-quota-mem-cpu'],
   );
 });
 
@@ -942,7 +946,7 @@ await check('调用方可注入内存 trace sink', async () => {
 });
 
 await check(
-  'exact path 覆盖核心字段,并返回 schema/policy 分层来源',
+  'exact path 覆盖核心字段并返回适用的分层来源',
   async () => {
     for (const tc of exactCases) {
       const result = await retrieveContext(
@@ -1157,11 +1161,13 @@ await check('对象字段错误进入 search 路径以检索子字段证据', as
     prepared.hits.map((hit) => hit.id),
     ranked.map((schemaChunk) => schemaChunk.id),
   );
-  assert.deepEqual(
-    resolved.expectedChunkIds.filter((id) =>
-      prepared.hits.some((hit) => hit.id === id),
-    ),
-    resolved.expectedChunkIds,
+  assert.equal(
+    evaluateEvidenceRanking(
+      resolved.expectedEvidenceGroups,
+      prepared.hits.map((hit) => hit.id),
+      prepared.hits.length,
+    ).fullRecall,
+    true,
   );
 
   await prepareAsk({

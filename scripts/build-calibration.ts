@@ -10,16 +10,17 @@ import {
 } from '../src/eval/calibration-snapshot';
 import { assertTuningEligibleCase } from '../src/eval/cases/governance';
 import {
-  decodeFaithTrace,
+  decodeFaithTraceArtifact,
+  type FaithTraceArtifact,
   type FaithTrace,
 } from '../src/eval/faith-store';
-import { listRuns } from '../src/eval/run-store';
+import { readRun } from '../src/eval/run-store';
 import type { EvalRun } from '../src/eval/protocol';
 import {
   evalArtifactPath,
   readTraceEnvelopes,
 } from '../src/eval/artifacts';
-import { faithTraceDatasetIdentity } from '../src/eval/runner-protocol';
+import { faithTraceArtifactDatasetIdentity } from '../src/eval/runner-protocol';
 import {
   decodeJudgeCalibrationCases,
   parseJudgeCalibrationLabelsJsonl,
@@ -44,20 +45,28 @@ function readLabels(): JudgeCalibrationLabel[] {
   return parseJudgeCalibrationLabelsJsonl(readFileSync(LABELS_PATH, 'utf8'));
 }
 
-function completedFaithRuns(): FaithEvalRun[] {
-  return listRuns({ kind: 'faith' })
-    .filter(
-      (run): run is FaithEvalRun =>
-        run.kind === 'faith' &&
-        run.status === 'completed' &&
-        run.scope !== 'smoke',
-    );
+function labeledFaithRuns(
+  labels: readonly JudgeCalibrationLabel[],
+): FaithEvalRun[] {
+  return [...new Set(labels.map((label) => label.sourceFaithRunId))].map(
+    (runId) => {
+      const run = readRun(runId);
+      if (run.kind !== 'faith') {
+        throw new Error(`calibration source ${runId} is not a faith run`);
+      }
+      if (run.status !== 'completed' || run.scope === 'smoke') {
+        throw new Error(
+          `calibration source ${runId} must be a completed non-smoke faith run`,
+        );
+      }
+      return run;
+    },
+  );
 }
 
 interface FaithTraceSnapshot {
   trace: FaithTrace;
   traceId: string;
-  run: FaithEvalRun;
 }
 
 function equalSorted(left: readonly string[], right: readonly string[]): boolean {
@@ -68,6 +77,7 @@ function equalSorted(left: readonly string[], right: readonly string[]): boolean
 }
 
 function readTraceFile(run: FaithEvalRun): FaithTraceSnapshot[] {
+  const artifacts: FaithTraceArtifact[] = [];
   const snapshots = readTraceEnvelopes(
     evalArtifactPath(run.artifactPaths.trace),
   ).map(
@@ -75,7 +85,8 @@ function readTraceFile(run: FaithEvalRun): FaithTraceSnapshot[] {
       if (envelope.runId !== run.id || envelope.kind !== 'faith') {
         throw new Error(`faith trace envelope mismatch: ${envelope.traceId}`);
       }
-      const trace = decodeFaithTrace(envelope.payload);
+      const artifact = decodeFaithTraceArtifact(envelope.payload);
+      const { trace } = artifact;
       if (trace.id !== envelope.evalCaseId) {
         throw new Error(`faith trace payload mismatch: ${envelope.traceId}`);
       }
@@ -84,7 +95,8 @@ function readTraceFile(run: FaithEvalRun): FaithTraceSnapshot[] {
           `faith trace governance mismatch: ${envelope.traceId}`,
         );
       }
-      return { trace, traceId: envelope.traceId, run };
+      artifacts.push(artifact);
+      return { trace, traceId: envelope.traceId };
     },
   );
   const traces = snapshots.map(({ trace }) => trace);
@@ -96,7 +108,7 @@ function readTraceFile(run: FaithEvalRun): FaithTraceSnapshot[] {
   ) {
     throw new Error(`faith run ${run.id} trace cases do not match dataset`);
   }
-  const snapshotIdentity = faithTraceDatasetIdentity(traces);
+  const snapshotIdentity = faithTraceArtifactDatasetIdentity(artifacts);
   if (
     snapshotIdentity.hash !== run.dataset.hash ||
     !isDeepStrictEqual(snapshotIdentity.cases, run.dataset.cases)
@@ -107,8 +119,8 @@ function readTraceFile(run: FaithEvalRun): FaithTraceSnapshot[] {
 }
 
 function main(): void {
-  const runs = completedFaithRuns();
   const labels = readLabels();
+  const runs = labeledFaithRuns(labels);
   if (runs.length === 0) {
     throw new Error('无可用 faith trace snapshot');
   }

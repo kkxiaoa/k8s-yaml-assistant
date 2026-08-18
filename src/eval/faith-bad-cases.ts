@@ -10,7 +10,8 @@ import {
 } from './bad-cases';
 import {
   assessFaith,
-  decodeFaithTrace,
+  decodeFaithTraceArtifact,
+  type FaithTraceArtifact,
   type FaithTrace,
 } from './faith-store';
 import {
@@ -18,7 +19,7 @@ import {
   readTraceEnvelopes,
   runPath,
 } from './artifacts';
-import { faithTraceDatasetIdentity } from './runner-protocol';
+import { faithTraceArtifactDatasetIdentity } from './runner-protocol';
 import { readRun } from './run-store';
 import { type EvalRun } from './protocol';
 
@@ -151,6 +152,7 @@ export function readFaithBadCaseInput(params: {
   }
   const envelopes = readTraceEnvelopes(tracePath);
   const observations: FaithTraceObservation[] = [];
+  const artifacts: FaithTraceArtifact[] = [];
 
   const seenCaseIds = new Set<string>();
   for (const envelope of envelopes) {
@@ -160,7 +162,8 @@ export function readFaithBadCaseInput(params: {
     if (seenCaseIds.has(envelope.evalCaseId)) {
       throw new Error(`duplicate trace case id: ${envelope.evalCaseId}`);
     }
-    const trace = decodeFaithTrace(envelope.payload);
+    const artifact = decodeFaithTraceArtifact(envelope.payload);
+    const { trace } = artifact;
     if (trace.id !== envelope.evalCaseId) {
       throw new Error(
         `faith payload id mismatch: envelope=${envelope.evalCaseId} payload=${trace.id}`,
@@ -172,6 +175,7 @@ export function readFaithBadCaseInput(params: {
       );
     }
     seenCaseIds.add(envelope.evalCaseId);
+    artifacts.push(artifact);
     observations.push({
       trace,
       latestEvidence: { runId: run.id, traceId: envelope.traceId },
@@ -187,9 +191,7 @@ export function readFaithBadCaseInput(params: {
     throw new Error('faith trace cases do not match run dataset');
   }
 
-  const selectionIdentity = faithTraceDatasetIdentity(
-    observations.map(({ trace }) => trace),
-  );
+  const selectionIdentity = faithTraceArtifactDatasetIdentity(artifacts);
   if (
     run.dataset.hash !== selectionIdentity.hash ||
     !isDeepStrictEqual(run.dataset.cases, selectionIdentity.cases)
@@ -303,7 +305,7 @@ function issueFromTrace(params: {
     taskType: existing?.taskType ?? taskTypeFromTrace(trace),
     input: existing?.input ?? { question: trace.question },
     expected: existing?.expected ?? {
-      sourceIds: trace.retrieval.expectedChunkIds,
+      sourceIdGroups: trace.retrieval.expectedEvidenceGroups,
     },
     actual: {
       ...existing?.actual,

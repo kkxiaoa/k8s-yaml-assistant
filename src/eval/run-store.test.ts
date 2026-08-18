@@ -45,6 +45,7 @@ const GOVERNANCE = {
 function runFixture(
   id: string,
   createdAt = '2026-07-12T00:00:00.000Z',
+  metricDefinitionVersion = 'legacy-v1',
 ): Extract<EvalRun, { kind: 'retrieval' }> {
   return {
     schemaVersion: EVAL_SCHEMA_VERSION,
@@ -61,7 +62,7 @@ function runFixture(
       caseCount: 1,
     },
     artifactPaths: { trace: `traces/${id}.retrieval.jsonl` },
-    metricDefinitionVersion: 'legacy-v1',
+    metricDefinitionVersion,
     config: {
       corpusManifestHash: HASH_B,
       indexHash: HASH_B,
@@ -137,7 +138,7 @@ check('readRun rejects a filename/run-id mismatch', () => {
   );
 });
 
-check('listRuns decodes every file, filters by kind, and latestRun uses createdAt', () => {
+check('listRuns decodes matching files and latestRun uses createdAt', () => {
   const evalRoot = mkdtempSync(join(tmpdir(), 'run-store-'));
   writeJsonAtomic(
     runPath('z-older', evalRoot),
@@ -154,6 +155,79 @@ check('listRuns decodes every file, filters by kind, and latestRun uses createdA
   );
   assert.equal(latestRun({ kind: 'retrieval', evalRoot })?.id, 'a-newer');
   assert.equal(latestRun({ kind: 'faith', evalRoot }), null);
+});
+
+check('run listing projects kind and metric identity before strict decoding', () => {
+  const evalRoot = mkdtempSync(join(tmpdir(), 'run-store-'));
+  writeJsonAtomic(
+    runPath('current', evalRoot),
+    runFixture(
+      'current',
+      '2026-07-12T00:00:00.000Z',
+      'current-v2',
+    ),
+  );
+  writeJsonAtomic(runPath('retired-candidate', evalRoot), {
+    ...runFixture(
+      'retired-candidate',
+      '2026-07-12T01:00:00.000Z',
+      'legacy-v1',
+    ),
+    config: {
+      ...runFixture('retired-candidate').config,
+      queryDecomposition: { enabled: true },
+    },
+  });
+
+  assert.deepEqual(
+    listRuns({
+      kind: 'retrieval',
+      metricDefinitionVersion: 'current-v2',
+      evalRoot,
+    }).map((run) => run.id),
+    ['current'],
+  );
+  assert.equal(
+    latestRun({
+      metricDefinitionVersion: 'current-v2',
+      evalRoot,
+    })?.id,
+    'current',
+  );
+  assert.throws(
+    () => listRuns({ kind: 'retrieval', evalRoot }),
+    /retired-candidate.*queryDecomposition/s,
+  );
+});
+
+check('run listing ignores unconsumed fields on excluded artifacts', () => {
+  const evalRoot = mkdtempSync(join(tmpdir(), 'run-store-'));
+  writeJsonAtomic(
+    runPath('current', evalRoot),
+    runFixture(
+      'current',
+      '2026-07-12T00:00:00.000Z',
+      'current-v2',
+    ),
+  );
+  writeJsonAtomic(runPath('excluded-legacy', evalRoot), {
+    ...runFixture(
+      'excluded-legacy',
+      '2026-07-12T01:00:00.000Z',
+      'legacy-v1',
+    ),
+    id: null,
+    createdAt: 'legacy timestamp',
+  });
+
+  assert.deepEqual(
+    listRuns({
+      kind: 'retrieval',
+      metricDefinitionVersion: 'current-v2',
+      evalRoot,
+    }).map((run) => run.id),
+    ['current'],
+  );
 });
 
 check('listRuns fails loudly when a run artifact cannot be decoded', () => {

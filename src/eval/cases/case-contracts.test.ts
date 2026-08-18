@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { ZodError } from 'zod';
+import { CORPUS } from '../../knowledge/corpus';
 import { readBadCases } from '../bad-cases';
 import { preflightFixCases, type FixCase } from '../assertions';
 import { FIX_CASES } from './fix-cases';
 import { GENERATION_CASES } from './generation-cases';
 import { selectCasesForSuite } from './governance';
+import { exactEvidenceGroups } from './evidence-groups';
 import {
   RETRIEVAL_CASES,
   decodeSemanticRetrievalCases,
@@ -46,7 +48,11 @@ function semanticCase(overrides: Record<string, unknown> = {}): unknown {
   return {
     id: 'pod-image',
     question: 'Pod 里怎么指定容器镜像?',
-    expectedChunkIds: ['schema::v1::Pod::spec.containers.image'],
+    expectedEvidenceGroups: [
+      {
+        anyOfChunkIds: ['schema::v1::Pod::spec.containers.image'],
+      },
+    ],
     target: { kind: 'Pod' },
     governance: FIELD_DEVELOPMENT,
     ...overrides,
@@ -96,7 +102,7 @@ expectInvalid(() =>
 );
 expectInvalid(() =>
   decodeSemanticRetrievalCases(
-    [semanticCase({ expectedChunkIds: [] })],
+    [semanticCase({ expectedEvidenceGroups: [] })],
     { knownChunkIds },
   ),
 );
@@ -127,7 +133,11 @@ expectInvalid(() =>
 );
 expectInvalid(() =>
   decodeSemanticRetrievalCases(
-    [semanticCase({ expectedChunkIds: ['missing-chunk'] })],
+    [
+      semanticCase({
+        expectedEvidenceGroups: [{ anyOfChunkIds: ['missing-chunk'] }],
+      }),
+    ],
     { knownChunkIds },
   ),
   /unknown expected chunk id/,
@@ -136,15 +146,19 @@ expectInvalid(() =>
   decodeSemanticRetrievalCases(
     [
       semanticCase({
-        expectedChunkIds: [
-          'schema::v1::Pod::spec.containers.image',
-          'schema::v1::Pod::spec.containers.image',
+        expectedEvidenceGroups: [
+          {
+            anyOfChunkIds: [
+              'schema::v1::Pod::spec.containers.image',
+              'schema::v1::Pod::spec.containers.image',
+            ],
+          },
         ],
       }),
     ],
     { knownChunkIds },
   ),
-  /duplicate expected chunk id/,
+  /duplicate evidence chunk id/,
 );
 
 for (const legacyOrEditorField of [
@@ -323,9 +337,9 @@ const answerableGatewayCases = decodeSemanticRetrievalCases([
       kind: 'HTTPRoute',
       apiVersion: 'gateway.networking.k8s.io/v1',
     },
-    expectedChunkIds: [
+    expectedEvidenceGroups: exactEvidenceGroups([
       'schema::gateway.networking.k8s.io/v1::HTTPRoute::spec.rules.backendRefs.weight',
-    ],
+    ]),
   }),
 ]);
 expectInvalid(
@@ -567,6 +581,23 @@ const storageClassExpansionGroundedAnswerCase =
   resolvedGroundedAnswerCases.find(
     (evalCase) => evalCase.id === 'sc-allowexpansion',
   );
+const roleBindingCrossResourceCase = RETRIEVAL_CASES.find(
+  (evalCase) => evalCase.id === 'cross-rolebinding-role-subject',
+);
+const podVolumeCrossResourceCase = RETRIEVAL_CASES.find(
+  (evalCase) => evalCase.id === 'cross-pod-volume-sources',
+);
+const hpaDeploymentCrossResourceCase = RETRIEVAL_CASES.find(
+  (evalCase) => evalCase.id === 'cross-hpa-deployment',
+);
+const pvcExpansionCrossResourceCase = RETRIEVAL_CASES.find(
+  (evalCase) => evalCase.id === 'cross-pvc-storageclass-expansion',
+);
+const roleBindingSubjectKind = CORPUS.find(
+  (chunk) =>
+    chunk.id ===
+    'schema::rbac.authorization.k8s.io/v1::RoleBinding::subjects.kind',
+);
 const statefulSetVolumeClaimGroundedAnswerCase =
   resolvedGroundedAnswerCases.find(
     (evalCase) => evalCase.id === 'sts-volumeclaimtemplates',
@@ -585,16 +616,16 @@ assert.ok(storageClassExpansionRetrievalCase);
 assert.ok(storageClassExpansionGroundedAnswerCase);
 assert.ok(statefulSetVolumeClaimGroundedAnswerCase);
 assert.ok(persistentVolumeClaimResourcesGroundedAnswerCase);
-assert.deepEqual(quotaRetrievalCase.expectedChunkIds, [
+assert.deepEqual(quotaRetrievalCase.expectedEvidenceGroups, exactEvidenceGroups([
   'schema::v1::ResourceQuota::spec.hard',
   'docs::kubernetes::resource-quotas::compute-resource-quota',
   'example::kubernetes::resource-quota-mem-cpu',
-]);
-assert.deepEqual(quotaGroundedAnswerCase.expectedChunkIds, [
+]));
+assert.deepEqual(quotaGroundedAnswerCase.expectedEvidenceGroups, exactEvidenceGroups([
   'schema::v1::ResourceQuota::spec.hard',
   'docs::kubernetes::resource-quotas::compute-resource-quota',
   'example::kubernetes::resource-quota-mem-cpu',
-]);
+]));
 assert.deepEqual(quotaGroundedAnswerCase.sourceExpectation, {
   mode: 'required',
   types: ['schema', 'docs', 'example'],
@@ -603,42 +634,105 @@ assert.equal(
   limitRangeRetrievalCase.question,
   'LimitRange 怎么给容器设默认资源?',
 );
-assert.deepEqual(limitRangeRetrievalCase.expectedChunkIds, [
+assert.deepEqual(limitRangeRetrievalCase.expectedEvidenceGroups, exactEvidenceGroups([
   'schema::v1::LimitRange::spec.limits.default',
   'schema::v1::LimitRange::spec.limits.defaultRequest',
-]);
+]));
 assert.deepEqual(
-  limitRangeGroundedAnswerCase.expectedChunkIds,
-  limitRangeRetrievalCase.expectedChunkIds,
+  limitRangeGroundedAnswerCase.expectedEvidenceGroups,
+  limitRangeRetrievalCase.expectedEvidenceGroups,
 );
 assert.deepEqual(limitRangeGroundedAnswerCase.sourceExpectation, {
   mode: 'required',
   types: ['schema', 'docs', 'example'],
 });
-assert.deepEqual(storageClassBindingRetrievalCase.expectedChunkIds, [
+assert.deepEqual(storageClassBindingRetrievalCase.expectedEvidenceGroups, exactEvidenceGroups([
   'schema::storage.k8s.io/v1::StorageClass::volumeBindingMode',
   'docs::kubernetes::storage-classes::volume-binding-mode',
   'example::kubernetes::storageclass-low-latency',
-]);
+]));
 assert.deepEqual(
-  storageClassBindingGroundedAnswerCase.expectedChunkIds,
-  storageClassBindingRetrievalCase.expectedChunkIds,
+  storageClassBindingGroundedAnswerCase.expectedEvidenceGroups,
+  storageClassBindingRetrievalCase.expectedEvidenceGroups,
 );
 assert.deepEqual(storageClassBindingGroundedAnswerCase.sourceExpectation, {
   mode: 'required',
   types: ['schema', 'docs', 'example'],
 });
-assert.deepEqual(storageClassExpansionRetrievalCase.expectedChunkIds, [
-  'schema::storage.k8s.io/v1::StorageClass::allowVolumeExpansion',
-  'example::kubernetes::storageclass-low-latency',
+assert.deepEqual(storageClassExpansionRetrievalCase.expectedEvidenceGroups, [
+  {
+    anyOfChunkIds: [
+      'schema::storage.k8s.io/v1::StorageClass::allowVolumeExpansion',
+      'docs::kubernetes::storage-classes::volume-expansion',
+    ],
+  },
+  { anyOfChunkIds: ['example::kubernetes::storageclass-low-latency'] },
 ]);
+assert.deepEqual(roleBindingCrossResourceCase?.expectedEvidenceGroups, exactEvidenceGroups([
+  'schema::rbac.authorization.k8s.io/v1::RoleBinding::roleRef',
+  'schema::rbac.authorization.k8s.io/v1::RoleBinding::subjects.kind',
+]));
+assert.deepEqual(podVolumeCrossResourceCase?.expectedEvidenceGroups, [
+  {
+    anyOfChunkIds: [
+      'schema::v1::Pod::spec.volumes.persistentVolumeClaim',
+      'docs::kubernetes::volumes::persistent-volume-claim',
+    ],
+  },
+  {
+    anyOfChunkIds: [
+      'schema::v1::Pod::spec.volumes.configMap',
+      'docs::kubernetes::volumes::config-map',
+    ],
+  },
+  {
+    anyOfChunkIds: [
+      'schema::v1::Pod::spec.volumes.secret',
+      'docs::kubernetes::volumes::secret',
+    ],
+  },
+]);
+assert.deepEqual(hpaDeploymentCrossResourceCase?.expectedEvidenceGroups, [
+  {
+    anyOfChunkIds: [
+      'schema::autoscaling/v2::HorizontalPodAutoscaler::spec.scaleTargetRef',
+      'docs::kubernetes::horizontal-pod-autoscale::scale-target',
+    ],
+  },
+]);
+assert.equal(
+  pvcExpansionCrossResourceCase?.question,
+  '需要配置哪些资源字段才能支持 PVC 扩容？',
+);
+assert.deepEqual(pvcExpansionCrossResourceCase?.expectedEvidenceGroups, [
+  {
+    anyOfChunkIds: [
+      'schema::v1::PersistentVolumeClaim::spec.resources.requests',
+      'docs::kubernetes::storage-classes::volume-expansion',
+    ],
+  },
+  {
+    anyOfChunkIds: [
+      'schema::storage.k8s.io/v1::StorageClass::allowVolumeExpansion',
+      'docs::kubernetes::storage-classes::volume-expansion',
+    ],
+  },
+]);
+assert.deepEqual(roleBindingSubjectKind?.targets, [
+  {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'RoleBinding',
+    path: 'subjects.kind',
+  },
+]);
+assert.match(roleBindingSubjectKind?.text ?? '', /ServiceAccount/u);
 assert.deepEqual(
-  storageClassExpansionGroundedAnswerCase.expectedChunkIds,
-  storageClassExpansionRetrievalCase.expectedChunkIds,
+  storageClassExpansionGroundedAnswerCase.expectedEvidenceGroups,
+  storageClassExpansionRetrievalCase.expectedEvidenceGroups,
 );
 assert.deepEqual(storageClassExpansionGroundedAnswerCase.sourceExpectation, {
   mode: 'required',
-  types: ['schema', 'example'],
+  types: ['example'],
 });
 assert.deepEqual(statefulSetVolumeClaimGroundedAnswerCase.sourceExpectation, {
   mode: 'required',
@@ -815,9 +909,9 @@ assert.deepEqual(
         apiVersion: 'gateway.networking.k8s.io/v1',
       },
       question: 'Gateway API 的 HTTPRoute 怎么按权重分流?',
-      expectedChunkIds: [
+      expectedEvidenceGroups: exactEvidenceGroups([
         'schema::gateway.networking.k8s.io/v1::HTTPRoute::spec.rules.backendRefs.weight',
-      ],
+      ]),
     },
     {
       id: 'certificate-issuer-ref',
@@ -827,9 +921,9 @@ assert.deepEqual(
         apiVersion: 'cert-manager.io/v1',
       },
       question: 'cert-manager 的 Certificate 怎么指定签发者 issuer?',
-      expectedChunkIds: [
+      expectedEvidenceGroups: exactEvidenceGroups([
         'schema::cert-manager.io/v1::Certificate::spec.issuerRef',
-      ],
+      ]),
     },
   ],
 );
@@ -842,7 +936,10 @@ for (const id of [
   );
   const retrieval = RETRIEVAL_CASES.find((evalCase) => evalCase.id === id)!;
   assert.deepEqual(resolved.governance, retrieval.governance);
-  assert.deepEqual(resolved.expectedChunkIds, retrieval.expectedChunkIds);
+  assert.deepEqual(
+    resolved.expectedEvidenceGroups,
+    retrieval.expectedEvidenceGroups,
+  );
 }
 assert.equal(
   RETRIEVAL_CASES.every((evalCase) => !('source' in evalCase)),
@@ -868,6 +965,10 @@ assert.deepEqual(
     .sort(),
   [
     'cm-immutable',
+    'cross-hpa-deployment',
+    'cross-pod-volume-sources',
+    'cross-pvc-storageclass-expansion',
+    'cross-rolebinding-role-subject',
     'deploy-container-image',
     'endpoints-subsets',
     'pod-volumes',

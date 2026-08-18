@@ -31,6 +31,7 @@ import {
 } from './judge';
 import {
   computeCanonicalHash,
+  computeDatasetHash,
   metricObservation,
   type MetricObservation,
 } from './protocol';
@@ -38,6 +39,7 @@ import {
   buildRetrievalEvalTracePayload,
   faithMetricsRecord,
   faithDatasetIdentity,
+  faithTraceArtifactDatasetIdentity,
   faithTraceDatasetIdentity,
   faithEvalConfig,
   fixDatasetIdentity,
@@ -61,10 +63,16 @@ import {
 } from './runner-protocol';
 import type { GroundedAnswerCase } from './cases/grounded-answer-cases';
 import type { SemanticRetrievalCase } from './cases/retrieval-cases';
+import { exactEvidenceGroups } from './cases/evidence-groups';
 import type { GenerationEvalCase } from './cases/generation-cases';
 import { FIX_CASES, type FixCase } from './cases/fix-cases';
 import type { JudgeCalibrationCase } from './metrics/judge-metrics';
-import { decodeFaithTrace, type FaithTrace } from './faith-store';
+import {
+  decodeFaithTrace,
+  decodeFaithTraceArtifact,
+  FAITH_TRACE_PAYLOAD_REVISION,
+  type FaithTrace,
+} from './faith-store';
 import {
   EvalCaseExecutionError,
   EvalRunExecutionError,
@@ -105,7 +113,7 @@ const SEMANTIC_CASE: SemanticRetrievalCase = {
     role: 'development',
   },
   question: 'How?',
-  expectedChunkIds: ['Chunk::b', 'Chunk::a'],
+  expectedEvidenceGroups: exactEvidenceGroups(['Chunk::b', 'Chunk::a']),
   target: { kind: 'Pod' },
 };
 const GROUNDED_REFERENCE: GroundedAnswerCase = {
@@ -235,6 +243,46 @@ check('semantic retrieval dataset contains only Recall/MRR cases', () => {
   assert.equal(identity.id, 'retrieval/semantic');
 });
 
+check('retrieval targeted selection is explicit', () => {
+  const cases = [
+    SEMANTIC_CASE,
+    REGRESSION_RETRIEVAL_CASE,
+    HOLDOUT_RETRIEVAL_CASE,
+  ];
+  const selected = selectRetrievalCases(
+    [
+      '--case',
+      'regression-semantic',
+      '--case',
+      'semantic',
+    ],
+    cases,
+  );
+
+  assert.equal(selected.scope, 'targeted');
+  assert.equal(selected.k, 3);
+  assert.deepEqual(
+    selected.cases.map((evalCase) => evalCase.id),
+    ['semantic', 'regression-semantic'],
+  );
+  assert.throws(
+    () =>
+      selectRetrievalCases(
+        ['--case', 'holdout-semantic'],
+        cases,
+      ),
+    /Holdout/u,
+  );
+  assert.throws(
+    () =>
+      selectRetrievalCases(
+        ['--full', '--case', 'semantic'],
+        cases,
+      ),
+    /用法/u,
+  );
+});
+
 check('retrieval defaults to tuning and only explicit flags select holdout or full', () => {
   const cases = [
     HOLDOUT_RETRIEVAL_CASE,
@@ -268,7 +316,10 @@ check('dataset hashes ignore case declaration order but change with semantics', 
   const ordered = retrievalDatasetIdentity([SEMANTIC_CASE, second]);
   const reversed = retrievalDatasetIdentity([second, SEMANTIC_CASE]);
   const changed = retrievalDatasetIdentity([
-    { ...SEMANTIC_CASE, expectedChunkIds: ['Chunk::changed'] },
+    {
+      ...SEMANTIC_CASE,
+      expectedEvidenceGroups: exactEvidenceGroups(['Chunk::changed']),
+    },
     second,
   ]);
 
@@ -313,8 +364,8 @@ check('faith selection includes explicit referenced and standalone cases', () =>
   assert.deepEqual(prepared.identity, identity);
   assert.equal(prepared.cases[0]?.question, SEMANTIC_CASE.question);
   assert.deepEqual(
-    prepared.cases[0]?.expectedChunkIds,
-    SEMANTIC_CASE.expectedChunkIds,
+    prepared.cases[0]?.expectedEvidenceGroups,
+    SEMANTIC_CASE.expectedEvidenceGroups,
   );
   assert.deepEqual(
     prepared.cases[0]?.governance,
@@ -406,6 +457,7 @@ check('validation-error faith identity snapshots the resolved real fixture', () 
   assert.ok((resolved.editorContext?.errors.length ?? 0) > 0);
 
   const trace: FaithTrace = {
+    payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
     id: resolved.id,
     governance: resolved.governance,
     input: resolved.input,
@@ -415,9 +467,9 @@ check('validation-error faith identity snapshots the resolved real fixture', () 
     target: resolved.target,
     editorContext: resolved.editorContext,
     retrieval: {
-      expectedChunkIds: resolved.expectedChunkIds,
+      expectedEvidenceGroups: resolved.expectedEvidenceGroups,
       topIds: [],
-      foundCount: 0,
+      satisfiedGroupCount: 0,
       fullRecall: false,
       queryExpansionConfig: {
         enabled: false,
@@ -459,6 +511,7 @@ check('validation-error faith identity snapshots the resolved real fixture', () 
 check('grounded and persisted faith snapshots share governance identity', () => {
   const prepared = prepareFaithDataset([GROUNDED_REFERENCE], [SEMANTIC_CASE]);
   const trace: FaithTrace = {
+    payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
     id: SEMANTIC_CASE.id,
     governance: SEMANTIC_CASE.governance,
     input: GROUNDED_REFERENCE.input,
@@ -467,9 +520,9 @@ check('grounded and persisted faith snapshots share governance identity', () => 
     sourceExpectation: GROUNDED_REFERENCE.sourceExpectation,
     target: SEMANTIC_CASE.target,
     retrieval: {
-      expectedChunkIds: SEMANTIC_CASE.expectedChunkIds,
+      expectedEvidenceGroups: SEMANTIC_CASE.expectedEvidenceGroups,
       topIds: [],
-      foundCount: 0,
+      satisfiedGroupCount: 0,
       fullRecall: false,
       queryExpansionConfig: {
         enabled: false,
@@ -493,6 +546,120 @@ check('grounded and persisted faith snapshots share governance identity', () => 
       },
     ]).hash,
     prepared.identity.hash,
+  );
+});
+
+check('legacy faith artifacts normalize at the file boundary and retain their original dataset identity', () => {
+  const currentTrace: FaithTrace = {
+    payloadRevision: FAITH_TRACE_PAYLOAD_REVISION,
+    id: SEMANTIC_CASE.id,
+    governance: SEMANTIC_CASE.governance,
+    input: GROUNDED_REFERENCE.input,
+    question: SEMANTIC_CASE.question,
+    expectedBehavior: GROUNDED_REFERENCE.expectedBehavior,
+    sourceExpectation: GROUNDED_REFERENCE.sourceExpectation,
+    target: SEMANTIC_CASE.target,
+    retrieval: {
+      expectedEvidenceGroups: SEMANTIC_CASE.expectedEvidenceGroups,
+      topIds: ['Chunk::a'],
+      satisfiedGroupCount: 1,
+      fullRecall: false,
+      queryExpansionConfig: {
+        enabled: false,
+        registryHash: null,
+        reviewedAliasCount: 0,
+      },
+    },
+    answer: '',
+    judgeAttempts: [],
+    verdict: null,
+    outcome: 'error',
+    errorPhase: 'retrieval',
+  };
+  const {
+    payloadRevision: _payloadRevision,
+    retrieval: currentRetrieval,
+    ...legacyRoot
+  } = currentTrace;
+  const {
+    expectedEvidenceGroups: _expectedEvidenceGroups,
+    satisfiedGroupCount: _satisfiedGroupCount,
+    ...sharedRetrieval
+  } = currentRetrieval;
+  const legacyPayload = {
+    ...legacyRoot,
+    retrieval: {
+      ...sharedRetrieval,
+      expectedChunkIds: ['Chunk::b', 'Chunk::a'],
+      foundCount: 1,
+    },
+  };
+
+  const artifact = decodeFaithTraceArtifact(legacyPayload);
+  assert.equal(artifact.sourcePayloadRevision, 1);
+  assert.deepEqual(
+    artifact.trace.retrieval.expectedEvidenceGroups,
+    exactEvidenceGroups(['Chunk::b', 'Chunk::a']),
+  );
+  assert.equal(artifact.trace.retrieval.satisfiedGroupCount, 1);
+  assert.equal(
+    decodeFaithTraceArtifact(currentTrace).sourcePayloadRevision,
+    FAITH_TRACE_PAYLOAD_REVISION,
+  );
+  assert.throws(
+    () =>
+      decodeFaithTraceArtifact({
+        ...currentTrace,
+        retrieval: {
+          ...currentTrace.retrieval,
+          satisfiedGroupCount: 2,
+        },
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes('satisfiedGroupCount') &&
+      !error.message.includes('expectedChunkIds'),
+  );
+  assert.throws(
+    () =>
+      decodeFaithTraceArtifact({
+        ...legacyPayload,
+        retrieval: { ...legacyPayload.retrieval, foundCount: 2 },
+      }),
+    /foundCount/u,
+  );
+
+  const legacyIdentity = faithTraceArtifactDatasetIdentity([artifact]);
+  assert.equal(
+    legacyIdentity.hash,
+    computeDatasetHash([
+      {
+        id: SEMANTIC_CASE.id,
+        input: GROUNDED_REFERENCE.input,
+        expectedBehavior: GROUNDED_REFERENCE.expectedBehavior,
+        sourceExpectation: {
+          mode: GROUNDED_REFERENCE.sourceExpectation!.mode,
+          types: [...GROUNDED_REFERENCE.sourceExpectation!.types].sort(),
+        },
+        question: SEMANTIC_CASE.question,
+        expectedChunkIds: ['Chunk::a', 'Chunk::b'],
+        target: SEMANTIC_CASE.target,
+        editorContext: null,
+        governance: SEMANTIC_CASE.governance,
+      },
+    ]),
+  );
+  assert.notEqual(
+    legacyIdentity.hash,
+    faithTraceDatasetIdentity([currentTrace]).hash,
+  );
+  assert.throws(
+    () =>
+      faithTraceArtifactDatasetIdentity([
+        artifact,
+        decodeFaithTraceArtifact({ ...currentTrace, id: 'second' }),
+      ]),
+    /mixed faith payload revisions/u,
   );
 });
 
@@ -886,32 +1053,62 @@ check('generation/fix identities hash actual system, tool, and validation inputs
   assert.equal(VALIDATION_LOGIC_REVISION, 'schema-validator-v2');
 });
 
-check('retrieval payload preserves retrieval trace and rank diagnostics', () => {
+check('retrieval payload truncates reciprocal rank at k and preserves diagnostics', () => {
   const payload = buildRetrievalEvalTracePayload({
     trace: {
       question: 'How?',
       mode: 'free',
       queryText: 'How?',
       path: 'search',
-      coarseHits: [],
+      coarseHits: [
+        {
+          id: 'Chunk::a',
+          title: 'Chunk A',
+          sourceType: 'schema',
+          provenance: { authority: 'cluster_api' },
+          targets: [{ kind: 'Pod', path: 'spec.a' }],
+        },
+      ],
       rerankHits: [],
       finalHits: [],
       latencyMs: { total: 1 },
       cache: { index: { status: 'hit' }, embeddingHit: false },
       createdAt: '2026-07-12T00:00:00.000Z',
     },
-    expectedChunkIds: ['Chunk::a'],
+    expectedEvidenceGroups: exactEvidenceGroups(['Chunk::a']),
     rankedIds: ['Chunk::b', 'Chunk::a'],
     k: 1,
   });
 
   assert.equal(payload.trace.question, 'How?');
-  assert.deepEqual(payload.expected, { chunkIds: ['Chunk::a'], k: 1 });
+  assert.deepEqual(payload.expected, {
+    evidenceGroups: exactEvidenceGroups(['Chunk::a']),
+    k: 1,
+  });
   assert.deepEqual(payload.ranking, {
     topKIds: ['Chunk::b'],
-    foundIds: [],
+    matches: [],
     firstRelevantRank: 2,
     recall: 0,
+    reciprocalRank: 0,
+  });
+  assert.deepEqual(payload.attribution, {
+    coarseMissingGroupIndexes: [],
+    postRerankMissingGroupIndexes: [0],
+    fullRecall: false,
+  });
+
+  const withinCutoff = buildRetrievalEvalTracePayload({
+    trace: payload.trace,
+    expectedEvidenceGroups: exactEvidenceGroups(['Chunk::a']),
+    rankedIds: ['Chunk::b', 'Chunk::a'],
+    k: 2,
+  });
+  assert.deepEqual(withinCutoff.ranking, {
+    topKIds: ['Chunk::b', 'Chunk::a'],
+    matches: [{ groupIndex: 0, chunkId: 'Chunk::a', rank: 2 }],
+    firstRelevantRank: 2,
+    recall: 1,
     reciprocalRank: 0.5,
   });
 });

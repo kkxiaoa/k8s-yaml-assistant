@@ -179,6 +179,21 @@ check('revision changes the version when numerator or pass semantics change', ()
   assert.notEqual(versionOf({ revision: 1 }), versionOf({ revision: 2 }));
 });
 
+check('retrieval metrics record the evidence-group contract revision', () => {
+  assert.equal(
+    METRIC_DEFINITIONS.find(
+      (definition) => definition.key === 'retrieval.semantic.recall',
+    )?.revision,
+    2,
+  );
+  assert.equal(
+    METRIC_DEFINITIONS.find(
+      (definition) => definition.key === 'retrieval.semantic.mrr',
+    )?.revision,
+    3,
+  );
+});
+
 check('current definition version is the canonical registry SHA-256', () => {
   assert.match(METRIC_DEFINITION_VERSION, /^[a-f0-9]{64}$/);
   assert.equal(
