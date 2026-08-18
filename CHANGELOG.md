@@ -3,6 +3,15 @@
 > 状态：当前维护。
 > 用途：记录面向使用者的版本变化、部署边界和已知限制。
 
+## [0.7.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.6.0...v0.7.0) (2026-08-18)
+
+
+### Features
+
+* expand grounded docs and examples ([#56](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/56)) ([0fa875d](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/0fa875d7609aa5b71bf845968979766a358fd788))
+* ground answers with docs and schema evidence ([4ae5560](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/4ae556048a4f83d9659b367c938e65113e91998f))
+* improve grounded Kubernetes retrieval ([#57](https://github.com/kkxiaoa/k8s-yaml-assistant/issues/57)) ([5e4cf82](https://github.com/kkxiaoa/k8s-yaml-assistant/commit/5e4cf82e16900734531dfe0c1e8f3a94871b4c26))
+
 ## [0.6.0](https://github.com/kkxiaoa/k8s-yaml-assistant/compare/v0.5.0...v0.6.0) (2026-08-06)
 
 
