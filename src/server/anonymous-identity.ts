@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { APPLICATION_BASE_PATH } from '../shared/application-path.mjs';
+import { applicationPath } from '../shared/application-path.mjs';
 import {
   issueAnonymousTrialToken,
   verifyAnonymousTrialToken,
@@ -31,7 +31,7 @@ export async function getAnonymousIdentity(
       httpOnly: true,
       secure: environment.NODE_ENV === 'production',
       sameSite: 'lax',
-      path: APPLICATION_BASE_PATH,
+      path: applicationPath('/'),
       maxAge: ANONYMOUS_TRIAL_DURATION_MS / 1_000,
     });
   }

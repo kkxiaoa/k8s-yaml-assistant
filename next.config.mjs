@@ -1,9 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  APPLICATION_BASE_PATH,
-  rootHealthRedirects,
-} from './src/shared/application-path.mjs';
+import { APPLICATION_BASE_PATH } from './src/shared/application-path.mjs';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,7 +11,6 @@ const nextConfig = {
   outputFileTracingRoot: projectRoot,
   output: 'standalone',
   basePath: APPLICATION_BASE_PATH,
-  redirects: rootHealthRedirects,
 };
 
 export default nextConfig;

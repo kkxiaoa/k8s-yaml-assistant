@@ -168,7 +168,7 @@ test('Dockerfile contract rejects mutable images and weakened runtime boundaries
 test('runtime base supplies Node C++ libraries without adding distribution tools', () => {
   assert.match(
     repositoryContract().dockerfile,
-    /FROM gcr\.io\/distroless\/cc-debian12:nonroot@sha256:[a-f0-9]{64} AS runtime-base/u,
+    /FROM gcr\.io\/distroless\/cc-debian13:nonroot@sha256:[a-f0-9]{64} AS runtime-base/u,
   );
 });
 

@@ -19,7 +19,7 @@ import { RELEASE_INDEX_EMBEDDING_MODEL } from '../src/release/manifest';
 const NODE_IMAGE_DIGEST =
   'sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d';
 const RUNTIME_IMAGE_DIGEST =
-  'sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e';
+  'sha256:83b9b50586253821cf63ffcec87d3d94265a093ad30da232039af962dd8f4edf';
 const REQUIRED_STAGES = [
   'deps',
   'verify',
@@ -611,6 +611,14 @@ function assertContainerIsolation(name: string): void {
 }
 
 function assertObservationRuntime(name: string): void {
+  // Load the observation-owning route without invoking its model-backed POST handler.
+  const route = nodeInContainer(
+    name,
+    "fetch('http://127.0.0.1:3000/api/ask',{signal:AbortSignal.timeout(5000)}).then(response=>console.log(response.status)).catch(error=>{console.error(error.message);process.exitCode=1})",
+  );
+  if (route.status !== 0 || route.stdout.trim() !== '405') {
+    fail(`observation route must load with GET rejected: ${route.stderr || route.stdout}`);
+  }
   const probe = nodeInContainer(
     name,
     `const fs=require('node:fs');const stat=path=>{const value=fs.statSync(path);return {mode:value.mode&0o777,uid:value.uid,gid:value.gid}};console.log(JSON.stringify({volume:stat('${OBSERVATION_VOLUME_PATH}'),data:fs.existsSync('${OBSERVATION_DATA_PATH}')?stat('${OBSERVATION_DATA_PATH}'):null,entries:fs.existsSync('${OBSERVATION_DATA_PATH}')?fs.readdirSync('${OBSERVATION_DATA_PATH}'):[]}))`,
@@ -639,7 +647,7 @@ function assertObservationRuntime(name: string): void {
     );
   }
   if (decoded.entries.length !== 0) {
-    fail('runtime startup must not create an observation segment');
+    fail('observation initialization must not create a segment');
   }
 
   const logs = run('docker', ['logs', name], { allowFailure: true });

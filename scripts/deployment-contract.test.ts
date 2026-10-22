@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { loadAll } from 'js-yaml';
 import { z } from 'zod';
-import { rootHealthRedirects } from '../src/shared/application-path.mjs';
+import nextConfig from '../next.config.mjs';
 
 const root = process.cwd();
 const k3sDir = join(root, 'deploy', 'k3s');
@@ -625,20 +625,7 @@ test('tokens, kubeconfig paths, public API binding, and disabled components fail
 });
 
 test('the public experience manifests preserve the risky deployment relationships', () => {
-  assert.deepEqual(rootHealthRedirects(), [
-    {
-      source: '/api/health/live',
-      destination: '/k8s-yaml-assistant/api/health/live',
-      permanent: false,
-      basePath: false,
-    },
-    {
-      source: '/api/health/ready',
-      destination: '/k8s-yaml-assistant/api/health/ready',
-      permanent: false,
-      basePath: false,
-    },
-  ]);
+  assert.equal(nextConfig.basePath, '');
   const configMap = readKubernetesResource(configMapPath);
   const configData = nestedRecord(configMap.resource, 'data', 'ConfigMap');
   assert.deepEqual(
@@ -655,10 +642,10 @@ test('the public experience manifests preserve the risky deployment relationship
       MODEL_ACCESS_ENABLED: 'true',
       CONTROL_DB_PATH: '/app/data/control/private/control.sqlite3',
       NEXTAUTH_URL:
-        'https://120.46.57.214/k8s-yaml-assistant/api/auth',
-      APP_PUBLIC_ORIGIN: 'https://120.46.57.214',
+        'https://yaml.kubesmith.cloud/api/auth',
+      APP_PUBLIC_ORIGIN: 'https://yaml.kubesmith.cloud',
       NODE_USE_ENV_PROXY: '1',
-      HTTPS_PROXY: 'http://95.40.183.32:3128',
+      HTTPS_PROXY: 'https://95.40.183.32:3128',
       NO_PROXY:
         'localhost,127.0.0.1,::1,.svc,.cluster.local,api.deepseek.com,api.voyageai.com',
     },
@@ -728,7 +715,7 @@ test('the public experience manifests preserve the risky deployment relationship
   } as const;
   assert.deepEqual(
     [...environment.keys()].sort(),
-    Object.keys(expectedSecretRefs).sort(),
+    [...Object.keys(expectedSecretRefs), 'NODE_EXTRA_CA_CERTS'].sort(),
   );
   for (const [name, [secretName, key]] of Object.entries(
     expectedSecretRefs,
@@ -747,18 +734,35 @@ test('the public experience manifests preserve the risky deployment relationship
     yamlArray(container.volumeMounts, 'application volume mounts').map(
       (entry) => {
         const mount = yamlRecord(entry, 'volume mount');
-        return [String(mount.name), mount.mountPath] as const;
+        return [String(mount.name), mount] as const;
       },
     ),
   );
-  assert.equal(mounts.get('control'), '/app/data/control');
-  assert.equal(mounts.get('observations'), '/app/data/observability');
-  assert.equal(mounts.get('tmp'), '/tmp');
+  assert.equal(mounts.get('control')?.mountPath, '/app/data/control');
+  assert.equal(mounts.get('observations')?.mountPath, '/app/data/observability');
+  assert.equal(mounts.get('tmp')?.mountPath, '/tmp');
+  const proxyTrustMount = mounts.get('proxy-trust');
+  assert.deepEqual(proxyTrustMount, {
+    name: 'proxy-trust',
+    mountPath: '/app/trust/egress-proxy',
+    readOnly: true,
+  });
+  assert.deepEqual(environment.get('NODE_EXTRA_CA_CERTS'), {
+    name: 'NODE_EXTRA_CA_CERTS',
+    value: `${proxyTrustMount.mountPath}/proxy.crt`,
+  });
   const volumes = new Map(
     yamlArray(podSpec.volumes, 'application volumes').map((entry) => {
       const volume = yamlRecord(entry, 'volume');
       return [String(volume.name), volume] as const;
     }),
+  );
+  assert.deepEqual(
+    nestedRecord(volumes.get('proxy-trust')!, 'configMap', 'proxy trust volume'),
+    {
+      name: 'k8s-yaml-assistant-proxy-trust',
+      items: [{ key: 'proxy.crt', path: 'proxy.crt' }],
+    },
   );
   assert.equal(
     nestedRecord(
@@ -870,7 +874,7 @@ test('the public experience manifests preserve the risky deployment relationship
     'proxy egress peer',
   );
   const proxyUrl = new URL(String(configData.HTTPS_PROXY));
-  assert.equal(proxyUrl.protocol, 'http:');
+  assert.equal(proxyUrl.protocol, 'https:');
   assert.equal(proxyUrl.port, '3128');
   assert.equal(proxyIpBlock.cidr, proxyUrl.hostname + '/32');
 
@@ -878,6 +882,8 @@ test('the public experience manifests preserve the risky deployment relationship
     path.slice(accessDir.length + 1),
   );
   assert.deepEqual(accessFiles, [
+    'domain-certificate.yaml',
+    'domain-issuer.yaml',
     'http-redirect.yaml',
     'middlewares.yaml',
     'routes.yaml',
@@ -930,7 +936,7 @@ test('the public experience manifests preserve the risky deployment relationship
   );
   assert.equal(
     routeRule.match,
-    'Path(`/k8s-yaml-assistant`) || PathPrefix(`/k8s-yaml-assistant/`)',
+    'Host(`yaml.kubesmith.cloud`)',
   );
   assert.deepEqual(
     yamlArray(routeRule.middlewares, 'IngressRoute middlewares'),
@@ -945,7 +951,7 @@ test('the public experience manifests preserve the risky deployment relationship
   );
   assert.equal(
     nestedRecord(routeSpec, 'tls', 'IngressRoute').secretName,
-    'k8s-yaml-assistant-ip-tls',
+    'k8s-yaml-assistant-tls',
   );
 
   const httpRedirectRoute = readKubernetesResource(
@@ -973,7 +979,7 @@ test('the public experience manifests preserve the risky deployment relationship
   );
   assert.equal(
     httpRedirectRule.match,
-    'Path(`/k8s-yaml-assistant`) || PathPrefix(`/k8s-yaml-assistant/`)',
+    'Host(`yaml.kubesmith.cloud`)',
   );
   assert.deepEqual(
     yamlArray(
@@ -1017,6 +1023,60 @@ test('the public experience manifests preserve the risky deployment relationship
     'k8s-yaml-assistant-ip-tls',
   );
 
+  const domainCertificate = readKubernetesResource(
+    join(accessDir, 'domain-certificate.yaml'),
+  );
+  assert.equal(domainCertificate.resource.kind, 'Certificate');
+  assert.deepEqual(
+    resourceMetadata(domainCertificate.resource, 'domain Certificate'),
+    { name: 'k8s-yaml-assistant', namespace: 'k8s-yaml-assistant-prod' },
+  );
+  const domainCertificateSpec = nestedRecord(
+    domainCertificate.resource,
+    'spec',
+    'domain Certificate',
+  );
+  assert.equal(
+    domainCertificateSpec.secretName,
+    nestedRecord(routeSpec, 'tls', 'IngressRoute').secretName,
+  );
+  assert.deepEqual(domainCertificateSpec.dnsNames, ['yaml.kubesmith.cloud']);
+  assert.equal(domainCertificateSpec.ipAddresses, undefined);
+  assert.deepEqual(domainCertificateSpec.issuerRef, {
+    name: 'letsencrypt-production',
+    kind: 'Issuer',
+    group: 'cert-manager.io',
+  });
+
+  const domainIssuer = readKubernetesResource(
+    join(accessDir, 'domain-issuer.yaml'),
+  );
+  assert.equal(domainIssuer.resource.kind, 'Issuer');
+  assert.deepEqual(
+    resourceMetadata(domainIssuer.resource, 'domain Issuer'),
+    { name: 'letsencrypt-production', namespace: 'k8s-yaml-assistant-prod' },
+  );
+  const domainAcme = nestedRecord(
+    nestedRecord(domainIssuer.resource, 'spec', 'domain Issuer'),
+    'acme',
+    'domain Issuer spec',
+  );
+  assert.equal(
+    domainAcme.server,
+    'https://acme-v02.api.letsencrypt.org/directory',
+  );
+  assert.equal(domainAcme.profile, undefined);
+  assert.deepEqual(domainAcme.privateKeySecretRef, {
+    name: 'letsencrypt-production-account',
+  });
+  assert.deepEqual(domainAcme.solvers, [
+    {
+      http01: {
+        ingress: { ingressClassName: 'traefik', serviceType: 'ClusterIP' },
+      },
+    },
+  ]);
+
   const manifestSources = [
     configMap.source,
     readFileSync(controlClaimPath, 'utf8'),
@@ -1024,6 +1084,9 @@ test('the public experience manifests preserve the risky deployment relationship
     readFileSync(networkPolicyPath, 'utf8'),
     readFileSync(accessMiddlewarePath, 'utf8'),
     readFileSync(accessRoutePath, 'utf8'),
+    readFileSync(httpRedirectRoutePath, 'utf8'),
+    domainCertificate.source,
+    domainIssuer.source,
     readFileSync(productionCertificatePath, 'utf8'),
     readFileSync(tlsStorePath, 'utf8'),
     readFileSync(kubernetesReadmePath, 'utf8'),
