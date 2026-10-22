@@ -5,16 +5,13 @@ import type {
   ExperienceQuota,
   ExperienceResponse,
 } from '@/server/experience-control';
-import {
-  APPLICATION_BASE_PATH,
-  applicationPath,
-} from '@/shared/application-path.mjs';
+import { applicationPath } from '@/shared/application-path.mjs';
 import { LABEL } from './styles';
 import { Tooltip } from './Tooltip';
 
 const LOGOUT_PATH = applicationPath(
   `/api/auth/signout?callbackUrl=${encodeURIComponent(
-    APPLICATION_BASE_PATH,
+    applicationPath('/'),
   )}`,
 );
 const ADMIN_PATH = applicationPath('/admin');

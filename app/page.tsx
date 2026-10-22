@@ -30,7 +30,7 @@ import {
   type AskMode,
   type SourceHit,
 } from './lib/api';
-import { APPLICATION_BASE_PATH } from '@/shared/application-path.mjs';
+import { applicationPath } from '@/shared/application-path.mjs';
 import { type ModelRoute } from '@/server/experience-control';
 
 const DEFAULT_YAML = `apiVersion: storage.k8s.io/v1
@@ -187,7 +187,7 @@ export default function Home() {
       // Login remains available when current-tab storage is unavailable.
     }
     try {
-      window.location.assign(await getGithubSignInUrl(APPLICATION_BASE_PATH));
+      window.location.assign(await getGithubSignInUrl(applicationPath('/')));
     } catch (error) {
       reportRequestError(error);
     }

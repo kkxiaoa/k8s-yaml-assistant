@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: k8s-yaml-assistant
+  namespace: k8s-yaml-assistant-prod
+spec:
+  secretName: k8s-yaml-assistant-tls
+  issuerRef:
+    name: letsencrypt-production
+    kind: Issuer
+    group: cert-manager.io
+  dnsNames:
+    - yaml.kubesmith.cloud

@@ -8,7 +8,7 @@ spec:
     - websecure
   routes:
     - kind: Rule
-      match: Path(`/k8s-yaml-assistant`) || PathPrefix(`/k8s-yaml-assistant/`)
+      match: Host(`yaml.kubesmith.cloud`)
       priority: 10
       middlewares:
         - name: k8s-yaml-assistant-rate-limit
@@ -17,4 +17,4 @@ spec:
         - name: k8s-yaml-assistant
           port: 80
   tls:
-    secretName: k8s-yaml-assistant-ip-tls
+    secretName: k8s-yaml-assistant-tls

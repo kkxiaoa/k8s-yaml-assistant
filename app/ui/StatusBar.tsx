@@ -17,7 +17,7 @@ export function StatusBar({ kind, apiVersion, count, errors }: Props) {
         : `本地检查：${errors.length} 个问题`;
 
   return (
-    <footer className="flex items-center gap-5 border-t border-line bg-surface/50 px-4 py-1.5 font-mono text-[11px] text-muted">
+    <footer className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-line bg-surface/50 px-4 py-1.5 font-mono text-[11px] text-muted">
       <span>
         {multipleResources ? '资源数' : 'kind'}:{' '}
         <span className="text-fg">
@@ -40,7 +40,26 @@ export function StatusBar({ kind, apiVersion, count, errors }: Props) {
       >
         {checkStatus}
       </span>
-      <span className="ml-auto">schema 知识库:动态加载</span>
+      <span>schema 知识库:动态加载</span>
+      <nav
+        aria-label="站点导航与备案"
+        className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1.5"
+      >
+        <a
+          href="https://incident.kubesmith.cloud/"
+          className="hover:text-fg focus-visible:text-fg"
+        >
+          Incident Agent
+        </a>
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-fg focus-visible:text-fg"
+        >
+          豫ICP备2026051618号-1
+        </a>
+      </nav>
     </footer>
   );
 }

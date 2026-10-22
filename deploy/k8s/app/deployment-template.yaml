@@ -47,6 +47,8 @@ spec:
             - configMapRef:
                 name: k8s-yaml-assistant
           env:
+            - name: NODE_EXTRA_CA_CERTS
+              value: /app/trust/egress-proxy/proxy.crt
             - name: DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -125,6 +127,9 @@ spec:
             failureThreshold: 3
             successThreshold: 1
           volumeMounts:
+            - name: proxy-trust
+              mountPath: /app/trust/egress-proxy
+              readOnly: true
             - name: control
               mountPath: /app/data/control
             - name: observations
@@ -132,6 +137,12 @@ spec:
             - name: tmp
               mountPath: /tmp
       volumes:
+        - name: proxy-trust
+          configMap:
+            name: k8s-yaml-assistant-proxy-trust
+            items:
+              - key: proxy.crt
+                path: proxy.crt
         - name: control
           persistentVolumeClaim:
             claimName: k8s-yaml-assistant-control

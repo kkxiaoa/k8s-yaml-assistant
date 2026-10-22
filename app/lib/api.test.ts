@@ -15,7 +15,7 @@ import {
 
 const REQUEST_ID = '11111111-1111-4111-8111-111111111111';
 
-test('browser API requests use the fixed application base path', async () => {
+test('browser API requests use the root application paths', async () => {
   const calls: Array<{ url: string; method: string }> = [];
   let githubSignInBody: URLSearchParams | null = null;
   let feedbackBody: string | null = null;
@@ -118,7 +118,7 @@ test('browser API requests use the fixed application base path', async () => {
     await setAdminExperience({ mode: 'sleep' });
     await submitResponseFeedback(REQUEST_ID, { rating: 'good' });
     assert.equal(
-      await getGithubSignInUrl('/k8s-yaml-assistant/admin'),
+      await getGithubSignInUrl('/admin'),
       'https://github.com/login/oauth/authorize?client_id=test',
     );
   } finally {
@@ -126,17 +126,17 @@ test('browser API requests use the fixed application base path', async () => {
   }
 
   assert.deepEqual(calls, [
-    { url: '/k8s-yaml-assistant/api/check', method: 'POST' },
-    { url: '/k8s-yaml-assistant/api/ask', method: 'POST' },
-    { url: '/k8s-yaml-assistant/api/generate', method: 'POST' },
-    { url: '/k8s-yaml-assistant/api/fix', method: 'POST' },
-    { url: '/k8s-yaml-assistant/api/experience', method: 'GET' },
-    { url: '/k8s-yaml-assistant/api/admin/experience', method: 'GET' },
-    { url: '/k8s-yaml-assistant/api/admin/experience', method: 'POST' },
-    { url: '/k8s-yaml-assistant/api/feedback', method: 'POST' },
-    { url: '/k8s-yaml-assistant/api/auth/csrf', method: 'GET' },
+    { url: '/api/check', method: 'POST' },
+    { url: '/api/ask', method: 'POST' },
+    { url: '/api/generate', method: 'POST' },
+    { url: '/api/fix', method: 'POST' },
+    { url: '/api/experience', method: 'GET' },
+    { url: '/api/admin/experience', method: 'GET' },
+    { url: '/api/admin/experience', method: 'POST' },
+    { url: '/api/feedback', method: 'POST' },
+    { url: '/api/auth/csrf', method: 'GET' },
     {
-      url: '/k8s-yaml-assistant/api/auth/signin/github',
+      url: '/api/auth/signin/github',
       method: 'POST',
     },
   ]);
@@ -145,7 +145,7 @@ test('browser API requests use the fixed application base path', async () => {
     Object.fromEntries(githubSignInBody),
     {
       csrfToken: 'csrf-token',
-      callbackUrl: '/k8s-yaml-assistant/admin',
+      callbackUrl: '/admin',
       json: 'true',
     },
   );
