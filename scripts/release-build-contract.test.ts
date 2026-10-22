@@ -15,9 +15,9 @@ const expectedNodeTypesVersion = '24.13.3';
 const expectedJsYamlVersion = '4.3.0';
 const expectedMonacoEditorVersion = '0.56.0';
 const expectedDompurifyVersion = '3.4.12';
-const expectedNextVersion = '16.2.12';
+const expectedNextVersion = '16.3.8';
 const expectedPostcssVersion = '8.5.23';
-const expectedSharpVersion = '0.35.3';
+const expectedSharpVersion = '0.35.5';
 const expectedLicense = 'Apache-2.0';
 const fontExtensions = new Set(['.otf', '.ttf', '.woff', '.woff2']);
 

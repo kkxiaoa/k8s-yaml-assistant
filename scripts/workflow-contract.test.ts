@@ -275,15 +275,7 @@ function validateTrivyIgnore(): void {
     'Trivy ignore policy',
   );
   assert.deepEqual(Object.keys(policy), ['vulnerabilities']);
-  assert.deepEqual(policy.vulnerabilities, [
-    {
-      id: 'CVE-2026-14456',
-      purls: ['pkg:deb/debian/libssl3@3.0.20-1~deb12u2'],
-      expired_at: new Date('2026-09-30T00:00:00.000Z'),
-      statement:
-        'OpenSSL 3.0 is not affected according to https://openssl-library.org/news/secadv/20260813.txt',
-    },
-  ]);
+  assert.deepEqual(policy.vulnerabilities, []);
 }
 
 function validateReleasePleaseConfig(): void {
